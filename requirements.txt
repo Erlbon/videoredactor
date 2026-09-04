@@ -10,5 +10,17 @@
 PyQt6>=6.6
 mutagen>=1.47
 
+# Shared UI/core code with the epub and mp3 Redactor tools -- a real
+# pip dependency (github.com/Erlbon/redactor_common), not a vendored
+# copy: previously each of the three projects hand-copied this file
+# tree in separately, so a fix to shared code needed three separate
+# manual resyncs and could silently drift out of sync (which is exactly
+# what happened -- see that repo's README/commit history around the
+# setWindowModality crash fix). Pinned to a tag, not @main -- see that
+# repo's README ("Releasing a new version") for how to bump this pin
+# deliberately when it changes, rather than floating and having one bad
+# push there break this project's next install.
+redactor_common @ git+https://github.com/Erlbon/redactor_common.git@2026-09-04-10
+
 # For building the .exe:
 pyinstaller>=6.3

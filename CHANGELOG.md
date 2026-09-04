@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-09-04#01 — redactor_common is now a real pip dependency
+
+Removes the vendored `redactor_common/` folder and adds it to
+`requirements.txt` instead, pinned to tag `2026-09-04-10`
+([Erlbon/redactor_common](https://github.com/Erlbon/redactor_common)).
+Previously each of the three Redactor projects hand-copied this shared
+code separately, so a fix in one place needed three separate manual
+resyncs and could silently drift out of sync -- which is exactly what
+happened with a real crash bug (`setWindowModality`, fixed just prior
+to this). One canonical source now; bumping the pin is a deliberate
+one-line `requirements.txt` diff instead of an easy-to-forget
+copy-paste. Import paths are unchanged (`from redactor_common.gui...`
+still works, just resolves from site-packages now).
+
 ## 2026-09-03#08 — Three new Operations commands: Case Conversion, Search/Replace, Auto-Numbering
 
 Requested directly. Added under Operations, after Remux and Rename/Export by Pattern, separated by a divider since these three are a genuinely different category (metadata field text transforms, not file-level operations).
