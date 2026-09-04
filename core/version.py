@@ -9,3 +9,4 @@ with the real mechanism here rather than the promise-based version.
 
 APP_VERSION = "2026-09-03#08"
 RELEASE_LABEL = "v0.1"
+APP_REPO_URL = "https://github.com/erlbon/videoredactor"

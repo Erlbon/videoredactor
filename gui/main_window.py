@@ -39,7 +39,7 @@ from core.config import get_setting, set_setting
 from redactor_common.gui.menu_builder import MenuAction, Separator, build_menu_bar
 from redactor_common.gui.zoom_toolbar import TableZoomController
 from redactor_common.gui.about_dialog import AboutDialog, ChangelogDialog
-from redactor_common.core.version import REDACTOR_COMMON_VERSION
+from redactor_common.core.version import REDACTOR_COMMON_REPO_URL, REDACTOR_COMMON_VERSION
 from gui.tag_panel import TagPanel, FIELD_LABELS
 from gui.tmdb_search_dialog import TMDBSearchDialog
 from gui.tmdb_episode_picker_dialog import TVEpisodePickerDialog
@@ -59,7 +59,7 @@ from core.controlled_vocab import (
     get_genre_options, add_genre_option, remove_genre_option,
     get_language_options, add_language_option, remove_language_option,
 )
-from core.version import APP_VERSION, RELEASE_LABEL
+from core.version import APP_REPO_URL, APP_VERSION, RELEASE_LABEL
 from core.external_tools import missing_tools
 
 # Assets live one level up from gui/, resolved relative to this file so
@@ -1556,6 +1556,8 @@ class MainWindow(QMainWindow):
             icon_path=str(ICON_PATH),
             about_path=str(ABOUT_PATH),
             component_versions={"redactor_common": REDACTOR_COMMON_VERSION},
+            repo_url=APP_REPO_URL,
+            component_repo_urls={"redactor_common": REDACTOR_COMMON_REPO_URL},
             parent=self,
         ).exec()
 
