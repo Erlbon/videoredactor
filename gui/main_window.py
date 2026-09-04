@@ -39,6 +39,7 @@ from core.config import get_setting, set_setting
 from redactor_common.gui.menu_builder import MenuAction, Separator, build_menu_bar
 from redactor_common.gui.context_menu import show_table_context_menu
 from redactor_common.gui.column_menu import show_column_header_context_menu
+from redactor_common.gui.collapsible_splitter import SplitterPaneCollapser
 from redactor_common.gui.zoom_toolbar import TableZoomController
 from redactor_common.gui.about_dialog import AboutDialog, ChangelogDialog, CreditsDialog
 from redactor_common.core.version import REDACTOR_COMMON_REPO_URL, REDACTOR_COMMON_VERSION
@@ -101,6 +102,7 @@ TECHNICAL_LABELS = {
 }
 
 FILE_ROLE = Qt.ItemDataRole.UserRole  # row -> VideoFile mapping, not row index
+TAG_PANEL_COLLAPSED_WIDTH = 32  # slim strip, not zero -- keeps the panel's own toggle button reachable
 
 # Single source of truth for column header labels -- built once at
 # module load rather than reconstructed inline at each use site, so
@@ -202,11 +204,18 @@ class MainWindow(QMainWindow):
         root_layout.addLayout(top_bar)
 
         # --- Splitter: TagPanel (left) + file table (right) ---
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter = self.splitter  # local alias, existing code below refers to it by this name
         root_layout.addWidget(splitter)
 
         self.tag_panel = TagPanel()
         self.tag_panel.apply_requested.connect(self._on_apply_to_selected)
+        self.tag_panel.collapseToggleRequested.connect(self._toggle_tag_panel)
+        # Deliberately low minimum -- lets the panel be dragged down to a
+        # sliver, or fully collapsed (see _toggle_tag_panel()), rather
+        # than being locked to a wide fixed range.
+        self.tag_panel.setMinimumWidth(24)
+        self.tag_panel.setMaximumWidth(440)
         splitter.addWidget(self.tag_panel)
 
         self.table = QTableWidget()
@@ -228,6 +237,13 @@ class MainWindow(QMainWindow):
 
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
+        splitter.setCollapsible(0, True)  # dragging the handle by hand can still reach 0 width
+        splitter.setCollapsible(1, False)  # the table itself should never fully vanish
+        splitter.splitterMoved.connect(self._on_splitter_moved)
+
+        self._panel_collapser = SplitterPaneCollapser(
+            self.splitter, pane_index=0, collapsed_width=TAG_PANEL_COLLAPSED_WIDTH, default_width=340,
+        )
 
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
@@ -350,6 +366,17 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.zoom.zoom_out_action)
         toolbar.addWidget(self.zoom.label)
         toolbar.addAction(self.zoom.zoom_in_action)
+
+        toolbar.addSeparator()
+
+        # Minimize/restore the bulk-edit panel, matching the epub tool's
+        # toolbar control (this project never had one before -- the
+        # panel's own in-corner button and dragging the splitter handle
+        # by hand were the only ways to do this).
+        toggle_panel_action = QAction("Panel", self)
+        toggle_panel_action.setToolTip("Minimize or restore the bulk-edit panel")
+        toggle_panel_action.triggered.connect(self._toggle_tag_panel)
+        toolbar.addAction(toggle_panel_action)
 
     def _check_external_tools_on_startup(self) -> None:
         """Warn once at launch if ffmpeg and/or MKVToolNix aren't on
@@ -843,6 +870,25 @@ class MainWindow(QMainWindow):
             get_selected_items=self._selected_video_files,
             get_path=lambda vf: vf.path,
         )
+
+    # --- TagPanel collapse/restore ----------------------------------------
+    # New: this project never had a way to minimize the panel before --
+    # resize logic lives in redactor_common's SplitterPaneCollapser
+    # (shared with epub), same split of responsibility as there: the
+    # panel only ever asks to be toggled, MainWindow owns the splitter.
+
+    def _toggle_tag_panel(self) -> None:
+        self._panel_collapser.toggle()
+        self._sync_tag_panel_collapsed_indicator()
+
+    def _on_splitter_moved(self, _pos, _index) -> None:
+        """Keeps the panel's own toggle-button glyph in sync when the
+        user drags the splitter handle by hand, not just when they use
+        the button/toolbar action."""
+        self._sync_tag_panel_collapsed_indicator()
+
+    def _sync_tag_panel_collapsed_indicator(self) -> None:
+        self.tag_panel.set_collapsed_indicator(self._panel_collapser.is_collapsed())
 
     def _on_selection_changed(self) -> None:
         selected = self._selected_video_files()

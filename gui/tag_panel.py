@@ -17,8 +17,8 @@ from __future__ import annotations
 from typing import Optional
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QScrollArea, QFormLayout, QLineEdit,
-    QTextEdit, QSpinBox, QComboBox, QLabel,
+    QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFormLayout, QLineEdit,
+    QTextEdit, QSpinBox, QComboBox, QLabel, QGroupBox, QSplitter,
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QPixmap
@@ -30,6 +30,8 @@ from core.controlled_vocab import (
 from core.table_settings import is_column_visible, sanitize_hidden_fields
 from core.config import get_setting
 from gui.multi_select_combo import MultiSelectComboBox
+from redactor_common.gui.image_label import AspectRatioImageLabel
+from redactor_common.gui.collapsible_splitter import CollapseToggleButton
 
 PREVIEW_WIDTH = 240
 PREVIEW_HEIGHT = 135  # 16:9 -- matches typical video aspect ratio
@@ -95,6 +97,7 @@ class TagPanel(QWidget):
     """
 
     apply_requested = pyqtSignal(dict)  # {field_name: value}
+    collapseToggleRequested = pyqtSignal()  # the panel doesn't control its own width -- MainWindow does
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -105,50 +108,76 @@ class TagPanel(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(4, 4, 4, 4)
 
-        # Preview thumbnail, above the field form -- same "cover preview
-        # above the fields" arrangement as the epub tool's cover/fields
-        # splitter, minus the splitter itself for now (fixed size; a
-        # draggable version can follow later if it's actually wanted).
-        self.preview_label = QLabel()
-        self.preview_label.setFixedSize(PREVIEW_WIDTH, PREVIEW_HEIGHT)
-        self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_label.setStyleSheet("background-color: #222; color: #888;")
-        self.preview_label.setText("No preview")
-        outer.addWidget(self.preview_label, alignment=Qt.AlignmentFlag.AlignHCenter)
+        # Sits at the very top regardless of how narrow the panel gets,
+        # so the toggle stays reachable even when minimized -- MainWindow
+        # collapses to a slim strip, not to zero width, for exactly this
+        # reason (see redactor_common's SplitterPaneCollapser).
+        toggle_row = QHBoxLayout()
+        toggle_row.addStretch(1)
+        self.collapse_toggle_btn = CollapseToggleButton()
+        self.collapse_toggle_btn.clicked.connect(self.collapseToggleRequested.emit)
+        toggle_row.addWidget(self.collapse_toggle_btn)
+        outer.addLayout(toggle_row)
 
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
-        outer.addWidget(self.scroll_area)
-
         self.form_container = QWidget()
         self.form_layout = QFormLayout(self.form_container)
         self.scroll_area.setWidget(self.form_container)
+
+        preview_box = QGroupBox("Preview")
+        preview_layout = QVBoxLayout(preview_box)
+        self.preview_label = AspectRatioImageLabel()
+        self.preview_label.setMinimumSize(PREVIEW_WIDTH // 2, PREVIEW_HEIGHT // 2)
+        self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_label.setStyleSheet("background-color: #222; color: #888;")
+        self.preview_label.setText("No preview")
+        preview_layout.addWidget(self.preview_label, 1)
+
+        # A real draggable divider between the two sections -- promoted
+        # from the epub tool's cover/fields splitter (this project
+        # originally deferred it: fixed-size preview). Both panes are
+        # collapsible (Qt's default), so either one can be dragged all
+        # the way down to make room for the other.
+        self._vertical_splitter = QSplitter(Qt.Orientation.Vertical)
+        self._vertical_splitter.addWidget(self.scroll_area)
+        self._vertical_splitter.addWidget(preview_box)
+        self._vertical_splitter.setStretchFactor(0, 1)
+        self._vertical_splitter.setStretchFactor(1, 1)
+        self._vertical_splitter.setSizes([500, 300])  # initial bias toward fields; purely a starting hint
+        outer.addWidget(self._vertical_splitter, 1)
 
         self.set_content_type_filter(None)  # builds the initial (all-fields) form
 
     def set_preview_image(self, path: Optional[str]) -> None:
         """Show a thumbnail, or a 'No preview'/'Multiple files selected'
-        placeholder when path is None. Scaling keeps aspect ratio rather
-        than stretching/distorting a 16:9 frame to fit a fixed box.
+        placeholder when path is None. AspectRatioImageLabel keeps
+        aspect ratio itself, rescaling as the preview pane is resized
+        (via the vertical splitter) rather than being locked to a fixed
+        box the way this used to be.
         """
         if path is None:
-            self.preview_label.setPixmap(QPixmap())  # clears any prior image
+            self.preview_label.set_original_pixmap(None)  # clears any prior image
             self.preview_label.setText("No preview")
             return
 
         pixmap = QPixmap(path)
         if pixmap.isNull():
-            self.preview_label.setPixmap(QPixmap())
+            self.preview_label.set_original_pixmap(None)
             self.preview_label.setText("Preview unavailable")
             return
 
-        scaled = pixmap.scaled(
-            PREVIEW_WIDTH, PREVIEW_HEIGHT,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
         self.preview_label.setText("")
-        self.preview_label.setPixmap(scaled)
+        self.preview_label.set_original_pixmap(pixmap)
+
+    def set_collapsed_indicator(self, collapsed: bool) -> None:
+        """Updates the panel's own toggle button to reflect whether it's
+        currently minimized. MainWindow owns the actual collapsed/
+        expanded state (via the splitter, since resizing is its job,
+        not this widget's) and calls this after any change -- the
+        toggle button click, or the user dragging the splitter handle
+        by hand."""
+        self.collapse_toggle_btn.set_collapsed(collapsed)
 
     def set_content_type_filter(self, content_type: Optional[ContentType]) -> None:
         """Rebuild the form for the given filter. None = show all editable fields.
