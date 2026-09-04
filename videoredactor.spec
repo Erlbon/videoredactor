@@ -25,6 +25,7 @@ a = Analysis(
     datas=[
         ("ABOUT.md", "."),
         ("CHANGELOG.md", "."),
+        ("CREDITS.md", "."),
         ("assets/icon.ico", "assets"),
     ],
     hiddenimports=[],

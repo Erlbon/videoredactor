@@ -38,7 +38,7 @@ from core.format_helpers import format_duration, format_file_size
 from core.config import get_setting, set_setting
 from redactor_common.gui.menu_builder import MenuAction, Separator, build_menu_bar
 from redactor_common.gui.zoom_toolbar import TableZoomController
-from redactor_common.gui.about_dialog import AboutDialog, ChangelogDialog
+from redactor_common.gui.about_dialog import AboutDialog, ChangelogDialog, CreditsDialog
 from redactor_common.core.version import REDACTOR_COMMON_REPO_URL, REDACTOR_COMMON_VERSION
 from gui.tag_panel import TagPanel, FIELD_LABELS
 from gui.tmdb_search_dialog import TMDBSearchDialog
@@ -78,6 +78,7 @@ else:
 ICON_PATH = ASSETS_DIR / "icon.ico"
 CHANGELOG_PATH = PROJECT_ROOT / "CHANGELOG.md"
 ABOUT_PATH = PROJECT_ROOT / "ABOUT.md"
+CREDITS_PATH = PROJECT_ROOT / "CREDITS.md"
 
 # Columns always shown regardless of filter (Filename/Status are
 # structural, not metadata fields, so the content-type filter never
@@ -282,6 +283,7 @@ class MainWindow(QMainWindow):
             "Help": [
                 MenuAction("about", "&About The \u0245ideo Redactor", self._on_show_about),
                 MenuAction("changelog", "View &Changelog", self._on_show_changelog),
+                MenuAction("credits", "&Credits", self._on_show_credits),
             ],
         }
         actions = build_menu_bar(self, specs)
@@ -1568,3 +1570,6 @@ class MainWindow(QMainWindow):
         second, separately-maintained implementation.
         """
         ChangelogDialog(str(CHANGELOG_PATH), parent=self).exec()
+
+    def _on_show_credits(self) -> None:
+        CreditsDialog(str(CREDITS_PATH), parent=self).exec()
