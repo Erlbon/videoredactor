@@ -1,0 +1,14 @@
+# Python dependencies for The Ʌideo Redactor.
+#
+# NOT included here (external binaries, not pip packages -- the app
+# shells out to these, same "real CLI tool" philosophy as the epub
+# tool's Calibre integration):
+#   - ffmpeg / ffprobe   (thumbnails, remux)      https://ffmpeg.org/download.html
+#   - MKVToolNix         (mkvpropedit, mkvmerge)  https://mkvtoolnix.download/downloads.html
+# Both must be installed separately and available on PATH.
+
+PyQt6>=6.6
+mutagen>=1.47
+
+# For building the .exe:
+pyinstaller>=6.3
