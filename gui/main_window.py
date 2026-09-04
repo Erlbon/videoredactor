@@ -19,7 +19,7 @@ import json
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
     QTableWidget, QTableWidgetItem, QComboBox, QLabel, QFileDialog,
-    QStatusBar, QMessageBox, QMenu, QToolBar, QProgressDialog, QApplication,
+    QStatusBar, QMessageBox, QToolBar, QProgressDialog, QApplication,
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QAction, QKeySequence, QIcon
@@ -37,6 +37,8 @@ from core.table_settings import merge_column_order, is_column_visible, sanitize_
 from core.format_helpers import format_duration, format_file_size
 from core.config import get_setting, set_setting
 from redactor_common.gui.menu_builder import MenuAction, Separator, build_menu_bar
+from redactor_common.gui.context_menu import show_table_context_menu
+from redactor_common.gui.column_menu import show_column_header_context_menu
 from redactor_common.gui.zoom_toolbar import TableZoomController
 from redactor_common.gui.about_dialog import AboutDialog, ChangelogDialog, CreditsDialog
 from redactor_common.core.version import REDACTOR_COMMON_REPO_URL, REDACTOR_COMMON_VERSION
@@ -212,6 +214,8 @@ class MainWindow(QMainWindow):
         self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self.table.setStyleSheet(TABLE_SELECTION_STYLESHEET)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._show_table_context_menu)
 
         header = self.table.horizontalHeader()
         header.setSectionsMovable(True)  # click-and-drag column reordering, built into Qt
@@ -584,28 +588,23 @@ class MainWindow(QMainWindow):
 
     def _on_column_header_context_menu(self, pos) -> None:
         """Right-click on a column header -> checklist of every current
-        candidate column, letting the user show/hide any of them.
-        `filename` is never offered here -- it's the row-identity anchor
-        every lookup depends on, so it's not something the app should
-        ever let get hidden by accident (or on purpose).
+        candidate column, letting the user show/hide any of them, plus
+        (new) a link to the same Add/Remove Columns dialog the Settings
+        menu already offers. `filename` is never offered here -- it's
+        the row-identity anchor every lookup depends on, so it's not
+        something the app should ever let get hidden by accident (or on
+        purpose).
         """
-        header = self.table.horizontalHeader()
-        menu = QMenu(self)
-        label_lookup = COLUMN_LABEL_LOOKUP
-        hidden = sanitize_hidden_fields(self._load_hidden_fields())
-
-        for field_name in self._column_order:
-            if field_name == "filename":
-                continue
-            label = label_lookup.get(field_name, field_name)
-            action = menu.addAction(label)
-            action.setCheckable(True)
-            action.setChecked(is_column_visible(field_name, hidden))
-            action.toggled.connect(
-                lambda checked, f=field_name: self._on_column_visibility_toggled(f, checked)
-            )
-
-        menu.exec(header.mapToGlobal(pos))
+        show_column_header_context_menu(
+            self, self.table, pos,
+            column_order=self._column_order,
+            label_lookup=COLUMN_LABEL_LOOKUP,
+            protected_columns=frozenset({"filename"}),
+            hidden_fields=sanitize_hidden_fields(self._load_hidden_fields()),
+            is_visible=is_column_visible,
+            on_toggle=self._on_column_visibility_toggled,
+            open_column_settings_dialog=self._on_open_column_visibility,
+        )
 
     def _on_column_visibility_toggled(self, field_name: str, checked: bool) -> None:
         hidden = self._load_hidden_fields()
@@ -831,6 +830,19 @@ class MainWindow(QMainWindow):
             if vf is not None:
                 files.append(vf)
         return files
+
+    def _show_table_context_menu(self, pos) -> None:
+        """New: this project never had a row right-click menu before --
+        the shared helper gets it the selection-fix (right-click outside
+        the current selection replaces it, matching Explorer) and the
+        two generic file actions (Open Containing Folder, Copy Path) for
+        free, same as epub/mp3.
+        """
+        show_table_context_menu(
+            self, self.table, pos,
+            get_selected_items=self._selected_video_files,
+            get_path=lambda vf: vf.path,
+        )
 
     def _on_selection_changed(self) -> None:
         selected = self._selected_video_files()
