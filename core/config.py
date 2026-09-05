@@ -8,6 +8,13 @@ rediscovering that the hard way.
 
 Not TMDB-specific -- this is general config plumbing. TMDB's API key is
 just the first thing that needs it.
+
+Filename is app-prefixed ("videoredactor_settings.ini"), not a bare
+"settings.ini" -- mp3redactor independently used that exact same
+generic name for its own settings file; both apps write next to their
+own exe, so a portable folder containing both exes would have had them
+silently reading/writing each other's settings, corrupting whichever
+wrote last.
 """
 
 from __future__ import annotations
@@ -30,7 +37,7 @@ def _app_dir() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-CONFIG_PATH = _app_dir() / "settings.ini"
+CONFIG_PATH = _app_dir() / "videoredactor_settings.ini"
 
 
 def load_config() -> configparser.ConfigParser:
