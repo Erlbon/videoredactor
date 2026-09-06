@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-09-06#02 — Window title now shows the version
+
+Title bar was `The Ʌideo Redactor (v0.1)` -- the release label only,
+no build version, unlike epub/mp3's title bars. Now
+`The Ʌideo Redactor (2026-09-06#02)`, matching the other two. Added an
+`APP_NAME` constant (`core/version.py`) rather than three separate
+hardcoded copies of the app name string in `main_window.py`.
+
+Bumped `redactor_common` to `2026-09-06-02` (fixes a stray leading
+comma in the About dialog for a project with no release label -- not
+this one, but keeping the pin current).
+
 ## 2026-09-06#01 — Standardized the built exe's filename
 
 The `.exe` this project builds was named `TheVideoRedactor.exe` --

@@ -63,7 +63,7 @@ from core.controlled_vocab import (
     get_genre_options, add_genre_option, remove_genre_option,
     get_language_options, add_language_option, remove_language_option,
 )
-from core.version import APP_REPO_URL, APP_VERSION, RELEASE_LABEL
+from core.version import APP_NAME, APP_REPO_URL, APP_VERSION, RELEASE_LABEL
 from core.external_tools import missing_tools
 
 # Assets live one level up from gui/, resolved relative to this file so
@@ -160,7 +160,7 @@ TABLE_SELECTION_STYLESHEET = f"""
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"The Ʌideo Redactor ({RELEASE_LABEL})")
+        self.setWindowTitle(f"{APP_NAME} ({APP_VERSION})")
         self.resize(1200, 700)
 
         if ICON_PATH.exists():
@@ -302,7 +302,7 @@ class MainWindow(QMainWindow):
                 MenuAction("add_remove_genres", "Add/Remove &Genres...", self._on_open_genres),
             ],
             "Help": [
-                MenuAction("about", "&About The \u0245ideo Redactor", self._on_show_about),
+                MenuAction("about", f"&About {APP_NAME}", self._on_show_about),
                 MenuAction("changelog", "View &Changelog", self._on_show_changelog),
                 MenuAction("credits", "&Credits", self._on_show_credits),
             ],
@@ -1628,7 +1628,7 @@ class MainWindow(QMainWindow):
         existing on disk.
         """
         AboutDialog(
-            app_name="The \u0245ideo Redactor",
+            app_name=APP_NAME,
             app_version=APP_VERSION,
             release_label=RELEASE_LABEL,
             icon_path=str(ICON_PATH),

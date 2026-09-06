@@ -7,6 +7,7 @@ didn't hold; v25 built an actual mechanism reading the clock). Starting
 with the real mechanism here rather than the promise-based version.
 """
 
-APP_VERSION = "2026-09-06#01"
+APP_NAME = "The Ʌideo Redactor"  # "Ʌ" = Ʌ, LATIN CAPITAL LETTER TURNED V
+APP_VERSION = "2026-09-06#02"
 RELEASE_LABEL = "v0.1"
 APP_REPO_URL = "https://github.com/erlbon/videoredactor"
