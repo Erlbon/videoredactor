@@ -30,11 +30,15 @@ Candidate = Union[MovieCandidate, TVCandidate]
 class TMDBSearchDialog(QDialog):
     """Search TMDB and let the user pick exactly one candidate.
 
-    Usage: dialog = TMDBSearchDialog(mode='movie', initial_query=guess);
+    Usage: dialog = TMDBSearchDialog(mode='movie', initial_query=guess, initial_year=year);
     if dialog.exec(): selected = dialog.selected_candidate
+
+    `initial_year` (movie mode only) pre-fills a Year box that narrows
+    the search via TMDB's dedicated `year` param -- much more reliable
+    than hoping the year survives as plain text inside the query.
     """
 
-    def __init__(self, mode: str, initial_query: str = "", parent=None):
+    def __init__(self, mode: str, initial_query: str = "", initial_year: str = "", parent=None):
         super().__init__(parent)
         self.mode = mode  # 'movie' or 'tv'
         self.selected_candidate: Optional[Candidate] = None
@@ -49,6 +53,18 @@ class TMDBSearchDialog(QDialog):
         self.query_edit = QLineEdit(initial_query)
         self.query_edit.returnPressed.connect(self._on_search)
         search_row.addWidget(self.query_edit)
+
+        # Year narrows a movie search a lot (TMDB's /search/movie takes a
+        # dedicated `year` param) -- TV search has no equivalent field
+        # here, so this box only shows up in movie mode.
+        self.year_edit: Optional[QLineEdit] = None
+        if mode == "movie":
+            self.year_edit = QLineEdit(initial_year)
+            self.year_edit.setPlaceholderText("Year")
+            self.year_edit.setMaximumWidth(70)
+            self.year_edit.returnPressed.connect(self._on_search)
+            search_row.addWidget(self.year_edit)
+
         self.search_button = QPushButton("Search")
         self.search_button.clicked.connect(self._on_search)
         search_row.addWidget(self.search_button)
@@ -89,7 +105,8 @@ class TMDBSearchDialog(QDialog):
 
         try:
             if self.mode == "movie":
-                self._candidates = search_movies(query)
+                year = self.year_edit.text().strip() if self.year_edit else ""
+                self._candidates = search_movies(query, year=year or None)
             else:
                 self._candidates = search_tv(query)
         except TMDBError as e:

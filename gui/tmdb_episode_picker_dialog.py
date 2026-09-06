@@ -8,6 +8,13 @@ same "always confirm explicitly, never auto-pick" principle applies here
 too, since guessing the wrong episode writes wrong metadata just as
 badly as guessing the wrong show.
 
+`initial_season`/`initial_episode`, when given (typically parsed from the
+file's own name via core.release_name_parser), pre-select that season and
+episode so the common case is "glance and confirm" instead of hunting
+through a season's episode list by hand -- the user still has to click
+"Use Selected Episode" for anything to happen, so this never weakens the
+"explicit confirmation" rule, it just saves the clicking.
+
 NOTE: not runnable in this sandbox -- no PyQt6, no network. Syntax-
 checked and reviewed only.
 """
@@ -29,9 +36,14 @@ class TVEpisodePickerDialog(QDialog):
     if dialog.exec(): season, episode = dialog.selected_season, dialog.selected_episode
     """
 
-    def __init__(self, tmdb_id: int, parent=None):
+    def __init__(
+        self, tmdb_id: int, initial_season: Optional[int] = None,
+        initial_episode: Optional[int] = None, parent=None,
+    ):
         super().__init__(parent)
         self.tmdb_id = tmdb_id
+        self._initial_season = initial_season
+        self._initial_episode = initial_episode
         self.selected_season: Optional[int] = None
         self.selected_episode: Optional[EpisodeInfo] = None
 
@@ -87,6 +99,11 @@ class TVEpisodePickerDialog(QDialog):
         # currentIndexChanged fires from addItem above once a default
         # selection exists, loading episodes for the first season.
 
+        if self._initial_season is not None:
+            idx = self.season_combo.findData(self._initial_season)
+            if idx >= 0:
+                self.season_combo.setCurrentIndex(idx)  # re-fires _on_season_changed if it actually moved
+
     def _on_season_changed(self) -> None:
         season_number = self.season_combo.currentData()
         if season_number is None:
@@ -101,11 +118,25 @@ class TVEpisodePickerDialog(QDialog):
             QMessageBox.warning(self, "Could Not Load Episodes", str(e))
             return
 
-        for ep in episodes:
+        select_row = -1
+        for row, ep in enumerate(episodes):
             label = f"E{ep.episode_number}: {ep.name}" if ep.name else f"Episode {ep.episode_number}"
             item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, ep)
             self.episode_list.addItem(item)
+            if (
+                self._initial_episode is not None
+                and season_number == self._initial_season
+                and ep.episode_number == self._initial_episode
+            ):
+                select_row = row
+
+        # Pre-select the episode parsed from the filename, if this is that
+        # season -- still just a selection, not a confirmed pick; the user
+        # still has to click "Use Selected Episode" (or double-click) for
+        # it to take effect.
+        if select_row >= 0:
+            self.episode_list.setCurrentRow(select_row)
 
     def _on_episode_selection_changed(self) -> None:
         items = self.episode_list.selectedItems()

@@ -31,6 +31,7 @@ from core.tmdb_client import (
     download_poster, TMDBError,
 )
 from core.tvdb_client import get_series_details, get_episode_details, download_image, TVDBError
+from core.release_name_parser import parse_release_name
 from core.ffmpeg_backend import remux_to_mp4
 from core.opensubtitles_client import download_subtitle_text, OpenSubtitlesError
 from core.table_settings import merge_column_order, is_column_visible, sanitize_hidden_fields
@@ -1119,8 +1120,11 @@ class MainWindow(QMainWindow):
         fetch_failures: list[tuple] = []
 
         for vf in files:
-            guess = vf.path.stem.replace(".", " ").replace("_", " ")
-            dialog = TMDBSearchDialog(mode="movie", initial_query=guess, parent=self)
+            guess = parse_release_name(vf.path.stem)
+            dialog = TMDBSearchDialog(
+                mode="movie", initial_query=guess.title, initial_year=guess.year or "",
+                parent=self,
+            )
             if not dialog.exec() or dialog.selected_candidate is None:
                 skipped_no_match += 1
                 continue
@@ -1171,8 +1175,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Some files failed to import", details_text)
 
     def _import_tmdb_tv(self, files: list, skipped_load_errors: int) -> None:
-        guess = files[0].path.stem.replace(".", " ").replace("_", " ")
-        dialog = TMDBSearchDialog(mode="tv", initial_query=guess, parent=self)
+        guess = parse_release_name(files[0].path.stem)
+        dialog = TMDBSearchDialog(mode="tv", initial_query=guess.title, parent=self)
         if not dialog.exec() or dialog.selected_candidate is None:
             return
         candidate = dialog.selected_candidate
@@ -1210,7 +1214,14 @@ class MainWindow(QMainWindow):
         episode_failures: list[tuple] = []
         episodes_set = 0
         for vf in files:
-            episode_dialog = TVEpisodePickerDialog(candidate.tmdb_id, parent=self)
+            # Parsed per-file (not reused from the show-level `guess`
+            # above) since each episode's own filename is what carries
+            # its season/episode number -- e.g. "Show S02E04.mkv".
+            file_guess = parse_release_name(vf.path.stem)
+            episode_dialog = TVEpisodePickerDialog(
+                candidate.tmdb_id, initial_season=file_guess.season,
+                initial_episode=file_guess.episode, parent=self,
+            )
             if not episode_dialog.exec() or episode_dialog.selected_episode is None:
                 continue
             try:
@@ -1244,7 +1255,7 @@ class MainWindow(QMainWindow):
             details_text = "\n".join(f"{vf.path.name}: {err}" for vf, err in episode_failures)
             QMessageBox.warning(self, "Some episode lookups failed", details_text)
 
-    def _apply_tvdb_episode_details(self, tvdb_id: int, details: dict) -> None:
+    def _apply_tvdb_episode_details(self, tvdb_id: int, details: dict, filename_stem: str = "") -> None:
         """Follow-up step after a TVDB show match: prompt for season +
         episode, then merge episode-level fields into `details` in
         place. Deliberate partial-import-on-cancel behavior -- if the
@@ -1252,8 +1263,15 @@ class MainWindow(QMainWindow):
         show-level-only rather than aborting the whole import. Uses
         TVDBEpisodePickerDialog (which fetches all episodes once, no
         per-season network call) rather than the TMDB picker.
+
+        `filename_stem`, when given, is parsed for a season/episode
+        number to pre-select in the picker (see core.release_name_parser).
         """
-        episode_dialog = TVDBEpisodePickerDialog(tvdb_id, parent=self)
+        file_guess = parse_release_name(filename_stem)
+        episode_dialog = TVDBEpisodePickerDialog(
+            tvdb_id, initial_season=file_guess.season,
+            initial_episode=file_guess.episode, parent=self,
+        )
         if not episode_dialog.exec() or episode_dialog.selected_episode is None:
             return
 
@@ -1297,9 +1315,9 @@ class MainWindow(QMainWindow):
             )
             return
 
-        guess = vf.path.stem.replace(".", " ").replace("_", " ")
+        guess = parse_release_name(vf.path.stem)
 
-        dialog = TVDBSearchDialog(initial_query=guess, parent=self)
+        dialog = TVDBSearchDialog(initial_query=guess.title, parent=self)
         if not dialog.exec() or dialog.selected_candidate is None:
             return
         candidate = dialog.selected_candidate
@@ -1307,7 +1325,7 @@ class MainWindow(QMainWindow):
         try:
             details = get_series_details(candidate.tvdb_id)
             vf.metadata.content_type = ContentType.TV
-            self._apply_tvdb_episode_details(candidate.tvdb_id, details)
+            self._apply_tvdb_episode_details(candidate.tvdb_id, details, vf.path.stem)
         except TVDBError as e:
             QMessageBox.warning(self, "TheTVDB Fetch Failed", str(e))
             return

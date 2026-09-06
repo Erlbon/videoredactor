@@ -15,6 +15,11 @@ dialog which does call out again for each season picked.
 Same "always confirm explicitly, never auto-pick" principle as every
 other picker dialog in this project.
 
+`initial_season`/`initial_episode`, when given (typically parsed from the
+file's own name via core.release_name_parser), pre-select that season and
+episode the same way tmdb_episode_picker_dialog.py does -- selection
+only, the user still has to click "Use Selected Episode" to confirm it.
+
 NOTE: not runnable in this sandbox -- no PyQt6, no network. Syntax-
 checked and reviewed only.
 """
@@ -38,9 +43,14 @@ class TVDBEpisodePickerDialog(QDialog):
     if dialog.exec(): season, episode = dialog.selected_season, dialog.selected_episode
     """
 
-    def __init__(self, tvdb_id: int, parent=None):
+    def __init__(
+        self, tvdb_id: int, initial_season: Optional[int] = None,
+        initial_episode: Optional[int] = None, parent=None,
+    ):
         super().__init__(parent)
         self.tvdb_id = tvdb_id
+        self._initial_season = initial_season
+        self._initial_episode = initial_episode
         self.selected_season: Optional[int] = None
         self.selected_episode: Optional[EpisodeInfo] = None
         self._all_episodes: list[EpisodeInfo] = []
@@ -98,6 +108,11 @@ class TVDBEpisodePickerDialog(QDialog):
         # currentIndexChanged fires from addItem above once a default
         # selection exists, populating episodes for the first season.
 
+        if self._initial_season is not None:
+            idx = self.season_combo.findData(self._initial_season)
+            if idx >= 0:
+                self.season_combo.setCurrentIndex(idx)  # re-fires _on_season_changed if it actually moved
+
     def _on_season_changed(self) -> None:
         season_number = self.season_combo.currentData()
         if season_number is None:
@@ -111,11 +126,21 @@ class TVDBEpisodePickerDialog(QDialog):
         episodes = [ep for ep in self._all_episodes if ep.season_number == season_number]
         episodes.sort(key=lambda ep: ep.episode_number)
 
-        for ep in episodes:
+        select_row = -1
+        for row, ep in enumerate(episodes):
             label = f"E{ep.episode_number}: {ep.name}" if ep.name else f"Episode {ep.episode_number}"
             item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, ep)
             self.episode_list.addItem(item)
+            if (
+                self._initial_episode is not None
+                and season_number == self._initial_season
+                and ep.episode_number == self._initial_episode
+            ):
+                select_row = row
+
+        if select_row >= 0:
+            self.episode_list.setCurrentRow(select_row)
 
     def _on_episode_selection_changed(self) -> None:
         items = self.episode_list.selectedItems()
