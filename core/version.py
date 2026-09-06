@@ -8,6 +8,6 @@ with the real mechanism here rather than the promise-based version.
 """
 
 APP_NAME = "The Ʌideo Redactor"  # "Ʌ" = Ʌ, LATIN CAPITAL LETTER TURNED V
-APP_VERSION = "2026-09-06#02"
+APP_VERSION = "2026-09-06#03"
 RELEASE_LABEL = "v0.1"
 APP_REPO_URL = "https://github.com/erlbon/videoredactor"

@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-09-06#03 — Path column, unified colors
+
+- **New "Path" column**, alongside Filename -- shows each file's full
+  path, matching the sibling projects. Read-only, table-only, hideable
+  like the other technical columns (Duration/Resolution/Size).
+- Colors (unsaved/error row tints, table selection highlight) now come
+  from `redactor_common.gui.colors` -- standardized on the epub tool's
+  scheme. This project's own selection color (`#14327D`, a dark navy)
+  had been deliberately chosen and verified at 11.6:1 contrast for
+  dark-theme readability; the shared `#2f6fed` hasn't been re-verified
+  against a dark theme. Switched anyway per explicit direction to
+  unify on epub's scheme -- worth a dark-theme check before trusting
+  it's still as readable.
+- Bumped `redactor_common` to `2026-09-06-06`.
+
 ## 2026-09-06#02 — Window title now shows the version
 
 Title bar was `The Ʌideo Redactor (v0.1)` -- the release label only,

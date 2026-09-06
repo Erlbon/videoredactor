@@ -38,6 +38,7 @@ from core.table_settings import merge_column_order, is_column_visible, sanitize_
 from core.format_helpers import format_duration, format_file_size
 from core.config import get_setting, set_setting
 from redactor_common.gui.menu_builder import MenuAction, Separator, build_menu_bar
+from redactor_common.gui.colors import DIRTY_COLOR, ERROR_COLOR, HIGHLIGHT_TEXT_COLOR, TABLE_SELECTION_STYLESHEET
 from redactor_common.gui.context_menu import show_table_context_menu
 from redactor_common.gui.column_menu import show_column_header_context_menu
 from redactor_common.gui.collapsible_splitter import SplitterPaneCollapser
@@ -95,8 +96,9 @@ ALWAYS_VISIBLE_COLUMNS = ["filename", "status", "content_type"]
 # table-only, informational. Shown regardless of Content Type filter
 # (unlike Director/Cast/etc, technical info isn't content-type-specific)
 # but still user-hideable via the column context menu like anything else.
-TECHNICAL_COLUMNS = ["duration_seconds", "resolution", "size_bytes"]
+TECHNICAL_COLUMNS = ["path", "duration_seconds", "resolution", "size_bytes"]
 TECHNICAL_LABELS = {
+    "path": "Path",
     "duration_seconds": "Duration",
     "resolution": "Resolution",
     "size_bytes": "Size",
@@ -126,35 +128,14 @@ COLUMN_LABEL_LOOKUP = {**FIELD_LABELS, **TECHNICAL_LABELS, "filename": "Filename
 # color for a background WE chose: own both colors as a fixed, always-
 # readable pair, so these cells are contrast-correct regardless of
 # which theme (or theme-following mode) the user is running.
-DIRTY_BG = QColor(255, 244, 200)
-DIRTY_FG = QColor(70, 55, 0)      # dark brown-gold, readable on the tint above
-ERROR_BG = QColor(255, 210, 210)
-ERROR_FG = QColor(90, 20, 20)     # dark red, readable on the tint above
-
-# Selection highlight -- same "own both colors as a fixed pair" fix,
-# applied to a DIFFERENT problem than DIRTY/ERROR above: Qt's row
-# SELECTION highlight is a separate rendering layer from a
-# QTableWidgetItem's own background/foreground (selection typically
-# overrides per-item colors while a row is selected), and defaults to
-# whatever the OS/Qt style's selection palette is -- which, same as
-# the DIRTY/ERROR case, isn't guaranteed to contrast well against a
-# dark theme just because it happens to work on a light one. Fixed
-# navy background + white text verified at 11.6:1 contrast (WCAG AAA
-# for normal text is 7:1), applied via stylesheet rather than trusted
-# to the theme default. A row that's BOTH dirty/error AND selected
-# will show this selection color while selected (Qt's selection layer
-# takes visual priority over the item's own background either way,
-# regardless of this fix) -- the Status column's text (UNSAVED/LOAD
-# ERROR/etc) still conveys the state even when the tint is temporarily
-# not visible, so nothing is actually lost, just not double-shown.
-SELECTION_BG = "#14327D"
-SELECTION_FG = "#FFFFFF"
-TABLE_SELECTION_STYLESHEET = f"""
-    QTableWidget::item:selected {{
-        background-color: {SELECTION_BG};
-        color: {SELECTION_FG};
-    }}
-"""
+# Colors now live in redactor_common.gui.colors -- the epub tool's
+# scheme became the shared standard across all three projects (each
+# had independently picked its own row-tint/selection colors before).
+# Note for posterity: this project's own SELECTION_BG ("#14327D", a
+# dark navy) was chosen and verified at 11.6:1 contrast specifically
+# for dark-theme readability -- the shared "#2f6fed" hasn't been
+# re-verified against a dark theme here. Flagged, not blocking, per
+# explicit direction to standardize on epub's scheme regardless.
 
 
 class MainWindow(QMainWindow):
@@ -815,14 +796,16 @@ class MainWindow(QMainWindow):
         urgent to notice than one with merely-unsaved edits.
         """
         if vf.load_error or vf.save_error:
-            return (ERROR_BG, ERROR_FG)
+            return (ERROR_COLOR, HIGHLIGHT_TEXT_COLOR)
         if vf.dirty:
-            return (DIRTY_BG, DIRTY_FG)
+            return (DIRTY_COLOR, HIGHLIGHT_TEXT_COLOR)
         return None
 
     def _display_value(self, vf: VideoFile, field_name: str) -> str:
         if field_name == "filename":
             return vf.path.name
+        if field_name == "path":
+            return str(vf.path)
         if field_name == "status":
             if vf.load_error:
                 return "LOAD ERROR"
