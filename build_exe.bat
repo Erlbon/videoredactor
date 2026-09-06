@@ -38,7 +38,7 @@ if errorlevel 1 (
 )
 echo.
 
-echo Building TheVideoRedactor.exe ...
+echo Building videoredactor.exe ...
 REM "python -m PyInstaller" instead of the bare "pyinstaller" command --
 REM pip installs the pyinstaller console script into a "Scripts" folder
 REM that often isn't on PATH, especially for a per-user (non-admin)
@@ -56,9 +56,9 @@ if errorlevel 1 (
 )
 echo.
 
-if not exist "dist\TheVideoRedactor.exe" (
+if not exist "dist\videoredactor.exe" (
     echo.
-    echo ERROR: PyInstaller reported success but dist\TheVideoRedactor.exe
+    echo ERROR: PyInstaller reported success but dist\videoredactor.exe
     echo was not found. Please copy the full output above and report it.
     pause
     exit /b 1
@@ -84,7 +84,7 @@ echo.
 
 echo.
 echo ================================================================
-echo  SUCCESS. Your app is at: %cd%\dist\TheVideoRedactor.exe
+echo  SUCCESS. Your app is at: %cd%\dist\videoredactor.exe
 echo  That one file ^(plus the dist\tools folder alongside it, if
 echo  present^) can be copied anywhere and run.
 echo.

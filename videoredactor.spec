@@ -48,7 +48,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name="TheVideoRedactor",
+    name="videoredactor",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

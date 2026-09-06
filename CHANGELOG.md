@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-09-06#01 — Standardized the built exe's filename
+
+The `.exe` this project builds was named `TheVideoRedactor.exe` --
+every sibling project (`mp3redactor.exe`, `epubredactor.exe`,
+`cbzredactor.exe`) uses the plain lowercase project name with no
+"The" prefix, so this was the odd one out. Renamed via
+`videoredactor.spec`'s `EXE()` `name=` field to `videoredactor`,
+matching the convention; updated `build_exe.bat`'s echoed messages and
+`BUILD.md`'s documented output path to match. Only the build artifact's
+filename changes here -- the in-app branding ("The Ʌideo Redactor" in
+window title, About dialog, etc.) is untouched, same reasoning as the
+existing note further down this file about why the exe name stays
+plain ASCII while in-app branding uses the turned-V.
+
 ## 2026-09-04#01 — redactor_common is now a real pip dependency
 
 Removes the vendored `redactor_common/` folder and adds it to

@@ -53,7 +53,7 @@ already confirmed works, rather than depending on a possibly-different
 Python's `pip`/`pyinstaller` being separately on PATH, which is a real
 class of bug this project already hit once.)
 
-The built exe lands at `dist/TheVideoRedactor.exe` -- a single
+The built exe lands at `dist/videoredactor.exe` -- a single
 portable file, not a folder. (The spec's `EXE()` call includes
 `a.binaries`/`a.zipfiles`/`a.datas` directly with no separate
 `COLLECT()` step, which is PyInstaller's onefile pattern; this was
