@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-09-07#01 — redactor_common adoption fixes
+
+A cross-repo review of `redactor_common` adoption found three real
+gaps in this project specifically:
+
+- **QMessageBox max-width fix was entirely missing** -- the only one of
+  the four Redactor apps without it. A long unwrappable line (a path,
+  raw ffmpeg/mkvtoolnix stderr) could stretch a message box across the
+  whole screen. Now calls `redactor_common.gui.qmessagebox_style.
+  apply_message_box_style()` at startup, same as the others.
+- **No path-too-long protection at all** -- `VideoFile.save()`'s
+  `OSError` handler now routes through `redactor_common.core.
+  save_errors.describe_save_error()`, so a path over Windows' 260-
+  character limit gets a clear "move the file" explanation instead of
+  a raw exception string that reads like a transient, retriable
+  failure. 2 new tests in `tests/test_save_error_messages.py`.
+- The toolbar's two remaining hand-built `QAction`s (Apply to Selected,
+  Panel toggle) now go through `redactor_common.gui.action_factory.
+  make_action()` like every other action in this project's menu bar,
+  instead of constructing `QAction` directly.
+- Bumped the `redactor_common` pin to `2026-09-07-01`, which also fixes
+  a real bug at the source: `colors.py`'s `TABLE_SELECTION_STYLESHEET`
+  used to hardcode a selected row's own background/text color,
+  silently overriding `apply_theme()`'s WCAG-verified, light/dark-aware
+  selection colors on this project's table.
+
 ## 2026-09-06#03 — Path column, unified colors
 
 - **New "Path" column**, alongside Filename -- shows each file's full

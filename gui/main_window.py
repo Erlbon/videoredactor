@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
     QStatusBar, QMessageBox, QToolBar, QProgressDialog, QApplication,
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QAction, QKeySequence, QIcon
+from PyQt6.QtGui import QColor, QKeySequence, QIcon
 
 from core.video_file import VideoFile, discover_video_files, has_subfolders
 from core.video_metadata import ContentType, EDITABLE_FIELDS
@@ -37,6 +37,7 @@ from core.opensubtitles_client import download_subtitle_text, OpenSubtitlesError
 from core.table_settings import merge_column_order, is_column_visible, sanitize_hidden_fields
 from core.format_helpers import format_duration, format_file_size
 from core.config import get_setting, set_setting
+from redactor_common.gui.action_factory import make_action
 from redactor_common.gui.menu_builder import MenuAction, Separator, build_menu_bar
 from redactor_common.gui.colors import DIRTY_COLOR, ERROR_COLOR, HIGHLIGHT_TEXT_COLOR, TABLE_SELECTION_STYLESHEET
 from redactor_common.gui.context_menu import show_table_context_menu
@@ -324,15 +325,16 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.open_folder_action)
         toolbar.addSeparator()
 
-        self.apply_action = QAction("&Apply to Selected", self)
-        self.apply_action.setShortcut("Ctrl+Return")
-        self.apply_action.setToolTip(
-            "Apply typed changes in the panel to the selected file(s) "
-            "-- does not save to disk (Save already applies pending "
-            "changes automatically, so this is only needed to stage "
-            "changes without saving yet)"
+        self.apply_action = make_action(
+            self, "&Apply to Selected", lambda: self.tag_panel.apply_pending_changes(),
+            shortcut="Ctrl+Return",
+            tooltip=(
+                "Apply typed changes in the panel to the selected file(s) "
+                "-- does not save to disk (Save already applies pending "
+                "changes automatically, so this is only needed to stage "
+                "changes without saving yet)"
+            ),
         )
-        self.apply_action.triggered.connect(lambda: self.tag_panel.apply_pending_changes())
         toolbar.addAction(self.apply_action)
 
         toolbar.addAction(self.save_selected_action)
@@ -355,9 +357,9 @@ class MainWindow(QMainWindow):
         # toolbar control (this project never had one before -- the
         # panel's own in-corner button and dragging the splitter handle
         # by hand were the only ways to do this).
-        toggle_panel_action = QAction("Panel", self)
-        toggle_panel_action.setToolTip("Minimize or restore the bulk-edit panel")
-        toggle_panel_action.triggered.connect(self._toggle_tag_panel)
+        toggle_panel_action = make_action(
+            self, "Panel", self._toggle_tag_panel, tooltip="Minimize or restore the bulk-edit panel"
+        )
         toolbar.addAction(toggle_panel_action)
 
     def _check_external_tools_on_startup(self) -> None:

@@ -15,6 +15,8 @@ from typing import Optional
 import hashlib
 import tempfile
 
+from redactor_common.core.save_errors import describe_save_error
+
 from core.video_metadata import VideoMetadata, EDITABLE_FIELDS, ContentType
 from core.mp4_backend import read_mp4_metadata, write_mp4_metadata
 from core.mkv_backend import read_mkv_metadata, write_mkv_metadata
@@ -177,7 +179,7 @@ class VideoFile:
                 self.save_error = f"Unsupported extension: {self.extension}"
                 return
         except OSError as e:
-            self.save_error = f"File error: {e}"
+            self.save_error = f"File error: {describe_save_error(e)}"
             return
         except Exception as e:
             self.save_error = f"Could not save metadata: {e}"
