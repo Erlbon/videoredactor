@@ -1,5 +1,39 @@
 # Changelog
 
+## 2026-09-10#01 — quick single-file rename
+
+Double-click a Filename cell (or right-click a single selected file >
+Rename File...) to fix a typo in one filename directly. epubredactor
+already had this (its own local copy); mp3redactor added it too and
+promoted the reusable part to `redactor_common`
+(`gui/rename_single_file.py`, tag `2026-09-10-01`, bumped here) --
+this consumes that shared function rather than writing a local copy.
+This project's own `core/filename_pattern.py`/`gui/rename_pattern_dialog.py`
+(the pattern-based batch tool) stay as they are -- untouched, separate
+concern.
+
+- Renames on disk immediately (extension kept automatically, current
+  name pre-filled), refuses illegal characters/reserved Windows names/
+  an already-existing filename with a clear message rather than a raw
+  exception or a silent overwrite. A physical file operation -- not
+  tracked by undo.
+- Right-click menu only offers it for a genuine single selection (via
+  `_selected_video_files()`, which already returns only real selection
+  here, no "fall back to everything loaded" behavior to work around)
+  and never for a file that failed to load.
+
+Verified end-to-end against a real file on disk (not mocked): a real
+double-click dispatch, a real rename, correct no-op on every other
+column, a cancelled dialog leaving the file untouched, and correct
+context-menu gating for a real single selection vs. none. Full suite:
+271 passed (the pre-existing 26 failures -- ffmpeg/MKVToolNix-dependent
+tests -- are unrelated to this change; confirmed identical before and
+after via `git stash`, both counts match: this sandbox has neither
+tool on PATH). No new permanent test file -- this project's GUI layer
+has no automated test coverage; the underlying `rename_file_on_disk()`/
+`validate_filename_stem()` logic is already covered by
+`redactor_common`'s own test suite.
+
 ## 2026-09-07#01 — redactor_common adoption fixes
 
 A cross-repo review of `redactor_common` adoption found three real

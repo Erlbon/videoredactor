@@ -45,6 +45,7 @@ from redactor_common.gui.column_menu import show_column_header_context_menu
 from redactor_common.gui.collapsible_splitter import SplitterPaneCollapser
 from redactor_common.gui.zoom_toolbar import TableZoomController
 from redactor_common.gui.about_dialog import AboutDialog, ChangelogDialog, CreditsDialog
+from redactor_common.gui.rename_single_file import rename_single_file as prompt_rename_single_file
 from redactor_common.core.version import REDACTOR_COMMON_REPO_URL, REDACTOR_COMMON_VERSION
 from gui.tag_panel import TagPanel, FIELD_LABELS
 from gui.tmdb_search_dialog import TMDBSearchDialog
@@ -206,6 +207,7 @@ class MainWindow(QMainWindow):
         self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self.table.setStyleSheet(TABLE_SELECTION_STYLESHEET)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
+        self.table.cellDoubleClicked.connect(self._on_cell_double_clicked)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._show_table_context_menu)
 
@@ -851,11 +853,48 @@ class MainWindow(QMainWindow):
         two generic file actions (Open Containing Folder, Copy Path) for
         free, same as epub/mp3.
         """
+        def extra_items(files: list[VideoFile]) -> list:
+            # Only offered for a single file -- renaming several files
+            # to the same name doesn't make sense. Distinct from any
+            # future pattern-based batch rename tool: this is the
+            # quick, direct fix for one typo at a time -- also
+            # reachable by double-clicking the Filename cell (see
+            # _on_cell_double_clicked()).
+            if len(files) == 1 and not files[0].load_error:
+                return [Separator(), MenuAction(
+                    "rename_file", "Rename File...", lambda: self.rename_single_file(files[0])
+                )]
+            return []
+
         show_table_context_menu(
             self, self.table, pos,
             get_selected_items=self._selected_video_files,
             get_path=lambda vf: vf.path,
+            extra_items=extra_items,
         )
+
+    def _on_cell_double_clicked(self, row: int, col: int) -> None:
+        if not (0 <= col < len(self._column_order)) or self._column_order[col] != "filename":
+            return
+        if not (0 <= row < len(self.video_files)):
+            return
+        vf = self.video_files[row]
+        if not vf.load_error:
+            self.rename_single_file(vf)
+
+    def rename_single_file(self, vf: VideoFile) -> None:
+        """Quick, direct rename of a single file on disk -- for fixing a
+        typo or small mistake in the filename directly. A physical file
+        operation -- not tracked by any undo mechanism, same as
+        Save/other on-disk operations. Triggered by double-clicking a
+        Filename cell, or via the table's right-click menu.
+
+        The prompt/validate/rename/error-report flow itself lives in
+        redactor_common.gui.rename_single_file (imported above as
+        prompt_rename_single_file to avoid shadowing this method's own
+        name)."""
+        if prompt_rename_single_file(self, str(vf.path), lambda p: setattr(vf, "path", Path(p))):
+            self._refresh_table_rows()
 
     # --- TagPanel collapse/restore ----------------------------------------
     # New: this project never had a way to minimize the panel before --
