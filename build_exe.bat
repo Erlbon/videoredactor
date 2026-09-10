@@ -44,6 +44,12 @@ REM pip installs the pyinstaller console script into a "Scripts" folder
 REM that often isn't on PATH, especially for a per-user (non-admin)
 REM Python install. "python -m" always finds it as long as it's
 REM installed in this same Python environment.
+REM
+REM The spec's upx=True is a silent no-op unless upx.exe is actually
+REM findable -- prepend the shared copy so PyInstaller's own DLL
+REM compression pass (CFG-protected DLLs are auto-skipped by
+REM PyInstaller itself) actually runs instead of doing nothing.
+set "PATH=%~dp0..\_shared-tools\upx;%PATH%"
 python -m PyInstaller videoredactor.spec --noconfirm
 if errorlevel 1 (
     echo.

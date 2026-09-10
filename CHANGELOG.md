@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-09-10#02 — smaller download
+
+No functional changes. The built .exe is now noticeably smaller
+(~39.3MB -> ~34.5MB, about 12%) because UPX compression — already
+configured in the PyInstaller spec (`upx=True`) but never actually
+installed in the build environment, so it had silently done nothing on
+every release so far — is now genuinely wired into `build_exe.bat`.
+Same fix applied across the whole Redactor family. Also fixes
+`release-videoredactor.ps1` (in `_shared-tools`, outside this repo)
+expecting the old pre-standardization `TheVideoRedactor.exe` filename
+instead of the `videoredactor.exe` this project's spec has actually
+produced since 2026-09-06 — the next release would otherwise have
+failed outright.
+
 ## 2026-09-10#01 — quick single-file rename
 
 Double-click a Filename cell (or right-click a single selected file >
