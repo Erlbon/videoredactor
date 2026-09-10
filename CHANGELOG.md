@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-09-10#03 — Quick "Number Episodes" on right-click
+
+- **New "Number Episodes..." in the table's right-click menu** -- the
+  quick, one-prompt version of Auto-Numbering: just asks for a
+  starting Episode # and numbers the selected files +1 per row, no
+  field picker or preview (Operations > Auto-Numbering... is still
+  there for that). Built on `redactor_common.gui.quick_series_number`.
+  Not routed through an undo manager -- this project doesn't have one
+  yet, same as every other in-memory edit here. Bumped
+  `redactor_common` to `2026-09-10-04`.
+
 ## 2026-09-10#02 — smaller download
 
 No functional changes. The built .exe is now noticeably smaller

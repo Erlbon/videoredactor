@@ -41,6 +41,7 @@ from redactor_common.gui.action_factory import make_action
 from redactor_common.gui.menu_builder import MenuAction, Separator, build_menu_bar
 from redactor_common.gui.colors import DIRTY_COLOR, ERROR_COLOR, HIGHLIGHT_TEXT_COLOR, TABLE_SELECTION_STYLESHEET
 from redactor_common.gui.context_menu import show_table_context_menu
+from redactor_common.gui.quick_series_number import prompt_and_generate_series_numbers
 from redactor_common.gui.column_menu import show_column_header_context_menu
 from redactor_common.gui.collapsible_splitter import SplitterPaneCollapser
 from redactor_common.gui.zoom_toolbar import TableZoomController
@@ -854,6 +855,7 @@ class MainWindow(QMainWindow):
         free, same as epub/mp3.
         """
         def extra_items(files: list[VideoFile]) -> list:
+            items: list = [Separator()]
             # Only offered for a single file -- renaming several files
             # to the same name doesn't make sense. Distinct from any
             # future pattern-based batch rename tool: this is the
@@ -861,10 +863,13 @@ class MainWindow(QMainWindow):
             # reachable by double-clicking the Filename cell (see
             # _on_cell_double_clicked()).
             if len(files) == 1 and not files[0].load_error:
-                return [Separator(), MenuAction(
+                items.append(MenuAction(
                     "rename_file", "Rename File...", lambda: self.rename_single_file(files[0])
-                )]
-            return []
+                ))
+            items.append(MenuAction(
+                "number_episodes", "Number Episodes...", lambda: self._quick_number_episodes(files)
+            ))
+            return items
 
         show_table_context_menu(
             self, self.table, pos,
@@ -1620,6 +1625,31 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(
                 f"Replaced text in {dialog.replaced_count} file(s) -- not yet saved to disk"
             )
+
+    def _quick_number_episodes(self, files: list[VideoFile]) -> None:
+        """The table right-click's quick version of Auto-Numbering:
+        just prompts for a starting Episode # (no field picker, no
+        step, no preview) and numbers the given files +1 per row from
+        there, in their current table order. For anything beyond the
+        plain "start here, count up by one" case on Episode #
+        specifically -- a different field, a different step, or a look
+        at what's changing before it does -- use
+        Operations -> Auto-Numbering... instead. Not routed through an
+        undo manager -- this project doesn't have one yet (unlike
+        epub/mp3/cbz), same as every other in-memory edit here.
+        """
+        values = prompt_and_generate_series_numbers(self, len(files), field_label="Starting Episode #")
+        if values is None:
+            return
+        for vf, new_value in zip(files, values):
+            try:
+                vf.metadata.episode_number = int(float(new_value))
+            except ValueError:
+                continue  # a genuinely unparseable value -- leave this file untouched
+            vf.dirty = True
+        self._refresh_table_rows()
+        if self._selected_video_files():
+            self._on_selection_changed()
 
     def _on_auto_numbering(self) -> None:
         """Batch sequential-number assignment into a chosen field,
