@@ -44,3 +44,10 @@ into files one at a time.
   container formats by hand.
 - **Typing alone never touches a file.** Edits are staged in memory
   until you explicitly apply and save.
+
+## License
+
+Licensed under the [GNU General Public License v3.0 or later](LICENSE).
+The GUI is built on PyQt6, which Riverbank Computing licenses under GPL
+v3 (or a paid commercial license) -- this project ships under
+GPL-compatible terms to match.
