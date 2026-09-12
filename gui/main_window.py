@@ -48,6 +48,7 @@ from redactor_common.gui.zoom_toolbar import TableZoomController
 from redactor_common.gui.about_dialog import AboutDialog, ChangelogDialog, CreditsDialog
 from redactor_common.gui.rename_single_file import rename_single_file as prompt_rename_single_file
 from redactor_common.gui.sortable_table import NumericTableWidgetItem, suspend_sorting
+from redactor_common.core.folder_refresh import find_new_files_in_loaded_folders
 from redactor_common.core.version import REDACTOR_COMMON_REPO_URL, REDACTOR_COMMON_VERSION
 from gui.tag_panel import TagPanel, FIELD_LABELS
 from gui.tmdb_search_dialog import TMDBSearchDialog
@@ -260,6 +261,12 @@ class MainWindow(QMainWindow):
                 Separator(),
                 MenuAction("save_selected", "&Save Selected", self._on_save_selected, shortcut="Ctrl+S"),
                 MenuAction("save_all", "Save &All Changed", self._on_save_all, shortcut="Ctrl+Shift+S"),
+                Separator(),
+                # F5 only, not the family's usual F5/Ctrl+R pair -- Ctrl+R
+                # is already "Remux Selected to MP4..." in this project's
+                # Operations menu (see MenuAction("remux", ...) below);
+                # adding it here too would make both ambiguous.
+                MenuAction("refresh_list", "Re&fresh List", self._refresh_list, shortcut="F5"),
                 Separator(),
                 MenuAction("exit", "E&xit", self.close, shortcut=QKeySequence.StandardKey.Quit),
             ],
@@ -745,6 +752,53 @@ class MainWindow(QMainWindow):
         if failed:
             msg += f", {failed} failed to read"
         msg += status_suffix
+        self.status_bar.showMessage(msg)
+
+    def _refresh_list(self) -> None:
+        """Re-scans the folder(s) your currently-loaded files live in
+        (picking up any new video file dropped there since you
+        loaded), then re-reads everything still present fresh from
+        disk. Doesn't discover a brand-new folder nothing's been
+        loaded from at all -- only folders already represented in the
+        current list get scanned, non-recursively -- use Open Folder
+        for an actual new folder.
+
+        Same silent-replace-the-list behavior _load_folder already has
+        (this project has no discard-unsaved-changes confirmation
+        mechanism yet, unlike its sibling Redactor projects -- not
+        introduced here, since that's a bigger, separate change
+        affecting Open Folder too, not just this one action).
+
+        The "what's new on disk" logic itself is
+        redactor_common.core.folder_refresh's -- this is just the
+        video-specific wiring: how paths come out of self.video_files,
+        and what to do once the new set is known."""
+        if not self.video_files:
+            return
+
+        existing_paths = [str(vf.path) for vf in self.video_files]
+        new_paths = find_new_files_in_loaded_folders(
+            existing_paths,
+            lambda folder: [str(p) for p in discover_video_files(Path(folder), recursive=False)],
+        )
+        all_paths = [Path(p) for p in existing_paths + new_paths]
+
+        self.video_files = []
+        for p in all_paths:
+            vf = VideoFile(path=p)
+            vf.load()
+            self.video_files.append(vf)
+
+        self._refresh_table_rows()
+
+        loaded = sum(1 for vf in self.video_files if not vf.load_error)
+        failed = len(self.video_files) - loaded
+        if new_paths:
+            msg = f"Found {len(new_paths)} new file(s), reloaded {loaded} file(s)"
+        else:
+            msg = f"No new files found, reloaded {loaded} file(s)"
+        if failed:
+            msg += f", {failed} failed to read"
         self.status_bar.showMessage(msg)
 
     def _restore_last_folder_on_startup(self) -> None:

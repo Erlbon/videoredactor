@@ -1,5 +1,41 @@
 # Changelog
 
+## 2026-09-12#02 — Refresh List (F5)
+
+File > Refresh List (F5) re-scans the folder(s) your currently-loaded
+files live in, picks up any new video file dropped there since you
+loaded, and re-reads everything still present fresh from disk.
+epubredactor already had this (F5/Ctrl+R); cbzredactor independently
+rewrote the same behavior from scratch; mp3redactor and videoredactor
+had neither.
+
+- F5 only here, not the family's usual F5/Ctrl+R pair -- Ctrl+R was
+  already "Remux Selected to MP4..." in this project's Operations
+  menu; adding it to both would have made them ambiguous (caught while
+  verifying this change, before it shipped).
+- Doesn't discover a brand-new folder nothing's been loaded from at
+  all -- only folders already represented in the current list get
+  scanned, non-recursively. Use Open Folder for an actual new folder.
+- Same silent-replace-the-list behavior `_load_folder` already has --
+  this project has no discard-unsaved-changes confirmation mechanism
+  yet, unlike its sibling Redactor projects; not introduced here,
+  since that's a bigger, separate change affecting Open Folder too,
+  not just this one action.
+- The "what's new on disk" logic itself is
+  `redactor_common.core.folder_refresh.find_new_files_in_loaded_folders()`
+  -- generalized off epubredactor's own version. Bumps the
+  `redactor_common` pin to `2026-09-12-02`.
+
+Verified end-to-end against real files on disk (not mocked): a file
+dropped into an already-loaded folder is found, a file in an unloaded
+subfolder is correctly NOT found, "no new files" produces the right
+status-bar message, and a file that's vanished from disk since being
+loaded shows up as a load error on its row instead of silently
+disappearing from the list. Also verified no menu shortcut collisions
+anywhere in the app after this change. Full suite: 271 passed (26
+pre-existing ffmpeg/MKVToolNix-dependent failures, unrelated -- this
+sandbox has neither tool on PATH).
+
 ## 2026-09-12#01 — click a column header to sort
 
 Click any column header to sort the table by it (click again to
