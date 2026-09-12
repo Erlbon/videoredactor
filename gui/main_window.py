@@ -704,6 +704,14 @@ class MainWindow(QMainWindow):
         caller to duplicate the whole message-assembly logic below.
         """
         paths = discover_video_files(folder_path, recursive=recursive)
+
+        # Replaces self.video_files wholesale -- shared by both Open Folder
+        # and the startup restore below, so this one check covers both call
+        # sites. Startup restore always finds video_files empty (nothing's
+        # been loaded yet), so _count_dirty() is always 0 there and this
+        # never actually prompts on launch.
+        if self._count_dirty() and not self._confirm_discard("load a new folder (discarding unsaved changes)"):
+            return
         self.video_files = []
 
         progress = None
@@ -763,17 +771,18 @@ class MainWindow(QMainWindow):
         current list get scanned, non-recursively -- use Open Folder
         for an actual new folder.
 
-        Same silent-replace-the-list behavior _load_folder already has
-        (this project has no discard-unsaved-changes confirmation
-        mechanism yet, unlike its sibling Redactor projects -- not
-        introduced here, since that's a bigger, separate change
-        affecting Open Folder too, not just this one action).
+        Discards unsaved in-memory edits (with confirmation first) --
+        same discard-confirmation mechanism _load_folder now has for
+        Open Folder, applied here too since this replaces the list
+        just as wholesale.
 
         The "what's new on disk" logic itself is
         redactor_common.core.folder_refresh's -- this is just the
         video-specific wiring: how paths come out of self.video_files,
         and what to do once the new set is known."""
         if not self.video_files:
+            return
+        if self._count_dirty() and not self._confirm_discard("refresh the list (discarding unsaved changes)"):
             return
 
         existing_paths = [str(vf.path) for vf in self.video_files]
@@ -1155,6 +1164,24 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Some files failed to save", details)
         else:
             self.status_bar.showMessage(f"Saved {succeeded} file(s){skip_note}{cancel_note}")
+
+    def _count_dirty(self) -> int:
+        return sum(1 for vf in self.video_files if vf.dirty)
+
+    def _confirm_discard(self, action_desc: str) -> bool:
+        reply = QMessageBox.question(
+            self,
+            "Unsaved changes",
+            f"You have unsaved changes. Are you sure you want to {action_desc}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
+    def closeEvent(self, event) -> None:
+        if self._count_dirty() and not self._confirm_discard("quit without saving"):
+            event.ignore()
+            return
+        super().closeEvent(event)
 
     # --- Applying bulk edits ----------------------------------------------
 

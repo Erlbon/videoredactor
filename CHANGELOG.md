@@ -1,5 +1,39 @@
 # Changelog
 
+## 2026-09-12#03 — confirm before discarding unsaved changes
+
+Open Folder, Refresh List (F5), and quitting the app now all warn first
+if any loaded file has unsaved edits (`VideoFile.dirty`), instead of
+silently replacing the in-memory list or closing the window and losing
+them. Every sibling Redactor project (mp3redactor, cbzredactor,
+epubredactor) already had this; videoredactor's Refresh List task
+(2026-09-12#02) deliberately left it unfixed since it meant guarding
+Open Folder too, not just the new action -- addressed here as its own
+change.
+
+- `_count_dirty()` / `_confirm_discard(action_desc)` -- same shape as
+  mp3redactor's `gui/main_window.py`: a Yes/No `QMessageBox.question`
+  asking "You have unsaved changes. Are you sure you want to
+  {action_desc}?", answered No/Cancel leaves the current list
+  untouched.
+- The guard lives in `_load_folder()` itself (shared by both `_on_open_
+  Folder()` and startup's `_restore_last_folder_on_startup()`), so one
+  check covers both -- startup never actually prompts since
+  `video_files` is always empty at that point (nothing's loaded yet).
+- `_refresh_list()` gets the same guard directly.
+- New `closeEvent()` override (this project had none before) -- quitting
+  with unsaved changes now asks first, ignoring the close on No/Cancel,
+  same as the other three Redactor projects already do.
+
+Verified end-to-end (not mocked Qt-wise beyond the confirmation dialog
+itself) with a real dirty `VideoFile`: Open Folder, Refresh List, and
+closing the window all prompt and respect No (list/window untouched)
+and Yes (proceeds); a clean list with nothing unsaved never prompts at
+all in any of the three paths -- no added friction for the common case.
+Full suite: 271 passed (26 pre-existing ffmpeg/MKVToolNix-dependent
+failures, unrelated -- this sandbox has neither tool on PATH), same
+count as before this change.
+
 ## 2026-09-12#02 — Refresh List (F5)
 
 File > Refresh List (F5) re-scans the folder(s) your currently-loaded
