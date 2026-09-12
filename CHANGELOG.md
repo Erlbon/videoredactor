@@ -1,5 +1,42 @@
 # Changelog
 
+## 2026-09-12#01 — click a column header to sort
+
+Click any column header to sort the table by it (click again to
+reverse); epubredactor already had this, videoredactor was missing it
+entirely. Safe here because row->file mapping is `FILE_ROLE`
+(`Qt.UserRole`)-based, not list-index-based -- native Qt sorting
+physically relocates rows, which is exactly what makes it unsafe for a
+project like cbzredactor whose rows are `self.books[row]`-indexed
+(that project's own click-to-sort is deliberately a different,
+non-native implementation for that reason).
+
+- Numeric-looking metadata columns (Season #, Episode #, Personal
+  Rating -- `core.video_metadata.NUMERIC_FIELDS`) sort as numbers, not
+  text -- "2" before "9" before "10". Duration and Size pass their
+  real underlying float/int explicitly as `sort_value` rather than
+  relying on parsing it back out of their formatted display text
+  ("1:30:25", "1.2 MB" aren't bare numbers).
+- `_refresh_table_rows()` (called after every load/edit/save) now
+  suspends sorting while it repopulates and restores it after --
+  required, not just tidy: Qt re-sorts as items land when sorting is
+  live, which can relocate an earlier row's cells before a later row
+  is even written, silently scrambling which row ends up holding which
+  file's data.
+- Built on `redactor_common.gui.sortable_table`
+  (`NumericTableWidgetItem` + `suspend_sorting()`), promoted from
+  epubredactor's own version. Bumps the `redactor_common` pin to
+  `2026-09-12-01`.
+
+Verified end-to-end against real (unmocked) `VideoFile`/`QTableWidget`
+objects: a real click-to-sort by Episode # producing numeric (not
+lexicographic) order, `FILE_ROLE` row->file mapping staying correct
+after a real native sort, Duration's explicit numeric `sort_value`, and
+a rebuild under an active sort neither crashing nor leaving sorting
+disabled afterward. Full suite: 271 passed (the pre-existing 26
+failures are ffmpeg/MKVToolNix-dependent tests, unrelated to this
+change -- this sandbox has neither tool on PATH).
+
 ## 2026-09-10#03 — Quick "Number Episodes" on right-click
 
 - **New "Number Episodes..." in the table's right-click menu** -- the

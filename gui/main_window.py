@@ -25,7 +25,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QKeySequence, QIcon
 
 from core.video_file import VideoFile, discover_video_files, has_subfolders
-from core.video_metadata import ContentType, EDITABLE_FIELDS
+from core.video_metadata import ContentType, EDITABLE_FIELDS, NUMERIC_FIELDS
 from core.tmdb_client import (
     get_movie_details, get_tv_show_details, get_tv_episode_details,
     download_poster, TMDBError,
@@ -47,6 +47,7 @@ from redactor_common.gui.collapsible_splitter import SplitterPaneCollapser
 from redactor_common.gui.zoom_toolbar import TableZoomController
 from redactor_common.gui.about_dialog import AboutDialog, ChangelogDialog, CreditsDialog
 from redactor_common.gui.rename_single_file import rename_single_file as prompt_rename_single_file
+from redactor_common.gui.sortable_table import NumericTableWidgetItem, suspend_sorting
 from redactor_common.core.version import REDACTOR_COMMON_REPO_URL, REDACTOR_COMMON_VERSION
 from gui.tag_panel import TagPanel, FIELD_LABELS
 from gui.tmdb_search_dialog import TMDBSearchDialog
@@ -206,6 +207,12 @@ class MainWindow(QMainWindow):
         self.table = QTableWidget()
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
+        # Click a header to sort by that column -- safe here because row
+        # -> file mapping is FILE_ROLE (Qt.UserRole)-based, not list-index
+        # based; _refresh_table_rows() suspends this while it repopulates,
+        # see suspend_sorting()'s own docstring for why that's required,
+        # not just tidy.
+        self.table.setSortingEnabled(True)
         self.table.setStyleSheet(TABLE_SELECTION_STYLESHEET)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
         self.table.cellDoubleClicked.connect(self._on_cell_double_clicked)
@@ -773,24 +780,42 @@ class MainWindow(QMainWindow):
     # --- Table rendering ---------------------------------------------------
 
     def _refresh_table_rows(self) -> None:
-        self.table.setRowCount(len(self.video_files))
-        for row, vf in enumerate(self.video_files):
-            row_colors = self._row_colors(vf)
-            for col, field_name in enumerate(self._column_order):
-                text = self._display_value(vf, field_name)
-                item = QTableWidgetItem(text)
-                if col == 0:
-                    # Store the VideoFile reference on the filename cell --
-                    # row->file mapping via UserRole, not row index.
-                    item.setData(FILE_ROLE, vf)
-                tooltip = vf.save_error or vf.load_error
-                if tooltip:
-                    item.setToolTip(tooltip)
-                if row_colors is not None:
-                    bg, fg = row_colors
-                    item.setBackground(bg)
-                    item.setForeground(fg)
-                self.table.setItem(row, col, item)
+        with suspend_sorting(self.table):
+            self.table.setRowCount(len(self.video_files))
+            for row, vf in enumerate(self.video_files):
+                row_colors = self._row_colors(vf)
+                for col, field_name in enumerate(self._column_order):
+                    text = self._display_value(vf, field_name)
+                    item = self._make_table_item(vf, field_name, text)
+                    if col == 0:
+                        # Store the VideoFile reference on the filename cell --
+                        # row->file mapping via UserRole, not row index.
+                        item.setData(FILE_ROLE, vf)
+                    tooltip = vf.save_error or vf.load_error
+                    if tooltip:
+                        item.setToolTip(tooltip)
+                    if row_colors is not None:
+                        bg, fg = row_colors
+                        item.setBackground(bg)
+                        item.setForeground(fg)
+                    self.table.setItem(row, col, item)
+
+    def _make_table_item(self, vf: VideoFile, field_name: str, text: str) -> QTableWidgetItem:
+        """Numeric-looking columns sort as numbers, not text ("2" before
+        "10", not "10" before "2"). Duration/Size display a formatted
+        string ("1:30:25", "1.2 MB") that isn't itself a bare number, so
+        their real underlying value is passed explicitly as sort_value
+        rather than relying on NumericTableWidgetItem parsing it back
+        out of the formatted text (which would just fail and silently
+        fall back to text order)."""
+        if field_name == "duration_seconds":
+            return NumericTableWidgetItem(text, sort_value=vf.metadata.duration_seconds)
+        if field_name == "size_bytes":
+            size = vf.size_bytes
+            return NumericTableWidgetItem(text, sort_value=float(size) if size is not None else None)
+        if field_name in NUMERIC_FIELDS:
+            return NumericTableWidgetItem(text)
+        return QTableWidgetItem(text)
 
     def _row_colors(self, vf: VideoFile) -> Optional[tuple[QColor, QColor]]:
         """Returns a (background, foreground) pair, or None for a
