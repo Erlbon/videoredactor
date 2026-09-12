@@ -1,5 +1,6 @@
 """
-ffmpeg backend: thumbnail extraction (video "cover" preview) and remux.
+ffmpeg backend: thumbnail extraction (video "cover" preview), remux, and
+transcode.
 
 Unlike mp4_backend/mkv_backend, this module shells out (same "always use
 the real CLI tool" precedent as the epub tool's Calibre integration and
@@ -11,6 +12,7 @@ file, not just syntax-checked -- see tests/test_ffmpeg_backend.py.
 from __future__ import annotations
 import subprocess
 import os
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -115,6 +117,75 @@ def remux_to_mp4(input_path: str, output_path: str) -> tuple[bool, str]:
     if result is None:
         return False, "ffmpeg not found on PATH -- is it installed?"
     return result.returncode == 0, result.stderr
+
+
+def transcode_to_mp4(
+    input_path: str,
+    output_path: str,
+    *,
+    crf: int = 23,
+    audio_bitrate: str = "128k",
+    threads: Optional[int] = None,
+    cancel_event: Optional[threading.Event] = None,
+) -> tuple[bool, str]:
+    """Re-encode (not just remux) into H.264/AAC MP4 -- for a source
+    remux_to_mp4 can't just stream-copy (a codec MP4 can't hold at all),
+    or simply because the user wants a smaller/normalized file. Same
+    ffmpeg invocation shape as this project's user has been running by
+    hand: `-c:v libx264 -crf <crf> -c:a aac -b:a <audio_bitrate>`, plus
+    `-threads <n>` when a thread count is given (omitted entirely
+    otherwise, so ffmpeg picks its own default rather than being told
+    "0 threads" or some other placeholder value).
+
+    Unlike remux_to_mp4 (an instant stream copy, safe to call straight
+    off the GUI thread), a real encode takes real time -- this is meant
+    to be driven from a background thread, with `cancel_event` set from
+    a Cancel button so a multi-minute encode can actually be killed
+    instead of just abandoned to keep running invisibly. Uses Popen +
+    polling communicate() rather than this module's usual `_run()`
+    helper for exactly that reason -- `_run()`'s plain subprocess.run()
+    blocks uninterruptibly until ffmpeg exits on its own.
+
+    Returns (True, stderr) on success, (False, stderr) on failure, and
+    (False, "Cancelled") if `cancel_event` fired mid-encode -- the
+    caller's batch summary can treat a cancellation as neither a normal
+    success nor a real per-file failure.
+    """
+    args = [
+        "ffmpeg", "-y", "-i", input_path,
+        "-c:v", "libx264", "-crf", str(crf),
+        "-c:a", "aac", "-b:a", audio_bitrate,
+    ]
+    if threads:
+        args += ["-threads", str(threads)]
+    args.append(output_path)
+
+    resolved_args = [get_executable_path(args[0])] + args[1:]
+    try:
+        proc = subprocess.Popen(
+            resolved_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, creationflags=_no_console_flags(),
+        )
+    except FileNotFoundError:
+        return False, "ffmpeg not found on PATH -- is it installed?"
+
+    # communicate(timeout=...) -- not a bare proc.wait() poll loop -- is
+    # the documented-safe way to poll a Popen with pipes: ffmpeg writes
+    # a steady stream of progress info to stderr, and a poll loop that
+    # never drains the pipes would deadlock once the OS pipe buffer
+    # fills, well before any real encode finishes. Repeated calls after
+    # a TimeoutExpired keep draining rather than losing output.
+    stderr = ""
+    while True:
+        try:
+            _, stderr = proc.communicate(timeout=0.5)
+            break
+        except subprocess.TimeoutExpired:
+            if cancel_event is not None and cancel_event.is_set():
+                proc.kill()
+                proc.communicate()
+                return False, "Cancelled"
+    return proc.returncode == 0, stderr or ""
 
 
 def probe_technical_info(path: str) -> dict:

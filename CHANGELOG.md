@@ -1,5 +1,39 @@
 # Changelog
 
+## 2026-09-13#01 — Convert Selected to MP4 (H.264)
+
+Operations > Convert Selected to MP4 (H.264)... -- a real re-encode
+(`ffmpeg -c:v libx264 -crf ... -c:a aac -b:a ...`), not just Remux's
+stream-copy repackage. Prompted directly by the user already running
+that exact ffmpeg invocation by hand outside the app; since ffmpeg was
+already a required dependency here (thumbnails/remux/probing), a real
+transcode feature was a natural extension rather than a new dependency.
+
+- CRF, audio bitrate, and thread count are persisted defaults, edited
+  once via Settings > Locate External Tools > Convert to MP4 (H.264)
+  Defaults (`core/transcode_settings.py`) -- not re-asked per batch,
+  unlike e.g. the TMDB search dialog's per-search Year field. 0 threads
+  means "no `-threads` flag at all," letting ffmpeg pick its own
+  default, rather than this app inventing a fake "0 threads" meaning.
+- Applies to any selected file, not just MKV (unlike Remux) -- an
+  already-MP4 source gets a distinctly-named `..._h264.mp4` output
+  rather than converting in place (reading and writing the same file
+  at once).
+- Deliberately does NOT offer to delete the original afterward, unlike
+  Remux's post-action prompt -- Remux is lossless (`-c copy`), so
+  deleting the source there is safe; a transcode is a real quality/
+  generation loss versus the source, and encouraging a user to throw
+  away their only lossless copy right after a lossy conversion would
+  be the wrong default.
+- A real encode takes real time (unlike Remux's near-instant stream
+  copy), so this runs on a background `QThread` (`_TranscodeWorker` in
+  `gui/main_window.py`) behind a modal progress dialog with a working
+  Cancel button -- `core/ffmpeg_backend.transcode_to_mp4()` drives
+  ffmpeg via `Popen` + polling `communicate(timeout=...)` rather than
+  this module's usual blocking `_run()` helper, specifically so Cancel
+  can actually kill an in-progress encode instead of only skipping
+  files not yet started.
+
 ## 2026-09-12#03 — confirm before discarding unsaved changes
 
 Open Folder, Refresh List (F5), and quitting the app now all warn first

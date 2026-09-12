@@ -15,13 +15,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 import json
+import threading
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
     QTableWidget, QTableWidgetItem, QComboBox, QLabel, QFileDialog,
     QStatusBar, QMessageBox, QToolBar, QProgressDialog, QApplication,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, QEventLoop, pyqtSignal
 from PyQt6.QtGui import QColor, QKeySequence, QIcon
 
 from core.video_file import VideoFile, discover_video_files, has_subfolders
@@ -32,7 +33,8 @@ from core.tmdb_client import (
 )
 from core.tvdb_client import get_series_details, get_episode_details, download_image, TVDBError
 from core.release_name_parser import parse_release_name
-from core.ffmpeg_backend import remux_to_mp4
+from core.ffmpeg_backend import remux_to_mp4, transcode_to_mp4
+from core.transcode_settings import get_transcode_settings
 from core.opensubtitles_client import download_subtitle_text, OpenSubtitlesError
 from core.table_settings import merge_column_order, is_column_visible, sanitize_hidden_fields
 from core.format_helpers import format_duration, format_file_size
@@ -141,6 +143,43 @@ COLUMN_LABEL_LOOKUP = {**FIELD_LABELS, **TECHNICAL_LABELS, "filename": "Filename
 # for dark-theme readability -- the shared "#2f6fed" hasn't been
 # re-verified against a dark theme here. Flagged, not blocking, per
 # explicit direction to standardize on epub's scheme regardless.
+
+
+class _TranscodeWorker(QThread):
+    """Runs a batch of transcode_to_mp4() calls off the GUI thread.
+
+    Unlike _on_remux_selected's loop (safe to run straight on the GUI
+    thread since -c copy is near-instant), a real H.264/AAC re-encode
+    can take minutes per file -- doing that inline would freeze the
+    whole window for the entire batch. Emits progress per file rather
+    than returning everything at once, so the caller's QProgressDialog
+    can update between files; `cancel_event` is checked both between
+    files here and (via transcode_to_mp4) mid-file, so Cancel actually
+    stops a long encode instead of only skipping ones not yet started.
+    """
+
+    file_started = pyqtSignal(int, str)       # index, input filename
+    file_finished = pyqtSignal(int, bool, str)  # index, success, stderr/message
+
+    def __init__(self, jobs: list[tuple[Path, Path]], settings, parent=None):
+        super().__init__(parent)
+        self._jobs = jobs
+        self._settings = settings
+        self.cancel_event = threading.Event()
+
+    def run(self) -> None:
+        for i, (input_path, output_path) in enumerate(self._jobs):
+            if self.cancel_event.is_set():
+                break
+            self.file_started.emit(i, input_path.name)
+            ok, message = transcode_to_mp4(
+                str(input_path), str(output_path),
+                crf=self._settings.crf,
+                audio_bitrate=self._settings.audio_bitrate,
+                threads=self._settings.threads or None,
+                cancel_event=self.cancel_event,
+            )
+            self.file_finished.emit(i, ok, message)
 
 
 class MainWindow(QMainWindow):
@@ -285,6 +324,8 @@ class MainWindow(QMainWindow):
             ],
             "Operations": [
                 MenuAction("remux", "&Remux Selected to MP4...", self._on_remux_selected, shortcut="Ctrl+R"),
+                MenuAction("convert_to_mp4", "Con&vert Selected to MP4 (H.264)...",
+                           self._on_convert_to_mp4, shortcut="Ctrl+Shift+C"),
                 MenuAction("rename_by_pattern", "Rena&me/Export by Pattern...",
                            self._on_rename_by_pattern, shortcut="Ctrl+Shift+R"),
                 Separator(),
@@ -1605,6 +1646,141 @@ class MainWindow(QMainWindow):
         if clicked == btn_no_all:
             return (False, False)
         return False  # dialog dismissed without a button (e.g. Esc) -- default to not deleting
+
+    def _on_convert_to_mp4(self) -> None:
+        """Re-encode selected files to H.264/AAC MP4 (batch-capable),
+        using the CRF/audio-bitrate/thread defaults from Tool Settings
+        (core/transcode_settings.py). Unlike Remux (-c copy, lossless,
+        MKV-only), this applies to any selected file and is a genuine
+        re-encode -- slower, and a generation/quality loss versus the
+        source, so unlike _on_remux_selected there is deliberately NO
+        "delete the original?" prompt here: encouraging a user to throw
+        away their only lossless copy right after a lossy conversion is
+        the wrong default, even though remux's equivalent prompt is safe
+        (a remux loses nothing).
+
+        Runs off the GUI thread via _TranscodeWorker + a QProgressDialog
+        with a working Cancel button -- a real encode takes real time,
+        unlike remux's near-instant stream copy.
+        """
+        selected = self._selected_video_files()
+        if not selected:
+            QMessageBox.information(
+                self, "Nothing to Convert",
+                "Select at least one video file to convert.",
+            )
+            return
+
+        settings = get_transcode_settings()
+        jobs: list[tuple[Path, Path]] = []
+        skipped_existing: list[VideoFile] = []
+        for vf in selected:
+            if vf.path.suffix.lower() == ".mp4":
+                # Converting an MP4 in place would mean reading and
+                # writing the same file at once -- name the output
+                # distinctly instead, same "never silently overwrite
+                # the input" reasoning as remux's existing-file check
+                # below (which only ever applies to non-MP4 sources).
+                output_path = vf.path.with_name(f"{vf.path.stem}_h264.mp4")
+            else:
+                output_path = vf.path.with_suffix(".mp4")
+            if output_path.exists():
+                skipped_existing.append(vf)
+                continue
+            jobs.append((vf.path, output_path))
+
+        if not jobs:
+            QMessageBox.information(
+                self, "Nothing to Convert",
+                "Every selected file's converted output already exists.",
+            )
+            return
+
+        thread_note = f", {settings.threads} threads" if settings.threads else ""
+        confirm = QMessageBox.question(
+            self, "Convert to MP4 (H.264)",
+            f"Re-encode {len(jobs)} file(s) to H.264/AAC MP4 "
+            f"(CRF {settings.crf}, audio {settings.audio_bitrate}{thread_note})?\n\n"
+            "This re-encodes video -- slower than Remux, and a quality/"
+            "generation loss versus the source. Originals are never "
+            "deleted automatically. Adjust these defaults via "
+            "Settings > Locate External Tools.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+
+        progress = QProgressDialog("Starting...", "Cancel", 0, len(jobs), self)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setWindowTitle("Converting to MP4")
+        progress.setMinimumDuration(0)
+
+        worker = _TranscodeWorker(jobs, settings, parent=self)
+        results: dict[int, tuple[bool, str]] = {}
+
+        def on_started(i: int, name: str) -> None:
+            progress.setLabelText(f"Converting {name}... ({i + 1}/{len(jobs)})")
+            progress.setValue(i)
+
+        def on_finished(i: int, ok: bool, message: str) -> None:
+            results[i] = (ok, message)
+
+        def on_cancel() -> None:
+            worker.cancel_event.set()
+            progress.setLabelText("Cancelling (finishing current file)...")
+
+        worker.file_started.connect(on_started)
+        worker.file_finished.connect(on_finished)
+        progress.canceled.connect(on_cancel)
+
+        # QProgressDialog's own modality pumps clicks/paint events, but
+        # not the "wait for this thread to actually finish" part -- a
+        # small local event loop tied to the worker's `finished` signal
+        # is the standard Qt pattern for blocking here without freezing
+        # the UI (the worker itself already runs off this thread).
+        wait_loop = QEventLoop()
+        worker.finished.connect(wait_loop.quit)
+        worker.start()
+        wait_loop.exec()
+
+        progress.setValue(len(jobs))
+        progress.close()
+
+        new_files: list[VideoFile] = []
+        succeeded = 0
+        failed: list[tuple[Path, str]] = []
+        cancelled_count = 0
+        for i, (input_path, output_path) in enumerate(jobs):
+            result = results.get(i)
+            if result is None:
+                cancelled_count += 1  # never started -- batch was cancelled first
+                continue
+            ok, message = result
+            if ok:
+                succeeded += 1
+                new_vf = VideoFile(path=output_path)
+                new_vf.load()
+                new_files.append(new_vf)
+            elif message == "Cancelled":
+                cancelled_count += 1
+            else:
+                failed.append((output_path, message))
+
+        self.video_files.extend(new_files)
+        self._refresh_table_rows()
+
+        parts = [f"Converted {succeeded} file(s)"]
+        if failed:
+            parts.append(f"{len(failed)} failed")
+        if cancelled_count:
+            parts.append(f"{cancelled_count} cancelled")
+        if skipped_existing:
+            parts.append(f"{len(skipped_existing)} skipped (output already exists)")
+        self.status_bar.showMessage(", ".join(parts))
+
+        if failed:
+            details = "\n".join(f"{path.name}: {err.strip() or 'ffmpeg conversion failed'}" for path, err in failed)
+            QMessageBox.warning(self, "Some files failed to convert", details)
 
     # --- Subtitles -------------------------------------------------------
 

@@ -2,10 +2,15 @@
 ToolSettingsDialog: lets the user point directly at ffmpeg/ffprobe/
 mkvpropedit/mkvmerge executables when PATH auto-detection fails --
 e.g. a portable/no-admin install where PATH can't be modified at all.
+Also holds the persisted defaults for the "Convert Selected to MP4
+(H.264)" transcode feature (core/transcode_settings.py) -- grouped here
+rather than in a dialog of its own since both are "set once, rarely
+revisited" ffmpeg-adjacent settings.
 
-Each row shows the currently configured override (blank = auto-detect
-via PATH), a live availability indicator, a Browse button, and a Clear
-button to remove the override and revert to PATH auto-detection.
+Each executable row shows the currently configured override (blank =
+auto-detect via PATH), a live availability indicator, a Browse button,
+and a Clear button to remove the override and revert to PATH
+auto-detection.
 
 NOTE: not runnable in this sandbox -- no PyQt6. Syntax-checked and
 reviewed only.
@@ -15,13 +20,14 @@ from __future__ import annotations
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit,
-    QPushButton, QLabel, QFileDialog, QWidget,
+    QPushButton, QLabel, QFileDialog, QWidget, QSpinBox, QGroupBox,
 )
 
 from core.external_tools import (
     get_tool_override, set_tool_override, is_executable_available,
     KNOWN_EXECUTABLES,
 )
+from core.transcode_settings import get_transcode_settings, set_transcode_settings, TranscodeSettings
 
 # Display order and labels for the four executables this app shells
 # out to. Order matches how they're introduced elsewhere (ffmpeg tools
@@ -58,7 +64,7 @@ class ToolSettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Locate External Tools")
-        self.resize(550, 250)
+        self.resize(550, 420)
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(
@@ -100,6 +106,36 @@ class ToolSettingsDialog(QDialog):
 
             form_layout.addRow(f"{display_name}:", row_widget)
         layout.addWidget(form_container)
+
+        transcode_group = QGroupBox("Convert to MP4 (H.264) Defaults")
+        transcode_form = QFormLayout(transcode_group)
+
+        current = get_transcode_settings()
+
+        self.crf_spin = QSpinBox()
+        self.crf_spin.setRange(0, 51)  # libx264's full valid CRF range
+        self.crf_spin.setValue(current.crf)
+        self.crf_spin.setToolTip(
+            "Lower = higher quality, larger file. 18-28 is the usual "
+            "sane range; libx264's own default is 23."
+        )
+        self.crf_spin.valueChanged.connect(self._on_transcode_setting_changed)
+        transcode_form.addRow("Video quality (CRF):", self.crf_spin)
+
+        self.audio_bitrate_edit = QLineEdit(current.audio_bitrate)
+        self.audio_bitrate_edit.setPlaceholderText("128k")
+        self.audio_bitrate_edit.setToolTip('ffmpeg -b:a value, e.g. "128k" or "192k".')
+        self.audio_bitrate_edit.editingFinished.connect(self._on_transcode_setting_changed)
+        transcode_form.addRow("Audio bitrate:", self.audio_bitrate_edit)
+
+        self.threads_spin = QSpinBox()
+        self.threads_spin.setRange(0, 128)
+        self.threads_spin.setSpecialValueText("Auto (let ffmpeg decide)")
+        self.threads_spin.setValue(current.threads)
+        self.threads_spin.valueChanged.connect(self._on_transcode_setting_changed)
+        transcode_form.addRow("Threads:", self.threads_spin)
+
+        layout.addWidget(transcode_group)
 
         button_row = QHBoxLayout()
         button_row.addStretch()
@@ -144,3 +180,15 @@ class ToolSettingsDialog(QDialog):
     def _refresh_all_status(self) -> None:
         for exe_name, _ in EXECUTABLE_ROWS:
             self._refresh_status(exe_name)
+
+    def _on_transcode_setting_changed(self, *_args) -> None:
+        """Saved immediately per-field, same as the executable overrides
+        above -- no separate Done-triggered save step. Audio bitrate is
+        stored as-typed with no validation (an empty/garbage value falls
+        back to the module default the next time it's read, rather than
+        being rejected here)."""
+        set_transcode_settings(TranscodeSettings(
+            crf=self.crf_spin.value(),
+            audio_bitrate=self.audio_bitrate_edit.text().strip(),
+            threads=self.threads_spin.value(),
+        ))
