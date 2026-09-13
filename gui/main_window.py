@@ -322,10 +322,8 @@ class MainWindow(QMainWindow):
                 # Explorer's F2 exactly. This project already had the
                 # underlying action (see the context menu's "Rename
                 # File..." below) but never exposed it as a keyboard
-                # shortcut. No pattern-based batch rename tool to
-                # distinguish it from yet -- "rename_by_pattern"
-                # (Operations menu, Ctrl+Shift+R) is the closest
-                # equivalent, on a different key already.
+                # shortcut. Distinct from "rename_by_pattern" (Operations
+                # menu, Ctrl+E) below -- that's the batch pattern tool.
                 MenuAction(
                     "rename_file", "&Rename File...", self.rename_selected_file,
                     shortcut=shortcuts.RENAME_SINGLE_FILE,
@@ -356,7 +354,8 @@ class MainWindow(QMainWindow):
                            self._on_import_tvdb, shortcut="Ctrl+Shift+T"),
                 Separator(),
                 MenuAction("import_from_filename", "Import Metadata from &Filename...",
-                           self._on_import_metadata_from_filename, shortcut="Ctrl+Shift+F"),
+                           self._on_import_metadata_from_filename,
+                           shortcut=shortcuts.PARSE_FILENAME_TO_METADATA),
                 MenuAction("import_subtitles", "Import &Subtitles from OpenSubtitles...",
                            self._on_import_subtitles, shortcut="Ctrl+Shift+O"),
             ],
@@ -365,7 +364,7 @@ class MainWindow(QMainWindow):
                 MenuAction("convert_to_mp4", "Con&vert Selected to MP4 (H.264)...",
                            self._on_convert_to_mp4, shortcut="Ctrl+Shift+C"),
                 MenuAction("rename_by_pattern", "Rena&me/Export by Pattern...",
-                           self._on_rename_by_pattern, shortcut="Ctrl+Shift+R"),
+                           self._on_rename_by_pattern, shortcut=shortcuts.RENAME_EXPORT_BY_PATTERN),
                 Separator(),
                 MenuAction("case_conversion", "Case &Conversion...", self._on_case_conversion),
                 MenuAction(

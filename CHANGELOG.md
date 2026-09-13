@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-09-13#03 — Ctrl+E/Ctrl+I export/import shortcut pairing
+
+Rename/Export by Pattern... moves from Ctrl+Shift+R (its own
+pre-existing key, and briefly this morning's family-wide standard) to
+**Ctrl+E**, and Import Metadata from Filename... moves from
+Ctrl+Shift+F to **Ctrl+I** — a deliberate export/import mnemonic pair
+for the two directions of the filename<->metadata relationship,
+requested explicitly and now applied here too (this project's
+filename-import action was left on its own key this morning
+specifically because moving it wasn't yet authorized — it is now).
+Applied family-wide via `redactor_common.gui.standard_shortcuts`.
+
 ## 2026-09-13#02 — hotkey audit: real F2, F1, Ctrl+H
 
 Full audit of keyboard shortcuts across the whole Redactor family
