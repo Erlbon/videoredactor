@@ -41,6 +41,7 @@ from core.format_helpers import format_duration, format_file_size
 from core.config import get_setting, set_setting
 from redactor_common.gui.action_factory import make_action
 from redactor_common.gui.menu_builder import MenuAction, Separator, build_menu_bar
+from redactor_common.gui.progress import run_with_progress
 from redactor_common.gui.colors import DIRTY_COLOR, ERROR_COLOR, HIGHLIGHT_TEXT_COLOR, TABLE_SELECTION_STYLESHEET
 from redactor_common.gui.context_menu import show_table_context_menu
 from redactor_common.gui.quick_series_number import prompt_and_generate_series_numbers
@@ -1208,43 +1209,33 @@ class MainWindow(QMainWindow):
         reasoning as the epub tool's per-book save-error tracking rather
         than an all-or-nothing batch.
 
-        Shows the same progress dialog pattern _load_folder() already
-        uses for Open Folder -- each vf.save() now does a write PLUS an
-        immediate verify-read-back (see core/video_file.py), roughly
-        doubling the I/O cost per file since that safety net was added,
-        which made a multi-file save look exactly as "frozen" as a
-        heavy folder load used to before that dialog existed.
+        Shows redactor_common's shared run_with_progress helper -- each
+        vf.save() now does a write PLUS an immediate verify-read-back
+        (see core/video_file.py), roughly doubling the I/O cost per
+        file since that safety net was added, which made a multi-file
+        save look exactly as "frozen" as a heavy folder load used to
+        before a dialog existed here. Threshold is now a plain item
+        count (3+), matching mp3/cbz's own save dialogs, rather than
+        this project's previous bespoke setMinimumDuration(400) -- one
+        less "arrived at independently" divergence between the family's
+        save flows.
         """
         succeeded = 0
         failed: list[VideoFile] = []
 
-        progress = None
-        cancelled = False
-        if files:
-            # Same setMinimumDuration threshold as _load_folder -- only
-            # actually appears if saving takes long enough to matter,
-            # so a quick single-file save shows nothing extra.
-            progress = QProgressDialog("Saving files...", "Cancel", 0, len(files), self)
-            progress.setWindowModality(Qt.WindowModality.WindowModal)
-            progress.setWindowTitle("Saving")
-            progress.setMinimumDuration(400)
-
-        for i, vf in enumerate(files):
-            if progress is not None:
-                if progress.wasCanceled():
-                    cancelled = True
-                    break
-                progress.setLabelText(f"Saving {vf.path.name}...")
-                progress.setValue(i)
-                QApplication.processEvents()
+        def _step(vf: VideoFile, _index: int) -> None:
+            nonlocal succeeded
             vf.save()
             if vf.save_error:
                 failed.append(vf)
             else:
                 succeeded += 1
 
-        if progress is not None:
-            progress.setValue(len(files))
+        cancelled = not run_with_progress(
+            self, files, _step, "Saving files...",
+            threshold=3,
+            label_for=lambda vf: f"Saving {vf.path.name}...",
+        )
 
         self._refresh_table_rows()
 

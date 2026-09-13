@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-09-13#04 — Save's progress dialog now shared, not hand-rolled
+
+`_save_files()`'s own copy of the "progress dialog with a per-file
+label" pattern is retired -- now built on
+`redactor_common.gui.run_with_progress`'s new `label_for` param (added
+specifically so this and epub's near-identical hand-rolled copy could
+both go away). One small, deliberate behavior change: the dialog now
+appears once 3+ files are being saved (a plain item-count threshold,
+matching mp3/cbz's own save dialogs), not this project's previous
+`setMinimumDuration(400)` (duration-adaptive, only after Qt guesses
+the whole run will take a while) -- one less "arrived at
+independently" divergence in the family's save flows. Bumped
+`redactor_common` to `2026-09-13-03`.
+
 ## 2026-09-13#03 — Ctrl+E/Ctrl+I export/import shortcut pairing
 
 Rename/Export by Pattern... moves from Ctrl+Shift+R (its own
