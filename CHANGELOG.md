@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-09-13#02 — hotkey audit: real F2, F1, Ctrl+H
+
+Full audit of keyboard shortcuts across the whole Redactor family
+against Qt's own Windows-standard bindings (verified via
+`QKeySequence.keyBindings()`, not assumed). This project doesn't have
+Undo yet (so no Redo here either — separate, bigger gap, out of scope
+for this pass), but picks up the rest:
+
+- **F2 now directly renames the one selected file** (Explorer
+  convention) — the underlying action already existed (the table's
+  right-click "Rename File..."), it just had no keyboard shortcut.
+- **Search/Replace... gains Ctrl+H** (`QKeySequence::Replace`).
+- **About gains F1** (`QKeySequence::HelpContents`).
+- **Exit's shortcut hint removed** — it was bound to
+  `QKeySequence.StandardKey.Quit`, which resolves to zero actual key
+  bindings on Windows (confirmed via `QKeySequence.keyBindings()`), so
+  it was never doing anything anyway. Alt+F4 already closes this app
+  at the OS level, verified with a real launch-and-close test.
+
+Two known cross-app inconsistencies were deliberately left as-is
+rather than resolved unilaterally (see the code comments at each):
+Open Folder stays on Ctrl+O rather than the family's Ctrl+Shift+O
+"load folder" convention (would collide with Import Subtitles, already
+on Ctrl+Shift+O), and Save All stays on Ctrl+Shift+S rather than
+cbzredactor's Ctrl+Shift+A (Ctrl+Shift+S is `QKeySequence::SaveAs`
+elsewhere in the family).
+
+New shared `redactor_common.gui.standard_shortcuts` module is now the
+source of truth for the shortcuts above, imported instead of literal
+key strings.
+
 ## 2026-09-13#01 — Convert Selected to MP4 (H.264)
 
 Operations > Convert Selected to MP4 (H.264)... -- a real re-encode

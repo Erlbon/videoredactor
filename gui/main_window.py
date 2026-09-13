@@ -50,6 +50,7 @@ from redactor_common.gui.zoom_toolbar import TableZoomController
 from redactor_common.gui.about_dialog import AboutDialog, ChangelogDialog, CreditsDialog
 from redactor_common.gui.rename_single_file import rename_single_file as prompt_rename_single_file
 from redactor_common.gui.sortable_table import NumericTableWidgetItem, suspend_sorting
+from redactor_common.gui import standard_shortcuts as shortcuts
 from redactor_common.core.folder_refresh import find_new_files_in_loaded_folders
 from redactor_common.core.version import REDACTOR_COMMON_REPO_URL, REDACTOR_COMMON_VERSION
 from gui.tag_panel import TagPanel, FIELD_LABELS
@@ -295,11 +296,40 @@ class MainWindow(QMainWindow):
         """
         specs = {
             "File": [
+                # NOTE: kept on Ctrl+O (via StandardKey.Open) rather than
+                # the family's usual Ctrl+Shift+O "load folder" convention
+                # -- this project's only load action IS a folder, unlike
+                # cbz/epub/mp3 which distinguish "load files" (Ctrl+O)
+                # from "load folder" (Ctrl+Shift+O). Reassigning this
+                # would collide with import_subtitles below, already on
+                # Ctrl+Shift+O -- left as a known cross-app inconsistency
+                # rather than resolved unilaterally; see the 2026-09-13
+                # hotkey audit.
                 MenuAction("open_folder", "&Open Folder...", self._on_open_folder,
                            shortcut=QKeySequence.StandardKey.Open),
                 Separator(),
                 MenuAction("save_selected", "&Save Selected", self._on_save_selected, shortcut="Ctrl+S"),
+                # NOTE: Ctrl+Shift+S is QKeySequence::SaveAs / cbzredactor's
+                # own "Save As..." key -- this project has no distinct
+                # Save-As action, but reusing that key for "Save All" here
+                # (rather than shortcuts.SAVE_ALL / Ctrl+Shift+A, which
+                # cbzredactor's actual Save All uses) is a second known
+                # cross-app inconsistency, also left unresolved rather
+                # than decided unilaterally; see the 2026-09-13 audit.
                 MenuAction("save_all", "Save &All Changed", self._on_save_all, shortcut="Ctrl+Shift+S"),
+                Separator(),
+                # Quick, direct rename of the one selected file -- matches
+                # Explorer's F2 exactly. This project already had the
+                # underlying action (see the context menu's "Rename
+                # File..." below) but never exposed it as a keyboard
+                # shortcut. No pattern-based batch rename tool to
+                # distinguish it from yet -- "rename_by_pattern"
+                # (Operations menu, Ctrl+Shift+R) is the closest
+                # equivalent, on a different key already.
+                MenuAction(
+                    "rename_file", "&Rename File...", self.rename_selected_file,
+                    shortcut=shortcuts.RENAME_SINGLE_FILE,
+                ),
                 Separator(),
                 # F5 only, not the family's usual F5/Ctrl+R pair -- Ctrl+R
                 # is already "Remux Selected to MP4..." in this project's
@@ -307,7 +337,15 @@ class MainWindow(QMainWindow):
                 # adding it here too would make both ambiguous.
                 MenuAction("refresh_list", "Re&fresh List", self._refresh_list, shortcut="F5"),
                 Separator(),
-                MenuAction("exit", "E&xit", self.close, shortcut=QKeySequence.StandardKey.Quit),
+                # No explicit shortcut -- Alt+F4 already closes this (or
+                # any) plain QMainWindow at the OS level, verified
+                # directly (launch, send Alt+F4, confirm the process
+                # exits), independent of anything bound here.
+                # QKeySequence.StandardKey.Quit (the previous binding)
+                # resolves to ZERO actual key bindings on Windows --
+                # confirmed via QKeySequence.keyBindings() -- so it was
+                # never doing anything anyway.
+                MenuAction("exit", "E&xit", self.close),
             ],
             "Import": [
                 MenuAction("import_tmdb_movie", "Import Metadata from TMDB (&Movie)...",
@@ -330,7 +368,10 @@ class MainWindow(QMainWindow):
                            self._on_rename_by_pattern, shortcut="Ctrl+Shift+R"),
                 Separator(),
                 MenuAction("case_conversion", "Case &Conversion...", self._on_case_conversion),
-                MenuAction("search_replace", "Search/&Replace...", self._on_search_replace),
+                MenuAction(
+                    "search_replace", "Search/&Replace...", self._on_search_replace,
+                    shortcut=shortcuts.SEARCH_REPLACE,
+                ),
                 MenuAction("auto_numbering", "Auto-&Numbering...", self._on_auto_numbering),
             ],
             "Settings": [
@@ -342,7 +383,7 @@ class MainWindow(QMainWindow):
                 MenuAction("add_remove_genres", "Add/Remove &Genres...", self._on_open_genres),
             ],
             "Help": [
-                MenuAction("about", f"&About {APP_NAME}", self._on_show_about),
+                MenuAction("about", f"&About {APP_NAME}", self._on_show_about, shortcut=shortcuts.HELP),
                 MenuAction("changelog", "View &Changelog", self._on_show_changelog),
                 MenuAction("credits", "&Credits", self._on_show_credits),
             ],
@@ -354,6 +395,7 @@ class MainWindow(QMainWindow):
         self.open_folder_action = actions["open_folder"]
         self.save_selected_action = actions["save_selected"]
         self.save_all_action = actions["save_all"]
+        self.rename_file_action = actions["rename_file"]
 
     def _build_toolbar(self) -> None:
         """Toolbar beneath the menu bar for the most-used actions (Open
@@ -991,10 +1033,13 @@ class MainWindow(QMainWindow):
             # quick, direct fix for one typo at a time -- also
             # reachable by double-clicking the Filename cell (see
             # _on_cell_double_clicked()).
+            # Reuses the actual File-menu QAction (F2) rather than
+            # building a fresh one -- same object, so this shows the
+            # real shortcut hint and can never drift out of sync with
+            # it. Only offered for a single file -- renaming several to
+            # the same name doesn't make sense.
             if len(files) == 1 and not files[0].load_error:
-                items.append(MenuAction(
-                    "rename_file", "Rename File...", lambda: self.rename_single_file(files[0])
-                ))
+                items.append(self.rename_file_action)
             items.append(MenuAction(
                 "number_episodes", "Number Episodes...", lambda: self._quick_number_episodes(files)
             ))
@@ -1029,6 +1074,16 @@ class MainWindow(QMainWindow):
         name)."""
         if prompt_rename_single_file(self, str(vf.path), lambda p: setattr(vf, "path", Path(p))):
             self._refresh_table_rows()
+
+    def rename_selected_file(self) -> None:
+        """F2 entry point (Explorer convention: select one item, press
+        F2, rename it directly) -- same guard the right-click "Rename
+        File..." item uses (exactly one file selected, no load error),
+        since F2 and that menu item are the same action reached two
+        ways."""
+        files = self._selected_video_files()
+        if len(files) == 1 and not files[0].load_error:
+            self.rename_single_file(files[0])
 
     # --- TagPanel collapse/restore ----------------------------------------
     # New: this project never had a way to minimize the panel before --
