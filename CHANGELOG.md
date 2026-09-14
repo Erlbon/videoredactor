@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-09-14#01 — Import & Convert to MP4: the first way in for other video formats
+
+New Import menu action, **Import & Convert to MP4...**, mirroring
+mp3redactor's "Import & Convert to MP3...": pick one or more AVI,
+MOV, WMV, FLV, WebM, MPG/MPEG, M2TS/MTS, TS, 3GP, OGV, or VOB files
+and they're re-encoded to H.264/AAC MP4 (via the same ffmpeg backend
+and Tool Settings CRF/bitrate/thread defaults as Operations > Convert
+Selected to MP4) and added to the table alongside whatever's already
+loaded. Until now this project's only way to bring a file in at all
+was Open Folder, which only ever picks up `.mp4`/`.m4v`/`.mkv`
+(`core/video_file.py`'s `SUPPORTED_EXTENSIONS`) — every other format
+was simply invisible to it, even though `transcode_to_mp4()` itself
+never cared what container it was fed. No core changes were needed
+beyond a new `IMPORTABLE_EXTENSIONS` list in `core/ffmpeg_backend.py`
+(mirroring `core/mp3_converter.py`'s own) — the conversion mechanism
+was already format-agnostic, only the GUI's file picker was gating
+what could reach it. Covered by a new real-ffmpeg test
+(`test_transcode_to_mp4_from_foreign_format_avi`) that actually feeds
+an AVI through `transcode_to_mp4()`, not just another MP4/MKV.
+
 ## 2026-09-13#04 — Save's progress dialog now shared, not hand-rolled
 
 `_save_files()`'s own copy of the "progress dialog with a per-file

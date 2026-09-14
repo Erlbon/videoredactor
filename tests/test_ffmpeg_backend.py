@@ -17,6 +17,7 @@ from pathlib import Path
 
 from core.ffmpeg_backend import (
     get_duration_seconds, extract_thumbnail, remux_to_mp4, transcode_to_mp4,
+    IMPORTABLE_EXTENSIONS,
 )
 
 
@@ -101,6 +102,50 @@ class TestFfmpegBackend(unittest.TestCase):
         duration = get_duration_seconds(out_path)
         self.assertIsNotNone(duration)
         self.assertAlmostEqual(duration, 3.0, delta=0.3)
+
+    def test_transcode_to_mp4_from_foreign_format_avi(self):
+        """Backs Import & Convert to MP4 (gui/main_window.py's
+        _on_import_and_convert) -- transcode_to_mp4() needed no
+        format-specific code to handle a non-native container; ffmpeg's
+        own demuxer already handles the input side regardless of
+        extension. Uses a real AVI here (not just another .mp4) so this
+        actually exercises that claim, rather than re-covering
+        test_transcode_to_mp4_succeeds_and_preserves_playability against
+        the same container it already assumes.
+        """
+        avi_path = os.path.join(self.tmpdir, "sample.avi")
+        subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-f", "lavfi", "-i", "testsrc=duration=2:size=320x240:rate=10",
+                "-f", "lavfi", "-i", "sine=frequency=1000:duration=2",
+                "-c:v", "mjpeg", "-c:a", "pcm_s16le", "-shortest", avi_path,
+            ],
+            capture_output=True, check=True,
+        )
+        out_path = os.path.join(self.tmpdir, "from_avi.mp4")
+        ok, stderr = transcode_to_mp4(avi_path, out_path, crf=30, audio_bitrate="96k")
+        self.assertTrue(ok, msg=stderr)
+        duration = get_duration_seconds(out_path)
+        self.assertIsNotNone(duration)
+        self.assertAlmostEqual(duration, 2.0, delta=0.3)
+
+
+class TestImportableExtensions(unittest.TestCase):
+    """core/ffmpeg_backend.py's IMPORTABLE_EXTENSIONS -- the file-picker
+    filter for Import & Convert to MP4. No ffmpeg call involved; just
+    the constant's own contents."""
+
+    def test_contains_common_foreign_formats(self):
+        for ext in (".avi", ".mov", ".wmv", ".webm", ".mpg"):
+            self.assertIn(ext, IMPORTABLE_EXTENSIONS)
+
+    def test_does_not_contain_natively_supported_formats(self):
+        # These already load directly (core.video_file.SUPPORTED_EXTENSIONS)
+        # -- listing them here too would be misleading, as if there were
+        # something to "import" rather than just Open Folder.
+        for ext in (".mp4", ".m4v", ".mkv"):
+            self.assertNotIn(ext, IMPORTABLE_EXTENSIONS)
 
 
 class TestTranscodeToMp4WithFakeProcess(unittest.TestCase):

@@ -18,6 +18,20 @@ from typing import Optional
 
 from core.external_tools import get_executable_path
 
+# Extensions offered in the Import menu's "Import & Convert to MP4..."
+# file picker -- anything ffmpeg's own demuxers commonly handle for a
+# "bring this into my video library" workflow. Not exhaustive (ffmpeg
+# reads far more than this), just the formats someone converting video
+# *to* MP4 would realistically have lying around: old camcorder/phone
+# footage (AVI, 3GP, MTS/M2TS), QuickTime/iPhone exports (MOV), old
+# Windows tools (WMV), web downloads (FLV, WebM, OGV), and DVD rips
+# (MPG/MPEG, VOB). Mirrors mp3redactor's IMPORTABLE_EXTENSIONS
+# (core/mp3_converter.py) -- same idea, same shape, different domain.
+IMPORTABLE_EXTENSIONS: frozenset[str] = frozenset({
+    ".avi", ".mov", ".wmv", ".flv", ".webm", ".mpg", ".mpeg",
+    ".m2ts", ".mts", ".ts", ".3gp", ".ogv", ".vob",
+})
+
 
 def _no_console_flags() -> int:
     """CREATE_NO_WINDOW on Windows, matching the epub tool's fix (v35)

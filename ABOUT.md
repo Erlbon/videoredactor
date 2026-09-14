@@ -25,6 +25,10 @@ into files one at a time.
   clearly flagged as sync-not-guaranteed.
 - **Remux to MP4** for MKV files (fast, lossless container swap, not a
   re-encode), with control over what happens to the original.
+- **Convert to MP4 (H.264)** for a real re-encode when a container swap
+  alone won't do, and **Import & Convert to MP4** to bring in AVI, MOV,
+  WMV, FLV, WebM, MPG, and other video formats this tool doesn't
+  otherwise load — both via ffmpeg.
 - **Poster art** saved as a sidecar image next to the video, the
   convention Plex/Jellyfin/Kodi already expect.
 - **Thumbnail preview** — pulls a real frame from the video so you can

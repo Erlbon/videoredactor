@@ -33,7 +33,7 @@ from core.tmdb_client import (
 )
 from core.tvdb_client import get_series_details, get_episode_details, download_image, TVDBError
 from core.release_name_parser import parse_release_name
-from core.ffmpeg_backend import remux_to_mp4, transcode_to_mp4
+from core.ffmpeg_backend import IMPORTABLE_EXTENSIONS, remux_to_mp4, transcode_to_mp4
 from core.transcode_settings import get_transcode_settings
 from core.opensubtitles_client import download_subtitle_text, OpenSubtitlesError
 from core.table_settings import merge_column_order, is_column_visible, sanitize_hidden_fields
@@ -359,6 +359,17 @@ class MainWindow(QMainWindow):
                            shortcut=shortcuts.PARSE_FILENAME_TO_METADATA),
                 MenuAction("import_subtitles", "Import &Subtitles from OpenSubtitles...",
                            self._on_import_subtitles, shortcut="Ctrl+Shift+O"),
+                Separator(),
+                # Brings a different video FORMAT in, converted to join
+                # this app's MP4/M4V/MKV-only library -- same shape as
+                # mp3redactor's "Import & Convert to MP3..." (its
+                # core.mp3_converter), just video instead of audio.
+                # Unlike Remux/Convert to MP4 in Operations (which only
+                # ever act on files already loaded), this is the one
+                # place a non-MP4/M4V/MKV file can enter this app at
+                # all.
+                MenuAction("import_convert", "Import && &Convert to MP4...",
+                           self._on_import_and_convert),
             ],
             "Operations": [
                 MenuAction("remux", "&Remux Selected to MP4...", self._on_remux_selected, shortcut="Ctrl+R"),
@@ -1826,6 +1837,155 @@ class MainWindow(QMainWindow):
         if failed:
             details = "\n".join(f"{path.name}: {err.strip() or 'ffmpeg conversion failed'}" for path, err in failed)
             QMessageBox.warning(self, "Some files failed to convert", details)
+
+    # --- Import & Convert --------------------------------------------------
+
+    def _on_import_and_convert(self) -> None:
+        """Import menu > "Import & Convert to MP4..." -- brings a
+        non-MP4/M4V/MKV video file (AVI/MOV/WMV/FLV/WebM/MPG/...) into
+        the library by re-encoding it to H.264/AAC MP4 via ffmpeg
+        (core.ffmpeg_backend.transcode_to_mp4), same directory, same
+        base filename. The only place a foreign format can enter this
+        app at all -- Open Folder only ever picks up .mp4/.m4v/.mkv
+        (core.video_file.SUPPORTED_EXTENSIONS).
+
+        Deliberately ADDITIVE to self.video_files, unlike Open Folder's
+        replace-wholesale semantics -- same reasoning as mp3redactor's
+        own Import & Convert (see that project's gui/main_window.py).
+        Reuses the exact same _TranscodeWorker + Tool Settings
+        (CRF/audio bitrate/threads) as Operations > Convert Selected to
+        MP4 (H.264) -- transcode_to_mp4() is already format-agnostic on
+        its input (whatever `ffmpeg -i` can read), so nothing in
+        core/ffmpeg_backend.py needed to change to support this, only
+        what the GUI lets a user pick.
+        """
+        extensions_filter = " ".join(f"*{ext}" for ext in sorted(IMPORTABLE_EXTENSIONS))
+        last_folder = get_setting("general", "last_folder", "")
+        paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Import & Convert to MP4",
+            last_folder,
+            f"Video Files ({extensions_filter})",
+        )
+        if not paths:
+            return
+
+        jobs: list[tuple[Path, Path]] = []
+        skipped_existing: list[Path] = []
+        for raw_path in paths:
+            src = Path(raw_path)
+            dest = src.with_suffix(".mp4")
+            if dest.exists():
+                # Refuse to silently clobber an existing file of that
+                # name -- same safety-first instinct as Convert Selected
+                # to MP4's own existing-output check below.
+                skipped_existing.append(dest)
+                continue
+            jobs.append((src, dest))
+
+        if skipped_existing:
+            names = "\n".join(p.name for p in skipped_existing)
+            proceed = QMessageBox.question(
+                self,
+                "Some Files Already Exist",
+                f"{len(skipped_existing)} file(s) already have an .mp4 of the same name in "
+                f"that folder and will be skipped (not overwritten):\n\n{names}\n\n"
+                f"Convert the remaining {len(jobs)} file(s)?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            )
+            if proceed != QMessageBox.StandardButton.Yes:
+                return
+
+        if not jobs:
+            return
+
+        settings = get_transcode_settings()
+        thread_note = f", {settings.threads} threads" if settings.threads else ""
+        confirm = QMessageBox.question(
+            self, "Import & Convert to MP4",
+            f"Convert {len(jobs)} file(s) to H.264/AAC MP4 "
+            f"(CRF {settings.crf}, audio {settings.audio_bitrate}{thread_note})?\n\n"
+            "Originals are never deleted automatically. Adjust these "
+            "defaults via Settings > Locate External Tools.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+
+        progress = QProgressDialog("Starting...", "Cancel", 0, len(jobs), self)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setWindowTitle("Importing & Converting")
+        progress.setMinimumDuration(0)
+
+        worker = _TranscodeWorker(jobs, settings, parent=self)
+        results: dict[int, tuple[bool, str]] = {}
+
+        def on_started(i: int, name: str) -> None:
+            progress.setLabelText(f"Converting {name}... ({i + 1}/{len(jobs)})")
+            progress.setValue(i)
+
+        def on_finished(i: int, ok: bool, message: str) -> None:
+            results[i] = (ok, message)
+
+        def on_cancel() -> None:
+            worker.cancel_event.set()
+            progress.setLabelText("Cancelling (finishing current file)...")
+
+        worker.file_started.connect(on_started)
+        worker.file_finished.connect(on_finished)
+        progress.canceled.connect(on_cancel)
+
+        wait_loop = QEventLoop()
+        worker.finished.connect(wait_loop.quit)
+        worker.start()
+        wait_loop.exec()
+
+        progress.setValue(len(jobs))
+        progress.close()
+
+        set_setting("general", "last_folder", str(Path(paths[0]).parent))
+
+        new_files: list[VideoFile] = []
+        succeeded = 0
+        failed: list[tuple[Path, str]] = []
+        cancelled_count = 0
+        for i, (input_path, output_path) in enumerate(jobs):
+            result = results.get(i)
+            if result is None:
+                cancelled_count += 1  # never started -- batch was cancelled first
+                continue
+            ok, message = result
+            if ok:
+                succeeded += 1
+                new_vf = VideoFile(path=output_path)
+                new_vf.load()
+                new_files.append(new_vf)
+            elif message == "Cancelled":
+                cancelled_count += 1
+            else:
+                failed.append((output_path, message))
+
+        self.video_files.extend(new_files)
+        self._refresh_table_rows()
+
+        parts = [f"Imported and converted {succeeded} file(s)"]
+        if failed:
+            parts.append(f"{len(failed)} failed")
+        if cancelled_count:
+            parts.append(f"{cancelled_count} cancelled")
+        if skipped_existing:
+            parts.append(f"{len(skipped_existing)} skipped (output already exists)")
+        self.status_bar.showMessage(", ".join(parts))
+
+        if failed:
+            details = "\n".join(
+                f"{path.name}: {err.strip() or 'ffmpeg conversion failed'}" for path, err in failed
+            )
+            QMessageBox.warning(self, "Some files failed to convert", details)
+        elif succeeded:
+            QMessageBox.information(
+                self, "Import Complete", f"Converted and loaded {succeeded} file(s)."
+            )
 
     # --- Subtitles -------------------------------------------------------
 
