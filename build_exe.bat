@@ -99,4 +99,3 @@ echo  must be installed separately and on PATH for the app to actually
 echo  work -- the app will warn you on first launch if either is
 echo  missing. See BUILD.md for details.
 echo ================================================================
-pause
