@@ -27,24 +27,26 @@ bundled copy actually gets used, not just detected.
 from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
-import sys
 
 from core.config import get_setting, set_setting
-from redactor_common.core.tool_locator import find_tool
+from core.app_paths import tools_dir
+from redactor_common.core.tool_locator import find_tool, windows_program_dirs
 
 TOOLS_SECTION = "tools"
 
 
 def _bundled_tools_dir() -> Path:
-    """Directory a bundled tools/ folder would live in next to a frozen
-    build -- same frozen-vs-dev-mode resolution core/config.py's
-    _app_dir() already uses, so a bundled ffmpeg.exe/mkvpropedit.exe
-    etc. would sit at that directory's tools/ subfolder, matching the
-    mp3 project's equivalent layout.
-    """
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent / "tools"
-    return Path(__file__).resolve().parent.parent / "tools"
+    """Where a bundled tools/ folder would live next to a frozen build
+    (see core/app_paths.py), matching the mp3 project's layout."""
+    return tools_dir()
+
+
+def _install_dirs() -> list[Path]:
+    """Well-known install folders, checked after PATH: MKVToolNix's
+    Windows installer does NOT add itself to PATH by default, so a
+    normal install used to be reported as missing. Empty on other
+    platforms. Tests patch this to isolate from the real machine."""
+    return windows_program_dirs("MKVToolNix", "ffmpeg/bin")
 
 
 # Every individual executable this app ever shells out to, across both
@@ -115,7 +117,7 @@ def get_executable_path(exe_name: str) -> str:
     override = get_tool_override(exe_name)
     if override:
         return override
-    found = find_tool(exe_name, tools_dir=_bundled_tools_dir())
+    found = find_tool(exe_name, tools_dir=_bundled_tools_dir(), install_dirs=_install_dirs())
     return str(found) if found else exe_name
 
 
@@ -127,7 +129,10 @@ def is_executable_available(exe_name: str) -> bool:
     or PATH.
     """
     override = get_tool_override(exe_name)
-    return find_tool(exe_name, tools_dir=_bundled_tools_dir(), override=override or None) is not None
+    return find_tool(
+        exe_name, tools_dir=_bundled_tools_dir(), override=override or None,
+        install_dirs=_install_dirs(),
+    ) is not None
 
 
 def is_tool_available(tool: ToolInfo) -> bool:

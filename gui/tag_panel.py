@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
     QTextEdit, QSpinBox, QComboBox, QLabel, QGroupBox, QSplitter,
 )
 from PyQt6.QtCore import pyqtSignal, Qt
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtGui import QImage, QPixmap
 
 from core.video_metadata import ContentType, fields_for_content_type, UNIVERSAL_FIELDS
 from core.controlled_vocab import (
@@ -169,6 +169,23 @@ class TagPanel(QWidget):
 
         self.preview_label.setText("")
         self.preview_label.set_original_pixmap(pixmap)
+
+    def set_preview_loading(self) -> None:
+        """Placeholder while a thumbnail is generated in the background
+        (see MainWindow._update_preview)."""
+        self.preview_label.set_original_pixmap(None)
+        self.preview_label.setText("Loading preview…")
+
+    def set_preview_qimage(self, image: Optional[QImage]) -> None:
+        """Shows an already-decoded thumbnail (decoded off the main
+        thread by redactor_common's AsyncPreviewLoader); a null or None
+        image shows "Preview unavailable"."""
+        if image is None or image.isNull():
+            self.preview_label.set_original_pixmap(None)
+            self.preview_label.setText("Preview unavailable")
+            return
+        self.preview_label.setText("")
+        self.preview_label.set_original_pixmap(QPixmap.fromImage(image))
 
     def set_collapsed_indicator(self, collapsed: bool) -> None:
         """Updates the panel's own toggle button to reflect whether it's

@@ -1,5 +1,46 @@
 # Changelog
 
+## 2026-09-23#01 — Shared-code consolidation: tool fixes, undo, async thumbnails
+
+Moves onto redactor_common 2026-09-23-01 (was pinned nine days behind at
+2026-09-13-03), fixing several real problems along the way:
+
+- **ffmpeg/ffprobe/MKVToolNix calls fixed.** Every call now goes through
+  the shared `run_tool()`: `stdin=DEVNULL` (ffmpeg can hang forever on an
+  inherited stdin), a timeout (a stuck probe or thumbnail no longer
+  freezes the app for good), and UTF-8 decoding of tool output -- an MKV
+  title like "Amélie" used to come back from `mkvmerge -J` as "AmÃ©lie"
+  (Windows' cp1252 default) and a later Save wrote the mangled text back.
+- **MKVToolNix is found in its default install folder.** Its installer
+  doesn't add itself to PATH, so a normal install was reported missing.
+- **Undo/Redo (Ctrl+Z / Ctrl+Y)** for every in-memory edit: bulk edit,
+  TMDB/TheTVDB import, filename import, case conversion, search/replace,
+  auto-numbering, quick episode numbering. This app had no undo at all.
+- **Thumbnail preview no longer freezes selection.** The first preview of
+  a file ran ffmpeg on the GUI thread; it now runs in the background
+  (debounced, latest selection only).
+- **Crash log** (`videoredactor_crash.log` next to the app) with an
+  "Unexpected Error" dialog; the app had none. Taskbar icon fixed when
+  run from source.
+- **Shared dialogs** for Rename/Export by Pattern (adds export-to-folder
+  and optional `[...]` groups; name collisions get " (2)" instead of
+  refusing the batch), Import Metadata from Filename (Season/Episode #
+  now digit-only, so "S01E03" parses), Case Conversion, Search/Replace
+  (adds regex and filename renames), Auto-Numbering, and Add/Remove
+  Columns. Title case keeps this app's "Star Wars: A New Hope" rule --
+  merged into the shared implementation for every app.
+- **Progress:** Refresh List (F5) now shows progress (it reloaded every
+  file silently); Open Folder and both transcode batches use the shared,
+  fixed-width dialog instead of hand-rolled ones that jumped in size.
+- **Error messages bounded:** a failed batch lists a capped summary
+  instead of a message box taller than the screen.
+- **TMDB/TheTVDB/OpenSubtitles** requests use the shared lookup client:
+  a read timeout or a malformed response now shows a clear error
+  instead of an unhandled exception.
+- Removed the dead `gui/markdown_viewer_dialog.py` and the local copies
+  the shared modules replace (`core/text_transforms.py`, five dialogs,
+  `gui/column_visibility_dialog.py`, `gui/placeholder_reference.py`).
+
 ## 2026-09-14#01 — Import & Convert to MP4: the first way in for other video formats
 
 New Import menu action, **Import & Convert to MP4...**, mirroring

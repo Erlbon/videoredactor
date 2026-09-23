@@ -19,25 +19,11 @@ wrote last.
 
 from __future__ import annotations
 import configparser
-import os
-import sys
 from pathlib import Path
 
+from core.app_paths import settings_ini_path
 
-def _app_dir() -> Path:
-    """Directory the ini file lives next to.
-
-    When frozen (e.g. via PyInstaller), sys.executable is the .exe
-    itself, so its parent is the right place -- same as the epub tool's
-    "ini next to the exe" approach. When running from source (this
-    sandbox, or a dev checkout), falls back to the project root.
-    """
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
-    return Path(__file__).resolve().parent.parent
-
-
-CONFIG_PATH = _app_dir() / "videoredactor_settings.ini"
+CONFIG_PATH: Path = settings_ini_path()
 
 
 def load_config() -> configparser.ConfigParser:

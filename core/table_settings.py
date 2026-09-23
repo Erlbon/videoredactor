@@ -6,8 +6,8 @@ Thin project-specific wrapper around redactor_common.core.table_settings
 with every other Redactor project) so a fix made once benefits all of
 them. This file just binds this project's PROTECTED_COLUMNS and keeps
 the original call signatures (no `protected_columns` argument) so
-every existing call site here (main_window.py, tag_panel.py,
-column_visibility_dialog.py) keeps working unchanged.
+every existing call site here (main_window.py, tag_panel.py) keeps
+working unchanged.
 """
 
 from __future__ import annotations

@@ -29,14 +29,17 @@ mysteriously.
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
-import urllib.request
-import urllib.parse
-import json
 import os
 
 from core.config import get_setting
+import urllib.error
+from redactor_common.core.lookup_client import build_request, fetch_bytes, fetch_json, make_default_fetch
 
 BASE_URL = "https://api.thetvdb.com/v4"
+USER_AGENT = "TheVideoRedactor"
+# Injectable for tests; see redactor_common.core.lookup_client.
+_fetch = make_default_fetch(USER_AGENT, timeout=10)
+_image_fetch = make_default_fetch(USER_AGENT, timeout=15)
 # TheTVDB returns full, ready-to-use image URLs directly in its API
 # responses (unlike TMDB's relative-path + separate base-URL scheme),
 # so there's no equivalent IMAGE_BASE_URL constant needed here.
@@ -143,24 +146,13 @@ def _login(force: bool = False) -> str:
         return _cached_token
 
     api_key = _require_api_key()
-    url = f"{BASE_URL}/login"
-    payload = json.dumps({"apikey": api_key}).encode("utf-8")
-    request = urllib.request.Request(
-        url, data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            data = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        if e.code == 401:
-            raise TVDBError("TheTVDB rejected the API key (401 Unauthorized).") from e
-        raise TVDBError(f"TheTVDB login failed: HTTP {e.code}") from e
-    except urllib.error.URLError as e:
-        raise TVDBError(f"Could not reach TheTVDB: {e.reason}") from e
+    request = build_request(f"{BASE_URL}/login", json_body={"apikey": api_key})
+    data = fetch_json(
+        request, _fetch, TVDBError, "TheTVDB",
+        status_messages={401: "TheTVDB rejected the API key (401 Unauthorized)."},
+    ) or {}
 
-    token = data.get("data", {}).get("token")
+    token = (data.get("data") or {}).get("token")
     if not token:
         raise TVDBError("TheTVDB login succeeded but returned no token.")
     _cached_token = token
@@ -171,25 +163,25 @@ def _get_json(path: str, params: Optional[dict] = None, _retrying: bool = False)
     """GET with the cached bearer token, retrying the login once (and
     only once, via _retrying) if the token's expired -- avoids both an
     infinite retry loop and forcing a fresh login on every single call.
+    HTTP/network/JSON failures become a TVDBError via redactor_common's
+    lookup_client (a read timeout or malformed response used to escape
+    uncaught).
     """
     token = _login()
-    query = f"?{urllib.parse.urlencode(params)}" if params else ""
-    url = f"{BASE_URL}{path}{query}"
-    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+    request = build_request(f"{BASE_URL}{path}", params, {"Authorization": f"Bearer {token}"})
     try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        if e.code == 401 and not _retrying:
-            _login(force=True)
-            return _get_json(path, params, _retrying=True)
-        if e.code == 401:
-            raise TVDBError("TheTVDB rejected the request even after re-login.") from e
-        if e.code == 429:
-            raise TVDBError("TheTVDB rate limit hit -- try again shortly.") from e
-        raise TVDBError(f"TheTVDB request failed: HTTP {e.code}") from e
-    except urllib.error.URLError as e:
-        raise TVDBError(f"Could not reach TheTVDB: {e.reason}") from e
+        return fetch_json(
+            request, _fetch, TVDBError, "TheTVDB",
+            status_messages={429: "TheTVDB rate limit hit -- try again shortly."},
+        ) or {}
+    except TVDBError as e:
+        cause = e.__cause__
+        if isinstance(cause, urllib.error.HTTPError) and cause.code == 401:
+            if not _retrying:
+                _login(force=True)
+                return _get_json(path, params, _retrying=True)
+            raise TVDBError("TheTVDB rejected the request even after re-login.") from cause
+        raise
 
 
 def search_series(query: str) -> list[SeriesCandidate]:
@@ -283,9 +275,4 @@ def download_image(image_url: str) -> bytes:
     (unlike TMDB, TheTVDB's API responses already contain the complete
     URL, so there's no base-URL-plus-size-plus-path assembly needed
     here the way tmdb_client.py's download_poster() does)."""
-    request = urllib.request.Request(image_url)
-    try:
-        with urllib.request.urlopen(request, timeout=15) as response:
-            return response.read()
-    except urllib.error.URLError as e:
-        raise TVDBError(f"Could not download image: {e.reason}") from e
+    return fetch_bytes(image_url, _image_fetch, TVDBError, what="the image")

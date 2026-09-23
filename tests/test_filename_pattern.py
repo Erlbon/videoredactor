@@ -1,13 +1,28 @@
-"""Tests for core/filename_pattern.py -- pure string/regex logic, fully runnable."""
+"""Tests for core/filename_pattern.py: this project's field settings on
+top of redactor_common's shared rename/parse engine (2026-09-23), plus
+the pattern history. The expectations that changed on purpose with the
+switch to the shared engine are marked "shared engine:"."""
 
 import unittest
 from pathlib import Path
 
 from core.video_metadata import VideoMetadata, ContentType
 from core.filename_pattern import (
-    render_filename, parse_filename, validate_filename_stem,
-    sanitize_filename_stem, load_pattern_history, save_pattern_to_history,
+    render_filename, parse_filename, load_pattern_history, save_pattern_to_history,
 )
+from redactor_common.core.rename_pattern import (
+    MAX_FILENAME_LENGTH, render_filename as render_values, validate_filename_stem as _validate,
+)
+
+
+def sanitize_filename_stem(raw: str) -> str:
+    return render_values({"x": raw}, "%x%")
+
+
+def validate_filename_stem(stem: str):
+    """The shared validator returns "" for a valid name (this project's
+    returned None) -- adapted so the existing cases read unchanged."""
+    return _validate(stem) or None
 
 
 class TestRenderFilename(unittest.TestCase):
@@ -27,15 +42,17 @@ class TestRenderFilename(unittest.TestCase):
         self.assertNotIn("?", result)
         self.assertNotIn("*", result)
 
-    def test_empty_field_produces_no_placeholder_text(self):
-        meta = VideoMetadata(title="")
-        result = render_filename(meta, "[%title%]")
-        self.assertEqual(result, "[]")
+    def test_empty_field_group_is_dropped(self):
+        # shared engine: a [...] group whose fields are all empty is
+        # optional and disappears, instead of leaving "[]" behind.
+        meta = VideoMetadata(title="", show_title="Show")
+        self.assertEqual(render_filename(meta, "%show_title% [%title%]"), "Show")
 
-    def test_unrecognized_placeholder_left_literal(self):
+    def test_unrecognized_placeholder_rendered_empty(self):
+        # shared engine: an unknown %token% renders as "" rather than
+        # surviving literally into the filename.
         meta = VideoMetadata(title="Test")
-        result = render_filename(meta, "%title% - %not_a_real_field%")
-        self.assertIn("%not_a_real_field%", result)
+        self.assertEqual(render_filename(meta, "%title% - %not_a_real_field%"), "Test")
 
     def test_content_type_enum_renders_as_string_value(self):
         meta = VideoMetadata(content_type=ContentType.MOVIE)
@@ -58,7 +75,7 @@ class TestSanitizeFilenameStem(unittest.TestCase):
 
     def test_length_capped(self):
         long_name = "a" * 500
-        self.assertLessEqual(len(sanitize_filename_stem(long_name)), 200)
+        self.assertLessEqual(len(sanitize_filename_stem(long_name)), MAX_FILENAME_LENGTH)
 
 
 class TestParseFilename(unittest.TestCase):

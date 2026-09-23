@@ -16,14 +16,20 @@ so the GUI layer can prompt the user rather than fail mysteriously.
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
-import urllib.request
-import urllib.parse
-import json
 
 from core.config import get_setting
 import os
+from redactor_common.core.lookup_client import build_request, fetch_bytes, fetch_json, make_default_fetch
 
 BASE_URL = "https://api.themoviedb.org/3"
+USER_AGENT = "TheVideoRedactor"
+_STATUS_MESSAGES = {
+    401: "TMDB rejected the API key (401 Unauthorized).",
+    429: "TMDB rate limit hit -- try again shortly.",
+}
+# Injectable for tests; see redactor_common.core.lookup_client.
+_fetch = make_default_fetch(USER_AGENT, timeout=10)
+_image_fetch = make_default_fetch(USER_AGENT, timeout=15)
 IMAGE_BASE_URL = "https://image.tmdb.org/t/p/"
 POSTER_SIZE = "w500"  # reasonable balance of quality vs download size
 
@@ -102,20 +108,15 @@ def _require_api_key() -> str:
 
 
 def _get_json(path: str, params: dict) -> dict:
+    """GET + JSON via redactor_common's lookup_client, which also turns a
+    read timeout or a malformed response into a TMDBError -- both used
+    to escape as an uncaught exception, since only HTTPError/URLError
+    were handled here."""
     key = _require_api_key()
-    params = {**params, "api_key": key}
-    url = f"{BASE_URL}{path}?{urllib.parse.urlencode(params)}"
-    try:
-        with urllib.request.urlopen(url, timeout=10) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        if e.code == 401:
-            raise TMDBError("TMDB rejected the API key (401 Unauthorized).") from e
-        if e.code == 429:
-            raise TMDBError("TMDB rate limit hit -- try again shortly.") from e
-        raise TMDBError(f"TMDB request failed: HTTP {e.code}") from e
-    except urllib.error.URLError as e:
-        raise TMDBError(f"Could not reach TMDB: {e.reason}") from e
+    request = build_request(f"{BASE_URL}{path}", {**params, "api_key": key})
+    return fetch_json(
+        request, _fetch, TMDBError, "TMDB", status_messages=_STATUS_MESSAGES,
+    ) or {}
 
 
 def search_movies(query: str, year: Optional[str] = None) -> list[MovieCandidate]:
@@ -250,8 +251,4 @@ def get_tv_episode_details(tmdb_id: int, season: int, episode: int) -> dict:
 def download_poster(poster_path: str) -> bytes:
     """Download poster image bytes at POSTER_SIZE resolution."""
     url = f"{IMAGE_BASE_URL}{POSTER_SIZE}{poster_path}"
-    try:
-        with urllib.request.urlopen(url, timeout=15) as response:
-            return response.read()
-    except urllib.error.URLError as e:
-        raise TMDBError(f"Could not download poster: {e.reason}") from e
+    return fetch_bytes(url, _image_fetch, TMDBError, what="the poster")

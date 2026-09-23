@@ -24,16 +24,18 @@ needs a real functional pass once a key + network access are available.
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
-import urllib.request
-import urllib.parse
-import json
 import os
 
 from core.config import get_setting
 from core.opensubtitles_hash import compute_moviehash
+from redactor_common.core.lookup_client import build_request, fetch_bytes, fetch_json, make_default_fetch
 
 BASE_URL = "https://api.opensubtitles.com/api/v1"
 USER_AGENT = "TheVideoRedactor v0.1"  # OpenSubtitles requires a descriptive User-Agent
+_RATE_LIMITED = "OpenSubtitles rate/quota limit hit -- try again later."
+# Injectable for tests; see redactor_common.core.lookup_client.
+_fetch = make_default_fetch(USER_AGENT, timeout=10)
+_download_fetch = make_default_fetch(USER_AGENT, timeout=15)
 
 
 class OpenSubtitlesError(Exception):
@@ -68,48 +70,33 @@ def _require_api_key() -> str:
     return key
 
 
-def _get_json(path: str, params: dict, bearer_token: Optional[str] = None) -> dict:
-    key = _require_api_key()
-    url = f"{BASE_URL}{path}?{urllib.parse.urlencode(params)}"
-    headers = {"Api-Key": key, "User-Agent": USER_AGENT}
+def _headers(bearer_token: Optional[str]) -> dict:
+    headers = {"Api-Key": _require_api_key(), "User-Agent": USER_AGENT}
     if bearer_token:
         headers["Authorization"] = f"Bearer {bearer_token}"
-    request = urllib.request.Request(url, headers=headers)
-    try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        if e.code == 401:
-            raise OpenSubtitlesError("OpenSubtitles rejected the API key (401 Unauthorized).") from e
-        if e.code == 429:
-            raise OpenSubtitlesError("OpenSubtitles rate/quota limit hit -- try again later.") from e
-        raise OpenSubtitlesError(f"OpenSubtitles request failed: HTTP {e.code}") from e
-    except urllib.error.URLError as e:
-        raise OpenSubtitlesError(f"Could not reach OpenSubtitles: {e.reason}") from e
+    return headers
+
+
+def _get_json(path: str, params: dict, bearer_token: Optional[str] = None) -> dict:
+    request = build_request(f"{BASE_URL}{path}", params, _headers(bearer_token))
+    return fetch_json(
+        request, _fetch, OpenSubtitlesError, "OpenSubtitles",
+        status_messages={
+            401: "OpenSubtitles rejected the API key (401 Unauthorized).",
+            429: _RATE_LIMITED,
+        },
+    ) or {}
 
 
 def _post_json(path: str, payload: dict, bearer_token: Optional[str] = None) -> dict:
-    key = _require_api_key()
-    url = f"{BASE_URL}{path}"
-    headers = {
-        "Api-Key": key, "User-Agent": USER_AGENT,
-        "Content-Type": "application/json",
-    }
-    if bearer_token:
-        headers["Authorization"] = f"Bearer {bearer_token}"
-    data = json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(url, data=data, headers=headers, method="POST")
-    try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        if e.code == 401:
-            raise OpenSubtitlesError("OpenSubtitles rejected the request (401 Unauthorized).") from e
-        if e.code == 429:
-            raise OpenSubtitlesError("OpenSubtitles rate/quota limit hit -- try again later.") from e
-        raise OpenSubtitlesError(f"OpenSubtitles request failed: HTTP {e.code}") from e
-    except urllib.error.URLError as e:
-        raise OpenSubtitlesError(f"Could not reach OpenSubtitles: {e.reason}") from e
+    request = build_request(f"{BASE_URL}{path}", headers=_headers(bearer_token), json_body=payload)
+    return fetch_json(
+        request, _fetch, OpenSubtitlesError, "OpenSubtitles",
+        status_messages={
+            401: "OpenSubtitles rejected the request (401 Unauthorized).",
+            429: _RATE_LIMITED,
+        },
+    ) or {}
 
 
 def search_by_hash(video_path: str, language: str = "en") -> list[SubtitleCandidate]:
@@ -167,9 +154,5 @@ def download_subtitle_text(file_id: int) -> str:
     if not download_url:
         raise OpenSubtitlesError("OpenSubtitles did not return a download link.")
 
-    request = urllib.request.Request(download_url, headers={"User-Agent": USER_AGENT})
-    try:
-        with urllib.request.urlopen(request, timeout=15) as response:
-            return response.read().decode("utf-8", errors="replace")
-    except urllib.error.URLError as e:
-        raise OpenSubtitlesError(f"Could not download subtitle file: {e.reason}") from e
+    data = fetch_bytes(download_url, _download_fetch, OpenSubtitlesError, what="the subtitle file")
+    return data.decode("utf-8", errors="replace")

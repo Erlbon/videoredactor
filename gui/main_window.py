@@ -14,19 +14,26 @@ columns are visible AND which fields TagPanel shows -- "no filter" means
 from __future__ import annotations
 from pathlib import Path
 from typing import Optional
+import copy
 import json
+import os
+import shutil
 import threading
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
     QTableWidget, QTableWidgetItem, QComboBox, QLabel, QFileDialog,
-    QStatusBar, QMessageBox, QToolBar, QProgressDialog, QApplication,
+    QStatusBar, QMessageBox, QToolBar,
 )
-from PyQt6.QtCore import Qt, QThread, QEventLoop, pyqtSignal
-from PyQt6.QtGui import QColor, QKeySequence, QIcon
+from PyQt6.QtCore import Qt, QThread, QEventLoop, QSize, pyqtSignal
+from PyQt6.QtGui import QColor, QImage, QKeySequence, QIcon
 
 from core.video_file import VideoFile, discover_video_files, has_subfolders
-from core.video_metadata import ContentType, EDITABLE_FIELDS, NUMERIC_FIELDS
+from core.video_metadata import ContentType, EDITABLE_FIELDS, NUMERIC_FIELDS, TEXT_FIELDS
+from core.filename_pattern import (
+    DEFAULT_RENAME_PATTERN, PARSE_NUMERIC_FIELDS, PARSE_STRIP_ZEROS_FIELDS, VALID_FIELD_KEYS,
+    field_text, load_pattern_history, placeholder_values, save_pattern_to_history,
+)
 from core.tmdb_client import (
     get_movie_details, get_tv_show_details, get_tv_episode_details,
     download_poster, TMDBError,
@@ -36,22 +43,31 @@ from core.release_name_parser import parse_release_name
 from core.ffmpeg_backend import IMPORTABLE_EXTENSIONS, remux_to_mp4, transcode_to_mp4
 from core.transcode_settings import get_transcode_settings
 from core.opensubtitles_client import download_subtitle_text, OpenSubtitlesError
-from core.table_settings import merge_column_order, is_column_visible, sanitize_hidden_fields
+from core.table_settings import PROTECTED_COLUMNS, merge_column_order, is_column_visible, sanitize_hidden_fields
 from core.format_helpers import format_duration, format_file_size
 from core.config import get_setting, set_setting
 from redactor_common.gui.action_factory import make_action
 from redactor_common.gui.menu_builder import MenuAction, Separator, build_menu_bar
-from redactor_common.gui.progress import run_with_progress
+from redactor_common.gui.async_preview import AsyncPreviewLoader
+from redactor_common.gui.auto_numbering_dialog import AutoNumberingDialog
+from redactor_common.gui.case_conversion_dialog import CaseConversionDialog
+from redactor_common.gui.parse_filename_dialog import ParseFilenameDialog
+from redactor_common.gui.rename_pattern_dialog import RenamePatternDialog
+from redactor_common.gui.search_replace_dialog import FILENAME_FIELD_KEY, SearchReplaceDialog
+from redactor_common.gui.progress import ProgressReporter, run_with_progress
 from redactor_common.gui.colors import DIRTY_COLOR, ERROR_COLOR, HIGHLIGHT_TEXT_COLOR, TABLE_SELECTION_STYLESHEET
 from redactor_common.gui.context_menu import show_table_context_menu
 from redactor_common.gui.quick_series_number import prompt_and_generate_series_numbers
 from redactor_common.gui.column_menu import show_column_header_context_menu
+from redactor_common.gui.column_settings_dialog import ColumnSettingsDialog
 from redactor_common.gui.collapsible_splitter import SplitterPaneCollapser
 from redactor_common.gui.zoom_toolbar import TableZoomController
 from redactor_common.gui.about_dialog import AboutDialog, ChangelogDialog, CreditsDialog
 from redactor_common.gui.rename_single_file import rename_single_file as prompt_rename_single_file
 from redactor_common.gui.sortable_table import NumericTableWidgetItem, suspend_sorting
 from redactor_common.gui import standard_shortcuts as shortcuts
+from redactor_common.core.error_summary import summarize_errors
+from redactor_common.core.undo import UndoManager
 from redactor_common.core.folder_refresh import find_new_files_in_loaded_folders
 from redactor_common.core.version import REDACTOR_COMMON_REPO_URL, REDACTOR_COMMON_VERSION
 from gui.tag_panel import TagPanel, FIELD_LABELS
@@ -60,13 +76,7 @@ from gui.tmdb_episode_picker_dialog import TVEpisodePickerDialog
 from gui.tvdb_search_dialog import TVDBSearchDialog
 from gui.tvdb_episode_picker_dialog import TVDBEpisodePickerDialog
 from gui.subtitle_search_dialog import SubtitleSearchDialog
-from gui.rename_pattern_dialog import RenameByPatternDialog
-from gui.parse_filename_dialog import ParseFilenameDialog
-from gui.case_conversion_dialog import CaseConversionDialog
-from gui.search_replace_dialog import SearchReplaceDialog
-from gui.auto_numbering_dialog import AutoNumberingDialog
 from gui.tool_settings_dialog import ToolSettingsDialog
-from gui.column_visibility_dialog import ColumnVisibilityDialog
 from gui.vocabulary_editor_dialog import VocabularyEditorDialog
 from gui.api_keys_dialog import ApiKeysDialog
 from core.controlled_vocab import (
@@ -75,20 +85,12 @@ from core.controlled_vocab import (
 )
 from core.version import APP_NAME, APP_REPO_URL, APP_VERSION, RELEASE_LABEL
 from core.external_tools import missing_tools
+from core.app_paths import asset_path
 
-# Assets live one level up from gui/, resolved relative to this file so
-# it works both from source and from a PyInstaller-frozen build (where
-# datas=[("assets/icon.ico", "assets")] in the spec file places it
-# alongside the frozen app, not necessarily at the same relative path
-# as the source tree -- sys._MEIPASS is PyInstaller's extraction dir
-# when frozen).
-import sys
-if getattr(sys, "frozen", False):
-    ASSETS_DIR = Path(sys._MEIPASS) / "assets"
-    PROJECT_ROOT = Path(sys._MEIPASS)
-else:
-    PROJECT_ROOT = Path(__file__).resolve().parent.parent
-    ASSETS_DIR = PROJECT_ROOT / "assets"
+# Bundled data assets (icon, ABOUT/CHANGELOG/CREDITS markdown) resolve
+# via sys._MEIPASS when frozen -- see core/app_paths.asset_path().
+ASSETS_DIR = asset_path("assets")
+PROJECT_ROOT = asset_path(".")
 ICON_PATH = ASSETS_DIR / "icon.ico"
 CHANGELOG_PATH = PROJECT_ROOT / "CHANGELOG.md"
 ABOUT_PATH = PROJECT_ROOT / "ABOUT.md"
@@ -147,6 +149,50 @@ COLUMN_LABEL_LOOKUP = {**FIELD_LABELS, **TECHNICAL_LABELS, "filename": "Filename
 # explicit direction to standardize on epub's scheme regardless.
 
 
+# Rename/Export and Parse Filename placeholders: every editable field,
+# labelled the same way as the bulk-edit panel.
+FILENAME_PLACEHOLDERS = [(field, FIELD_LABELS.get(field, field)) for field in EDITABLE_FIELDS]
+
+
+def _field_text(vf: VideoFile, field_name: str) -> str:
+    """A metadata field as the plain string the shared dialogs work on."""
+    return field_text(vf.metadata, field_name)
+
+
+def _set_field_from_text(vf: VideoFile, field_name: str, text: str) -> bool:
+    """Stores a string from a shared dialog back into its typed field.
+    Returns False (and leaves the field untouched) for a value that
+    doesn't fit: a non-number for an int field, or an unknown Content
+    Type -- skipping one field beats crashing the whole batch or writing
+    a string into an int field."""
+    text = (text or "").strip()
+    if field_name in NUMERIC_FIELDS:
+        if not text:
+            setattr(vf.metadata, field_name, None)
+            return True
+        try:
+            setattr(vf.metadata, field_name, int(float(text)))
+        except ValueError:
+            return False
+        return True
+    if field_name == "content_type":
+        try:
+            vf.metadata.content_type = ContentType(text)
+        except ValueError:
+            return False
+        return True
+    setattr(vf.metadata, field_name, text)
+    return True
+
+
+def _error_details(lines: list[str]) -> str:
+    """A bounded "N file(s): a; b; c, ..." message-box body -- ffmpeg's
+    stderr alone can run to hundreds of lines per file, and a failed
+    batch of hundreds of files used to produce a message box taller
+    than the screen, with its OK button out of reach."""
+    return f"{len(lines)} file(s):\n\n{summarize_errors(lines)}"
+
+
 class _TranscodeWorker(QThread):
     """Runs a batch of transcode_to_mp4() calls off the GUI thread.
 
@@ -197,12 +243,23 @@ class MainWindow(QMainWindow):
         # which is the right degrade for something this cosmetic.
 
         self.video_files: list[VideoFile] = []
+        # In-memory edits (bulk edit, lookups, batch text operations) are
+        # undoable, same as epub/mp3/cbz -- this project had no undo at
+        # all before 2026-09-23. File operations on disk (rename, remux,
+        # convert) are not, matching the other apps.
+        self.undo_manager: UndoManager[VideoFile] = UndoManager()
         self._column_order: list[str] = []  # populated in _rebuild_table_columns
         self._suppress_column_signals = False  # True while _rebuild_table_columns
         # is programmatically applying persisted widths/visibility, so those
         # calls don't get misread as user actions and re-saved redundantly
         # (or, for a hidden column's width momentarily reporting as 0,
         # incorrectly overwrite a perfectly good persisted width).
+
+        # Thumbnails are generated and decoded off the GUI thread; see
+        # _update_preview(). Decoded no larger than this -- ffmpeg grabs
+        # the frame at the video's full resolution.
+        self._preview_loader = AsyncPreviewLoader(QSize(960, 960), parent=self)
+        self._preview_loader.image_ready.connect(self._on_preview_ready)
 
         self._build_ui()
         self._build_menu_bar()
@@ -384,6 +441,9 @@ class MainWindow(QMainWindow):
                     shortcut=shortcuts.SEARCH_REPLACE,
                 ),
                 MenuAction("auto_numbering", "Auto-&Numbering...", self._on_auto_numbering),
+                Separator(),
+                MenuAction("undo", "&Undo", self.undo_last_action, shortcut=shortcuts.UNDO),
+                MenuAction("redo", "&Redo", self.redo_last_action, shortcut=shortcuts.REDO),
             ],
             "Settings": [
                 MenuAction("locate_tools", "&Locate External Tools...", self._on_locate_tools),
@@ -407,6 +467,10 @@ class MainWindow(QMainWindow):
         self.save_selected_action = actions["save_selected"]
         self.save_all_action = actions["save_all"]
         self.rename_file_action = actions["rename_file"]
+        self.undo_action = actions["undo"]
+        self.redo_action = actions["redo"]
+        self.undo_action.setEnabled(False)
+        self.redo_action.setEnabled(False)
 
     def _build_toolbar(self) -> None:
         """Toolbar beneath the menu bar for the most-used actions (Open
@@ -551,22 +615,21 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _on_open_column_visibility(self) -> None:
-        """Add/Remove Columns (Settings menu) -- opens the same
-        ColumnVisibilityDialog the table header's right-click menu
-        already exposes, reading/writing the exact same persisted
-        hidden-columns state. Refreshes both the table and the bulk-
-        edit panel if anything actually changed, per the same "hiding
-        a column also hides its panel field" behavior established
-        earlier.
-        """
-        dialog = ColumnVisibilityDialog(
-            list(COLUMN_LABEL_LOOKUP.items()),
-            self._load_hidden_fields,
-            lambda hidden: set_setting("table", "hidden_columns", ",".join(sorted(hidden))),
-            parent=self,
+        """Add/Remove Columns (Settings menu) -- redactor_common's shared
+        ColumnSettingsDialog (the same one cbz/mp3 use), reading and
+        writing the same persisted hidden-columns state as the table
+        header's right-click menu. Refreshes both the table and the
+        bulk-edit panel if anything changed ("hiding a column also hides
+        its panel field")."""
+        before = sanitize_hidden_fields(self._load_hidden_fields())
+        dialog = ColumnSettingsDialog(
+            list(COLUMN_LABEL_LOOKUP.items()), before,
+            protected_columns=PROTECTED_COLUMNS, parent=self,
         )
         dialog.exec()
-        if dialog.changed:
+        hidden = sanitize_hidden_fields(dialog.hidden_fields())
+        if hidden != before:
+            set_setting("table", "hidden_columns", ",".join(sorted(hidden)))
             self._on_column_visibility_changed_via_settings()
 
     def _on_open_languages(self) -> None:
@@ -807,40 +870,20 @@ class MainWindow(QMainWindow):
         if self._count_dirty() and not self._confirm_discard("load a new folder (discarding unsaved changes)"):
             return
         self.video_files = []
+        self._clear_undo()
 
-        progress = None
-        cancelled = False
-        if paths:
-            # setMinimumDuration means this only actually appears if
-            # loading takes longer than the threshold -- a typical
-            # small folder finishes before it ever shows, so this adds
-            # zero visual noise for the common case while still
-            # covering the "heavy folder looks frozen" complaint this
-            # was built for. Determinate (not busy/indeterminate) since
-            # the total file count is already known up front.
-            progress = QProgressDialog("Loading video files...", "Cancel", 0, len(paths), self)
-            progress.setWindowModality(Qt.WindowModality.WindowModal)
-            progress.setWindowTitle("Loading Folder")
-            progress.setMinimumDuration(400)
-
-        for i, p in enumerate(paths):
-            if progress is not None:
-                if progress.wasCanceled():
-                    cancelled = True
-                    break
-                progress.setLabelText(f"Loading {p.name}...")
-                progress.setValue(i)
-                # QProgressDialog doesn't pump the event loop on its
-                # own -- without this, the dialog itself would be just
-                # as frozen-looking as the table it's meant to explain,
-                # and the Cancel button wouldn't respond either.
-                QApplication.processEvents()
+        def _step(p: Path, _index: int) -> None:
             vf = VideoFile(path=p)
             vf.load()
             self.video_files.append(vf)
 
-        if progress is not None:
-            progress.setValue(len(paths))
+        # The shared helper: threshold-gated, fixed width (the old
+        # hand-rolled dialog grew with each long "Loading <name>" label
+        # and never shrank back), per-file label elided, Cancel works.
+        cancelled = not run_with_progress(
+            self, paths, _step, "Loading video files...", threshold=3,
+            label_for=lambda p: f"Loading {p.name}",
+        )
 
         self._refresh_table_rows()
         loaded = sum(1 for vf in self.video_files if not vf.load_error)
@@ -887,10 +930,19 @@ class MainWindow(QMainWindow):
         all_paths = [Path(p) for p in existing_paths + new_paths]
 
         self.video_files = []
-        for p in all_paths:
+        self._clear_undo()
+
+        def _step(p: Path, _index: int) -> None:
             vf = VideoFile(path=p)
             vf.load()
             self.video_files.append(vf)
+
+        # Not cancellable: the old list is already gone, so stopping
+        # halfway would silently drop the rest of the loaded files.
+        run_with_progress(
+            self, all_paths, _step, "Refreshing...", threshold=3, cancellable=False,
+            label_for=lambda p: f"Loading {p.name}",
+        )
 
         self._refresh_table_rows()
 
@@ -1129,25 +1181,32 @@ class MainWindow(QMainWindow):
         for multi-selection, since there's no single frame that
         represents several different files.
 
-        NOTE: this generates synchronously on the GUI thread the first
-        time a given file is previewed (subsequent selections of the same
-        file hit VideoFile's on-disk cache and return instantly). For a
-        very large/slow-to-seek file this could cause a brief UI pause --
-        worth revisiting with a background thread if that turns out to be
-        noticeable in practice, but not optimizing preemptively here.
+        The first preview of a file runs ffmpeg to grab a frame. That
+        used to happen right here on the GUI thread, so selecting a large
+        or slow-to-seek file (or one on a slow network share) froze the
+        window until ffmpeg finished. It now runs on a worker thread via
+        redactor_common's AsyncPreviewLoader: debounced, so arrowing
+        through the table doesn't start an ffmpeg per row, and only the
+        latest selection's result is ever shown. Later selections of the
+        same file still hit VideoFile's on-disk thumbnail cache.
         """
         if len(selected) != 1:
+            self._preview_loader.cancel()
             self.tag_panel.set_preview_image(None)
             self.tag_panel.preview_label.setText(f"{len(selected)} files selected")
             return
 
         vf = selected[0]
         if vf.load_error:
+            self._preview_loader.cancel()
             self.tag_panel.set_preview_image(None)
             return
 
-        thumb_path = vf.get_thumbnail()
-        self.tag_panel.set_preview_image(str(thumb_path) if thumb_path else None)
+        self.tag_panel.set_preview_loading()
+        self._preview_loader.request(vf, vf.get_thumbnail)
+
+    def _on_preview_ready(self, _vf: VideoFile, image: QImage) -> None:
+        self.tag_panel.set_preview_qimage(image)
 
     def _merge_metadata_for_panel(self, files: list[VideoFile]) -> dict[str, object]:
         """Merge selected files' fields for the panel: a field with the
@@ -1257,7 +1316,7 @@ class MainWindow(QMainWindow):
         if failed:
             msg = f"Saved {succeeded} file(s), {len(failed)} failed{skip_note}{cancel_note}"
             self.status_bar.showMessage(msg)
-            details = "\n".join(f"{vf.path.name}: {vf.save_error}" for vf in failed)
+            details = _error_details([f"{vf.path.name}: {vf.save_error}" for vf in failed])
             QMessageBox.warning(self, "Some files failed to save", details)
         else:
             self.status_bar.showMessage(f"Saved {succeeded} file(s){skip_note}{cancel_note}")
@@ -1292,6 +1351,7 @@ class MainWindow(QMainWindow):
             # what triggering it with nothing pending should do.
             return
         selected = self._selected_video_files()
+        self._push_undo("Bulk Edit", selected)
         for vf in selected:
             for field_name, value in changed_fields.items():
                 if field_name == "content_type" and value:
@@ -1351,6 +1411,9 @@ class MainWindow(QMainWindow):
         poster_saved = 0
         fetch_failures: list[tuple] = []
 
+        # One undo entry for the whole batch (the stack keeps only the
+        # last few entries, so one per file would lose the earlier ones).
+        self._push_undo("TMDB Import", files)
         for vf in files:
             guess = parse_release_name(vf.path.stem)
             dialog = TMDBSearchDialog(
@@ -1403,7 +1466,7 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(", ".join(parts))
 
         if fetch_failures:
-            details_text = "\n".join(f"{vf.path.name}: {err}" for vf, err in fetch_failures)
+            details_text = _error_details([f"{vf.path.name}: {err}" for vf, err in fetch_failures])
             QMessageBox.warning(self, "Some files failed to import", details_text)
 
     def _import_tmdb_tv(self, files: list, skipped_load_errors: int) -> None:
@@ -1428,6 +1491,7 @@ class MainWindow(QMainWindow):
             except TMDBError as e:
                 poster_error = str(e)
 
+        self._push_undo("TMDB Import", files)
         for vf in files:
             vf.metadata.content_type = ContentType.TV
             for field_name, value in show_details.items():
@@ -1484,7 +1548,7 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(", ".join(parts))
 
         if episode_failures:
-            details_text = "\n".join(f"{vf.path.name}: {err}" for vf, err in episode_failures)
+            details_text = _error_details([f"{vf.path.name}: {err}" for vf, err in episode_failures])
             QMessageBox.warning(self, "Some episode lookups failed", details_text)
 
     def _apply_tvdb_episode_details(self, tvdb_id: int, details: dict, filename_stem: str = "") -> None:
@@ -1554,6 +1618,7 @@ class MainWindow(QMainWindow):
             return
         candidate = dialog.selected_candidate
 
+        self._push_undo("TheTVDB Import", [vf])
         try:
             details = get_series_details(candidate.tvdb_id)
             vf.metadata.content_type = ContentType.TV
@@ -1668,10 +1733,10 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(", ".join(parts))
 
         if failed:
-            details = "\n".join(f"{vf.path.name}: {err}" for vf, err in failed)
+            details = _error_details([f"{vf.path.name}: {err}" for vf, err in failed])
             QMessageBox.warning(self, "Some files failed to remux", details)
         if deletion_failures:
-            details = "\n".join(f"{vf.path.name}: {err}" for vf, err in deletion_failures)
+            details = _error_details([f"{vf.path.name}: {err}" for vf, err in deletion_failures])
             QMessageBox.warning(self, "Some originals could not be deleted", details)
 
     def _confirm_delete_original(self, vf: VideoFile, output_path: Path):
@@ -1703,6 +1768,46 @@ class MainWindow(QMainWindow):
             return (False, False)
         return False  # dialog dismissed without a button (e.g. Esc) -- default to not deleting
 
+    def _run_transcode_jobs(
+        self, jobs: list[tuple[Path, Path]], settings, title: str
+    ) -> dict[int, tuple[bool, str]]:
+        """Runs `jobs` on a _TranscodeWorker thread behind the shared
+        progress dialog (fixed width, elided per-file label) and returns
+        {job index: (ok, message)} -- an index missing from the result
+        never started because the batch was cancelled first. Shared by
+        Convert to MP4 and Import & Convert, which each hand-rolled an
+        identical copy of this before.
+
+        threshold=1: even a single encode takes minutes, so the dialog
+        (and its Cancel button) always shows."""
+        worker = _TranscodeWorker(jobs, settings, parent=self)
+        results: dict[int, tuple[bool, str]] = {}
+        with ProgressReporter(self, len(jobs), "Starting...", threshold=1, title=title) as reporter:
+            def on_started(i: int, name: str) -> None:
+                reporter.set_label(f"Converting {name}... ({i + 1}/{len(jobs)})")
+                reporter.set_value(i, pump=False)
+
+            def on_finished(i: int, ok: bool, message: str) -> None:
+                results[i] = (ok, message)
+
+            def on_cancel() -> None:
+                worker.cancel_event.set()
+                reporter.set_label("Cancelling (finishing current file)...")
+
+            worker.file_started.connect(on_started)
+            worker.file_finished.connect(on_finished)
+            reporter.connect_cancel(on_cancel)
+
+            # The dialog's modality pumps clicks/paint events, but not
+            # "wait for this thread to finish" -- a local event loop tied
+            # to the worker's `finished` signal blocks here without
+            # freezing the UI (the encode itself runs on the worker).
+            wait_loop = QEventLoop()
+            worker.finished.connect(wait_loop.quit)
+            worker.start()
+            wait_loop.exec()
+        return results
+
     def _on_convert_to_mp4(self) -> None:
         """Re-encode selected files to H.264/AAC MP4 (batch-capable),
         using the CRF/audio-bitrate/thread defaults from Tool Settings
@@ -1715,7 +1820,7 @@ class MainWindow(QMainWindow):
         the wrong default, even though remux's equivalent prompt is safe
         (a remux loses nothing).
 
-        Runs off the GUI thread via _TranscodeWorker + a QProgressDialog
+        Runs off the GUI thread via _TranscodeWorker + the shared progress dialog
         with a working Cancel button -- a real encode takes real time,
         unlike remux's near-instant stream copy.
         """
@@ -1766,41 +1871,7 @@ class MainWindow(QMainWindow):
         if confirm != QMessageBox.StandardButton.Yes:
             return
 
-        progress = QProgressDialog("Starting...", "Cancel", 0, len(jobs), self)
-        progress.setWindowModality(Qt.WindowModality.WindowModal)
-        progress.setWindowTitle("Converting to MP4")
-        progress.setMinimumDuration(0)
-
-        worker = _TranscodeWorker(jobs, settings, parent=self)
-        results: dict[int, tuple[bool, str]] = {}
-
-        def on_started(i: int, name: str) -> None:
-            progress.setLabelText(f"Converting {name}... ({i + 1}/{len(jobs)})")
-            progress.setValue(i)
-
-        def on_finished(i: int, ok: bool, message: str) -> None:
-            results[i] = (ok, message)
-
-        def on_cancel() -> None:
-            worker.cancel_event.set()
-            progress.setLabelText("Cancelling (finishing current file)...")
-
-        worker.file_started.connect(on_started)
-        worker.file_finished.connect(on_finished)
-        progress.canceled.connect(on_cancel)
-
-        # QProgressDialog's own modality pumps clicks/paint events, but
-        # not the "wait for this thread to actually finish" part -- a
-        # small local event loop tied to the worker's `finished` signal
-        # is the standard Qt pattern for blocking here without freezing
-        # the UI (the worker itself already runs off this thread).
-        wait_loop = QEventLoop()
-        worker.finished.connect(wait_loop.quit)
-        worker.start()
-        wait_loop.exec()
-
-        progress.setValue(len(jobs))
-        progress.close()
+        results = self._run_transcode_jobs(jobs, settings, "Converting to MP4")
 
         new_files: list[VideoFile] = []
         succeeded = 0
@@ -1835,7 +1906,9 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(", ".join(parts))
 
         if failed:
-            details = "\n".join(f"{path.name}: {err.strip() or 'ffmpeg conversion failed'}" for path, err in failed)
+            details = _error_details(
+                [f"{path.name}: {err.strip() or 'ffmpeg conversion failed'}" for path, err in failed]
+            )
             QMessageBox.warning(self, "Some files failed to convert", details)
 
     # --- Import & Convert --------------------------------------------------
@@ -1884,7 +1957,7 @@ class MainWindow(QMainWindow):
             jobs.append((src, dest))
 
         if skipped_existing:
-            names = "\n".join(p.name for p in skipped_existing)
+            names = summarize_errors([p.name for p in skipped_existing])
             proceed = QMessageBox.question(
                 self,
                 "Some Files Already Exist",
@@ -1912,36 +1985,7 @@ class MainWindow(QMainWindow):
         if confirm != QMessageBox.StandardButton.Yes:
             return
 
-        progress = QProgressDialog("Starting...", "Cancel", 0, len(jobs), self)
-        progress.setWindowModality(Qt.WindowModality.WindowModal)
-        progress.setWindowTitle("Importing & Converting")
-        progress.setMinimumDuration(0)
-
-        worker = _TranscodeWorker(jobs, settings, parent=self)
-        results: dict[int, tuple[bool, str]] = {}
-
-        def on_started(i: int, name: str) -> None:
-            progress.setLabelText(f"Converting {name}... ({i + 1}/{len(jobs)})")
-            progress.setValue(i)
-
-        def on_finished(i: int, ok: bool, message: str) -> None:
-            results[i] = (ok, message)
-
-        def on_cancel() -> None:
-            worker.cancel_event.set()
-            progress.setLabelText("Cancelling (finishing current file)...")
-
-        worker.file_started.connect(on_started)
-        worker.file_finished.connect(on_finished)
-        progress.canceled.connect(on_cancel)
-
-        wait_loop = QEventLoop()
-        worker.finished.connect(wait_loop.quit)
-        worker.start()
-        wait_loop.exec()
-
-        progress.setValue(len(jobs))
-        progress.close()
+        results = self._run_transcode_jobs(jobs, settings, "Importing & Converting")
 
         set_setting("general", "last_folder", str(Path(paths[0]).parent))
 
@@ -1978,8 +2022,8 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(", ".join(parts))
 
         if failed:
-            details = "\n".join(
-                f"{path.name}: {err.strip() or 'ffmpeg conversion failed'}" for path, err in failed
+            details = _error_details(
+                [f"{path.name}: {err.strip() or 'ffmpeg conversion failed'}" for path, err in failed]
             )
             QMessageBox.warning(self, "Some files failed to convert", details)
         elif succeeded:
@@ -2032,86 +2076,188 @@ class MainWindow(QMainWindow):
 
     # --- Filename patterns -------------------------------------------------
 
-    def _on_rename_by_pattern(self) -> None:
-        """Batch rename/export by pattern, working on the current
-        selection (or ALL loaded files if nothing's selected -- matches
-        the epub tool's own Rename/Export tool, which operates on the
-        full loaded set by default rather than requiring an explicit
-        select-all first for what's usually a whole-batch operation).
-        """
+    def _batch_targets(self, verb: str) -> list[VideoFile]:
+        """The selection, or every loaded file if nothing is selected --
+        the family's convention for whole-batch operations. Files that
+        failed to load are excluded; an empty list means "nothing to do"
+        and the user has already been told why."""
         selected = self._selected_video_files()
-        targets = selected if selected else self.video_files
+        targets = [vf for vf in (selected or self.video_files) if not vf.load_error]
         if not targets:
-            QMessageBox.information(self, "No Files", "Load some files first.")
+            QMessageBox.information(self, "No Files", f"Load some files first (or select the ones to {verb}).")
+        return targets
+
+    def _after_batch_edit(self, message: str) -> None:
+        self._refresh_table_rows()
+        if self._selected_video_files():
+            self._on_selection_changed()
+        self.status_bar.showMessage(message)
+
+    def _on_rename_by_pattern(self) -> None:
+        """Rename (or export copies of) files by a %field% pattern --
+        redactor_common's shared RenamePatternDialog since 2026-09-23,
+        which added export-to-folder mode, a clickable placeholder list,
+        optional [...] groups and automatic " (2)" de-duplication instead
+        of refusing the whole batch on a name collision. Acts on disk
+        immediately; not undoable, same as the other apps."""
+        targets = self._batch_targets("rename")
+        if not targets:
+            return
+        dialog = RenamePatternDialog(
+            targets, FILENAME_PLACEHOLDERS,
+            lambda vf: placeholder_values(vf.metadata),
+            lambda vf: str(vf.path),
+            pattern_history=load_pattern_history(),
+            default_pattern=DEFAULT_RENAME_PATTERN,
+            item_noun="file",
+            zero_pad_field="episode_number",
+            zero_pad_label="Zero-pad episode # to:",
+            parent=self,
+        )
+        if dialog.exec() != dialog.DialogCode.Accepted:
             return
 
-        dialog = RenameByPatternDialog(targets, parent=self)
-        if dialog.exec():
-            self._refresh_table_rows()
-            self.status_bar.showMessage(f"Renamed {dialog.renamed_count} file(s)")
+        save_pattern_to_history(dialog.pattern_edit.text())
+        export_mode = dialog.is_export_mode()
+        done = 0
+        errors: list[str] = []
+        for vf, old_path, new_path in dialog.planned_renames():
+            if os.path.normcase(os.path.abspath(old_path)) == os.path.normcase(os.path.abspath(new_path)):
+                continue
+            try:
+                if export_mode:
+                    shutil.copy2(old_path, new_path)
+                else:
+                    os.rename(old_path, new_path)
+                    vf.path = Path(new_path)
+                done += 1
+            except OSError as exc:
+                errors.append(f"{os.path.basename(old_path)}: {exc}")
+
+        self._refresh_table_rows()
+        verb = "Exported" if export_mode else "Renamed"
+        self.status_bar.showMessage(f"{verb} {done} file(s)")
+        if errors:
+            QMessageBox.warning(self, "Some files failed", _error_details(errors))
 
     def _on_import_metadata_from_filename(self) -> None:
-        """Extract metadata from filenames into staged (unsaved) fields
-        (renamed from "Parse Filename to Metadata" per explicit
-        request). Same selection-or-all-files scope as rename by
-        pattern.
-        """
-        selected = self._selected_video_files()
-        targets = selected if selected else self.video_files
+        """Extract metadata from filenames into staged (unsaved) fields,
+        via redactor_common's shared ParseFilenameDialog. Season/Episode
+        #/Rating only match digits (so "S01E03" parses cleanly) and lose
+        their filename zero-padding."""
+        targets = self._batch_targets("parse")
         if not targets:
-            QMessageBox.information(self, "No Files", "Load some files first.")
+            return
+        dialog = ParseFilenameDialog(
+            targets, FILENAME_PLACEHOLDERS, lambda vf: str(vf.path),
+            pattern_history=load_pattern_history(),
+            default_pattern=DEFAULT_RENAME_PATTERN,
+            valid_field_keys=set(VALID_FIELD_KEYS),
+            numeric_fields=set(PARSE_NUMERIC_FIELDS),
+            strip_leading_zeros_fields=set(PARSE_STRIP_ZEROS_FIELDS),
+            title="Import Metadata from Filename",
+            item_noun="file",
+            parent=self,
+        )
+        if dialog.exec() != dialog.DialogCode.Accepted:
             return
 
-        dialog = ParseFilenameDialog(targets, parent=self)
-        if dialog.exec():
-            self._refresh_table_rows()
-            if self._selected_video_files():
-                self._on_selection_changed()  # refresh panel if a parsed file is still selected
-            self.status_bar.showMessage(
-                f"Imported metadata from filename for {dialog.matched_count} file(s) -- not yet saved to disk"
-            )
+        save_pattern_to_history(dialog.pattern_edit.text())
+        changes = dialog.accepted_changes()
+        if not changes:
+            return
+        self._push_undo("Import from Filename", [targets[i] for i in changes])
+        for index, fields in changes.items():
+            vf = targets[index]
+            for field_name, value in fields.items():
+                if value:
+                    _set_field_from_text(vf, field_name, value)
+            vf.dirty = True
+        self._after_batch_edit(
+            f"Imported metadata from filename for {len(changes)} file(s) -- not yet saved to disk"
+        )
 
     # --- Batch text operations (Operations menu) ------------------------
 
+    def _text_field_choices(self) -> list[tuple[str, str]]:
+        return [(field, FIELD_LABELS.get(field, field)) for field in TEXT_FIELDS]
+
     def _on_case_conversion(self) -> None:
         """Batch case conversion for a chosen text field, staged
-        (unsaved) onto the selected files. Same selection-or-all-files
-        scope as rename by pattern.
-        """
-        selected = self._selected_video_files()
-        targets = selected if selected else self.video_files
+        (unsaved), via redactor_common's shared dialog -- per-row Apply
+        checkboxes; title case keeps this app's "Star Wars: A New Hope"
+        clause rule, now part of the shared implementation."""
+        targets = self._batch_targets("convert")
         if not targets:
-            QMessageBox.information(self, "No Files", "Load some files first.")
             return
-
-        dialog = CaseConversionDialog(targets, parent=self)
-        if dialog.exec():
-            self._refresh_table_rows()
-            if self._selected_video_files():
-                self._on_selection_changed()
-            self.status_bar.showMessage(
-                f"Converted case for {dialog.converted_count} file(s) -- not yet saved to disk"
-            )
+        dialog = CaseConversionDialog(
+            targets, self._text_field_choices(), _field_text,
+            lambda vf: vf.path.name, item_noun="file", parent=self,
+        )
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        self._apply_single_field_changes("Case Conversion", targets, dialog.result_field_key(),
+                                         dialog.accepted_changes(), "Converted case for")
 
     def _on_search_replace(self) -> None:
-        """Batch find-and-replace within a chosen text field, staged
-        (unsaved) onto the selected files. Same selection-or-all-files
-        scope as rename by pattern.
-        """
-        selected = self._selected_video_files()
-        targets = selected if selected else self.video_files
+        """Batch find-and-replace within a chosen text field (or the
+        filename itself), via redactor_common's shared dialog -- adds
+        regex support and per-row Apply checkboxes. A filename change
+        renames on disk immediately; field changes are staged."""
+        targets = self._batch_targets("search")
         if not targets:
-            QMessageBox.information(self, "No Files", "Load some files first.")
             return
 
-        dialog = SearchReplaceDialog(targets, parent=self)
-        if dialog.exec():
-            self._refresh_table_rows()
-            if self._selected_video_files():
-                self._on_selection_changed()
-            self.status_bar.showMessage(
-                f"Replaced text in {dialog.replaced_count} file(s) -- not yet saved to disk"
-            )
+        def get_value(vf: VideoFile, field_key: str) -> str:
+            if field_key == FILENAME_FIELD_KEY:
+                return vf.path.stem
+            return _field_text(vf, field_key)
+
+        dialog = SearchReplaceDialog(
+            targets, self._text_field_choices(), get_value,
+            lambda vf: vf.path.name, include_filename=True, item_noun="file", parent=self,
+        )
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        field_key = dialog.result_field_key()
+        changes = dialog.accepted_changes()
+        if field_key != FILENAME_FIELD_KEY:
+            self._apply_single_field_changes("Search & Replace", targets, field_key, changes, "Replaced text in")
+            return
+
+        errors: list[str] = []
+        renamed = 0
+        for index, new_stem in changes.items():
+            vf = targets[index]
+            new_path = vf.path.with_name(new_stem + vf.path.suffix)
+            try:
+                if new_path.exists() and new_path != vf.path:
+                    raise FileExistsError(f"{new_path.name} already exists")
+                os.rename(vf.path, new_path)
+                vf.path = new_path
+                renamed += 1
+            except OSError as exc:
+                errors.append(f"{vf.path.name}: {exc}")
+        self._after_batch_edit(f"Renamed {renamed} file(s)")
+        if errors:
+            QMessageBox.warning(self, "Some files failed to rename", _error_details(errors))
+
+    def _apply_single_field_changes(
+        self, label: str, targets: list[VideoFile], field_key: str,
+        changes: dict[int, str], verb: str,
+    ) -> None:
+        """Shared tail of the one-field batch dialogs: stage each accepted
+        new value (undoably), then refresh."""
+        if not changes:
+            return
+        self._push_undo(label, [targets[i] for i in changes])
+        applied = 0
+        for index, new_value in changes.items():
+            vf = targets[index]
+            if _set_field_from_text(vf, field_key, new_value):
+                vf.dirty = True
+                applied += 1
+        self._after_batch_edit(f"{verb} {applied} file(s) -- not yet saved to disk")
 
     def _quick_number_episodes(self, files: list[VideoFile]) -> None:
         """The table right-click's quick version of Auto-Numbering:
@@ -2121,13 +2267,12 @@ class MainWindow(QMainWindow):
         plain "start here, count up by one" case on Episode #
         specifically -- a different field, a different step, or a look
         at what's changing before it does -- use
-        Operations -> Auto-Numbering... instead. Not routed through an
-        undo manager -- this project doesn't have one yet (unlike
-        epub/mp3/cbz), same as every other in-memory edit here.
+        Operations -> Auto-Numbering... instead. Undoable (Ctrl+Z).
         """
         values = prompt_and_generate_series_numbers(self, len(files), field_label="Starting Episode #")
         if values is None:
             return
+        self._push_undo("Number Episodes", files)
         for vf, new_value in zip(files, values):
             try:
                 vf.metadata.episode_number = int(float(new_value))
@@ -2139,25 +2284,64 @@ class MainWindow(QMainWindow):
             self._on_selection_changed()
 
     def _on_auto_numbering(self) -> None:
-        """Batch sequential-number assignment into a chosen field,
-        staged (unsaved) onto the selected files, in their current
-        selection/table order. Same selection-or-all-files scope as
-        rename by pattern.
-        """
-        selected = self._selected_video_files()
-        targets = selected if selected else self.video_files
+        """Batch sequential numbers into a chosen field, staged (unsaved),
+        in the files' current table order, via redactor_common's shared
+        dialog (which started life as this project's own)."""
+        targets = self._batch_targets("number")
         if not targets:
-            QMessageBox.information(self, "No Files", "Load some files first.")
             return
+        fields = [
+            (field, FIELD_LABELS.get(field, field), field in NUMERIC_FIELDS)
+            for field in NUMERIC_FIELDS + TEXT_FIELDS
+        ]
+        dialog = AutoNumberingDialog(
+            targets, fields, _field_text, lambda vf: vf.path.name, item_noun="file", parent=self,
+        )
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        self._apply_single_field_changes("Auto-Numbering", targets, dialog.result_field_key(),
+                                         dialog.accepted_changes(), "Auto-numbered")
 
-        dialog = AutoNumberingDialog(targets, parent=self)
-        if dialog.exec():
-            self._refresh_table_rows()
-            if self._selected_video_files():
-                self._on_selection_changed()
-            self.status_bar.showMessage(
-                f"Auto-numbered {dialog.numbered_count} file(s) -- not yet saved to disk"
-            )
+    # --- Undo / Redo -----------------------------------------------------
+
+    @staticmethod
+    def _snapshot(vf: VideoFile) -> tuple:
+        return copy.deepcopy(vf.metadata), vf.dirty
+
+    @staticmethod
+    def _restore(vf: VideoFile, snapshot: tuple) -> None:
+        vf.metadata, vf.dirty = copy.deepcopy(snapshot[0]), snapshot[1]
+
+    def _push_undo(self, label: str, files: list[VideoFile]) -> None:
+        """Call BEFORE mutating `files`, to capture their prior state."""
+        if not files:
+            return
+        self.undo_manager.push(label, files, self._snapshot)
+        self._update_undo_actions()
+
+    def _clear_undo(self) -> None:
+        self.undo_manager.clear()
+        self._update_undo_actions()
+
+    def _update_undo_actions(self) -> None:
+        undo_label = self.undo_manager.peek_label()
+        redo_label = self.undo_manager.peek_redo_label()
+        self.undo_action.setEnabled(self.undo_manager.can_undo())
+        self.undo_action.setText(f"&Undo {undo_label}" if undo_label else "&Undo")
+        self.redo_action.setEnabled(self.undo_manager.can_redo())
+        self.redo_action.setText(f"&Redo {redo_label}" if redo_label else "&Redo")
+
+    def undo_last_action(self) -> None:
+        # snapshot_fn too, so the state being overwritten goes onto the
+        # redo stack -- see redactor_common.core.undo.
+        if self.undo_manager.undo(self._restore, self._snapshot):
+            self._after_batch_edit("Undone")
+        self._update_undo_actions()
+
+    def redo_last_action(self) -> None:
+        if self.undo_manager.redo(self._restore, self._snapshot):
+            self._after_batch_edit("Redone")
+        self._update_undo_actions()
 
     # --- Help ------------------------------------------------------------
 

@@ -49,6 +49,7 @@ from typing import Optional
 
 from core.video_metadata import VideoMetadata, ContentType
 from core.external_tools import get_executable_path
+from redactor_common.core.subprocess_utils import run_tool
 
 # Every editable field EXCEPT title maps to a MATROSKA_TAG_KEY of the
 # same shape (title is handled separately -- see module docstring).
@@ -136,16 +137,19 @@ def parse_tags_xml(xml_text: str) -> dict[str, str]:
     return result
 
 
-def _no_console_flags() -> int:
-    return subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0  # type: ignore[attr-defined]
+# mkvpropedit edits in place and mkvmerge -J / mkvextract tags only read
+# headers, so all three finish in seconds even for a huge file -- a call
+# still running after this long is hung (e.g. a stalled network share).
+# TimeoutExpired propagates; VideoFile.load()/save() already turn any
+# exception into a per-file error.
+MKV_TOOL_TIMEOUT_SECONDS = 300
 
 
 def run_mkvpropedit(path: str, args: list[str]) -> subprocess.CompletedProcess:
     """Run mkvpropedit on a file with the given argument list.
 
-    Uses CREATE_NO_WINDOW on Windows to avoid the console-popup issue the
-    epub tool hit and fixed (v35) with its own Calibre subprocess calls --
-    applying that lesson here proactively rather than waiting to rediscover it.
+    Goes through redactor_common's run_tool(): no console window,
+    stdin=DEVNULL, UTF-8 output decoding, and a timeout.
 
     CALLER CONTRACT: does not check whether mkvpropedit is actually on
     PATH -- a missing executable raises FileNotFoundError here rather
@@ -155,11 +159,9 @@ def run_mkvpropedit(path: str, args: list[str]) -> subprocess.CompletedProcess:
     don't remove that upstream check assuming this function guards
     against it, it doesn't.
     """
-    return subprocess.run(
+    return run_tool(
         [get_executable_path("mkvpropedit"), path] + args,
-        capture_output=True,
-        text=True,
-        creationflags=_no_console_flags(),
+        timeout=MKV_TOOL_TIMEOUT_SECONDS,
     )
 
 
@@ -205,9 +207,12 @@ def read_mkv_metadata(path: str, diagnostics: Optional[dict] = None) -> VideoMet
         diagnostics = {}
     meta = VideoMetadata(container="mkv")
 
-    merge_result = subprocess.run(
+    # UTF-8 decoding matters here: mkvmerge's JSON is UTF-8, and the
+    # locale default (cp1252) turned a non-ASCII title ("Amélie") into
+    # mojibake that a later Save then wrote back into the file.
+    merge_result = run_tool(
         [get_executable_path("mkvmerge"), "-J", path],
-        capture_output=True, text=True, creationflags=_no_console_flags(),
+        timeout=MKV_TOOL_TIMEOUT_SECONDS,
     )
     diagnostics["mkvmerge_stderr"] = merge_result.stderr or ""
     try:
@@ -245,9 +250,9 @@ def read_mkv_metadata(path: str, diagnostics: Optional[dict] = None) -> VideoMet
     try:
         with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as tmp_file:
             tmp_extract_path = tmp_file.name
-        extract_result = subprocess.run(
+        extract_result = run_tool(
             [get_executable_path("mkvextract"), path, "tags", tmp_extract_path],
-            capture_output=True, text=True, creationflags=_no_console_flags(),
+            timeout=MKV_TOOL_TIMEOUT_SECONDS,
         )
         diagnostics["mkvextract_stderr"] = extract_result.stderr or ""
         diagnostics["mkvextract_stdout"] = extract_result.stdout or ""

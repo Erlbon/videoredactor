@@ -1,11 +1,19 @@
-"""Tests for core/text_transforms.py -- pure functions, fully runnable."""
+"""This project's case conversion / search-replace / auto-numbering
+expectations, run against redactor_common's shared implementations
+(core/text_transforms.py was retired 2026-09-23; its title-case clause
+rule -- "Star Wars: A New Hope" -- was merged into the shared one)."""
 
 import unittest
 
-from core.text_transforms import (
-    apply_case_conversion, apply_search_replace,
-    generate_auto_number, apply_auto_number_to_text_field,
-)
+from redactor_common.core.auto_number import apply_auto_number_to_text_field, generate_auto_number
+from redactor_common.core.case_conversion import apply_case_conversion
+from redactor_common.core.search_replace import apply_replace
+
+
+def apply_search_replace(text, search, replace, case_sensitive=True):
+    """Plain-text (non-regex) replace, case-sensitive by default, as
+    this project's original helper was."""
+    return apply_replace(text, search, replace, use_regex=False, case_sensitive=case_sensitive)
 
 
 class TestCaseConversion(unittest.TestCase):
@@ -53,9 +61,10 @@ class TestCaseConversion(unittest.TestCase):
     def test_whitespace_only_unchanged(self):
         self.assertEqual(apply_case_conversion("   ", "upper"), "   ")
 
-    def test_unknown_mode_raises(self):
-        with self.assertRaises(ValueError):
-            apply_case_conversion("test", "not_a_real_mode")
+    def test_unknown_mode_leaves_text_unchanged(self):
+        # The shared implementation is driven by a fixed dropdown and
+        # treats an unknown mode as a no-op rather than raising.
+        self.assertEqual(apply_case_conversion("test", "not_a_real_mode"), "test")
 
     def test_sentence_case_preserves_leading_whitespace(self):
         self.assertEqual(apply_case_conversion("  hello world", "sentence"), "  Hello world")

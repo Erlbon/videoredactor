@@ -11,12 +11,12 @@ file, not just syntax-checked -- see tests/test_ffmpeg_backend.py.
 
 from __future__ import annotations
 import subprocess
-import os
 import threading
 from pathlib import Path
 from typing import Optional
 
 from core.external_tools import get_executable_path
+from redactor_common.core.subprocess_utils import popen_tool, run_tool
 
 # Extensions offered in the Import menu's "Import & Convert to MP4..."
 # file picker -- anything ffmpeg's own demuxers commonly handle for a
@@ -33,38 +33,33 @@ IMPORTABLE_EXTENSIONS: frozenset[str] = frozenset({
 })
 
 
-def _no_console_flags() -> int:
-    """CREATE_NO_WINDOW on Windows, matching the epub tool's fix (v35)
-    for Calibre subprocess calls popping a console window."""
-    return subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0  # type: ignore[attr-defined]
+# Timeouts: a probe or a single-frame grab that hasn't finished in a
+# minute is hung (a stalled network share, a pathological file), not
+# slow. A remux is a stream copy -- minutes for a very large file at
+# worst -- so it gets a much longer ceiling rather than none at all.
+PROBE_TIMEOUT_SECONDS = 60
+THUMBNAIL_TIMEOUT_SECONDS = 60
+REMUX_TIMEOUT_SECONDS = 3 * 60 * 60
 
 
-def _run(args: list[str]) -> Optional[subprocess.CompletedProcess]:
-    """subprocess.run wrapper shared by every function below. args[0]
-    is always the LOGICAL executable name ("ffmpeg", "ffprobe") as
-    written at each call site -- resolved here through
-    get_executable_path(), which substitutes a user-configured
-    settings.ini override when one exists, or leaves it as the bare
-    command name for normal PATH resolution otherwise. Every call site
-    below stays written against the logical name; only this one
-    function needs to know overrides exist at all.
+def _run(args: list[str], timeout: float = PROBE_TIMEOUT_SECONDS) -> Optional[subprocess.CompletedProcess]:
+    """Runs a tool via redactor_common's run_tool() (no console window,
+    stdin=DEVNULL so ffmpeg can never sit waiting on an inherited stdin,
+    UTF-8 output decoding so a non-ASCII title isn't mangled into cp1252
+    mojibake, and a timeout). args[0] is always the LOGICAL executable
+    name ("ffmpeg", "ffprobe") as written at each call site -- resolved
+    here through get_executable_path(), which substitutes a
+    user-configured override, a bundled tools/ copy, or an install-folder
+    copy, or leaves the bare name for PATH resolution.
 
-    Returns None if the resolved executable still isn't found
-    (FileNotFoundError / WinError2) rather than letting that propagate
-    as an uncaught exception -- every caller already has a defined
-    "this failed" return shape (None / False / (False, message)), so a
-    missing ffmpeg becomes a clean failure through that same shape
-    instead of a crash. Reproduced and fixed against this exact
-    condition: this development sandbox genuinely lacks MKVToolNix,
-    which surfaced the same unguarded-subprocess bug class in
-    mkv_backend.py first.
+    Returns None if the executable isn't found or the call times out,
+    rather than raising -- every caller already has a defined "this
+    failed" return shape (None / False / (False, message)).
     """
     resolved_args = [get_executable_path(args[0])] + args[1:]
     try:
-        return subprocess.run(
-            resolved_args, capture_output=True, text=True, creationflags=_no_console_flags(),
-        )
-    except FileNotFoundError:
+        return run_tool(resolved_args, timeout=timeout)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
 
 
@@ -112,6 +107,7 @@ def extract_thumbnail(
             "-q:v", "3",  # JPEG quality; 2-5 is "visually lossless enough" range
             output_path,
         ],
+        timeout=THUMBNAIL_TIMEOUT_SECONDS,
     )
     if result is None:
         return False
@@ -127,9 +123,12 @@ def remux_to_mp4(input_path: str, output_path: str) -> tuple[bool, str]:
     the caller needs it verbatim to show the user, not a generic
     exception message.
     """
-    result = _run(["ffmpeg", "-y", "-i", input_path, "-c", "copy", output_path])
+    result = _run(
+        ["ffmpeg", "-y", "-i", input_path, "-c", "copy", output_path],
+        timeout=REMUX_TIMEOUT_SECONDS,
+    )
     if result is None:
-        return False, "ffmpeg not found on PATH -- is it installed?"
+        return False, "ffmpeg could not be run (not found, or it stopped responding)."
     return result.returncode == 0, result.stderr
 
 
@@ -176,9 +175,8 @@ def transcode_to_mp4(
 
     resolved_args = [get_executable_path(args[0])] + args[1:]
     try:
-        proc = subprocess.Popen(
-            resolved_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, creationflags=_no_console_flags(),
+        proc = popen_tool(
+            resolved_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         )
     except FileNotFoundError:
         return False, "ffmpeg not found on PATH -- is it installed?"
