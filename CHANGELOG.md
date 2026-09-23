@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-23#02 — Shared resizable preview area
+
+The thumbnail preview's splitter is now redactor_common's shared
+`ImagePanelSplitter` + `ImagePreviewBox` (2026-09-23-02). Same dark
+"screen" look; after the preview has been dragged large it can be
+dragged smaller again, and the Preview box's title can no longer keep
+the side panel from collapsing fully.
+
 ## 2026-09-23#01 — Shared-code consolidation: tool fixes, undo, async thumbnails
 
 Moves onto redactor_common 2026-09-23-01 (was pinned nine days behind at

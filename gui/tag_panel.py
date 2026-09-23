@@ -18,9 +18,9 @@ from typing import Optional
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFormLayout, QLineEdit,
-    QTextEdit, QSpinBox, QComboBox, QLabel, QGroupBox, QSplitter,
+    QTextEdit, QSpinBox, QComboBox, QLabel,
 )
-from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
 
 from core.video_metadata import ContentType, fields_for_content_type, UNIVERSAL_FIELDS
@@ -30,8 +30,8 @@ from core.controlled_vocab import (
 from core.table_settings import is_column_visible, sanitize_hidden_fields
 from core.config import get_setting
 from gui.multi_select_combo import MultiSelectComboBox
-from redactor_common.gui.image_label import AspectRatioImageLabel
 from redactor_common.gui.collapsible_splitter import CollapseToggleButton
+from redactor_common.gui.image_pane import ImagePanelSplitter, ImagePreviewBox
 
 PREVIEW_WIDTH = 240
 PREVIEW_HEIGHT = 135  # 16:9 -- matches typical video aspect ratio
@@ -125,26 +125,17 @@ class TagPanel(QWidget):
         self.form_layout = QFormLayout(self.form_container)
         self.scroll_area.setWidget(self.form_container)
 
-        preview_box = QGroupBox("Preview")
-        preview_layout = QVBoxLayout(preview_box)
-        self.preview_label = AspectRatioImageLabel()
-        self.preview_label.setMinimumSize(PREVIEW_WIDTH // 2, PREVIEW_HEIGHT // 2)
-        self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_label.setStyleSheet("background-color: #222; color: #888;")
-        self.preview_label.setText("No preview")
-        preview_layout.addWidget(self.preview_label, 1)
-
-        # A real draggable divider between the two sections -- promoted
-        # from the epub tool's cover/fields splitter (this project
-        # originally deferred it: fixed-size preview). Both panes are
-        # collapsible (Qt's default), so either one can be dragged all
-        # the way down to make room for the other.
-        self._vertical_splitter = QSplitter(Qt.Orientation.Vertical)
-        self._vertical_splitter.addWidget(self.scroll_area)
-        self._vertical_splitter.addWidget(preview_box)
-        self._vertical_splitter.setStretchFactor(0, 1)
-        self._vertical_splitter.setStretchFactor(1, 1)
-        self._vertical_splitter.setSizes([500, 300])  # initial bias toward fields; purely a starting hint
+        # redactor_common's ImagePreviewBox + ImagePanelSplitter: the
+        # resizable image area every Redactor side panel shares -- drag
+        # the divider to give the thumbnail more (or less) room; either
+        # pane can be dragged all the way closed.
+        self.preview_box = ImagePreviewBox(
+            "Preview", placeholder="No preview",
+            minimum_size=(PREVIEW_WIDTH // 2, PREVIEW_HEIGHT // 2),
+        )
+        self.preview_label = self.preview_box.image_label
+        self.preview_label.setStyleSheet("background-color: #222; color: #888;")  # a "screen" look for video frames
+        self._vertical_splitter = ImagePanelSplitter(self.scroll_area, self.preview_box, initial_sizes=(500, 300))
         outer.addWidget(self._vertical_splitter, 1)
 
         self.set_content_type_filter(None)  # builds the initial (all-fields) form
@@ -157,35 +148,20 @@ class TagPanel(QWidget):
         box the way this used to be.
         """
         if path is None:
-            self.preview_label.set_original_pixmap(None)  # clears any prior image
-            self.preview_label.setText("No preview")
+            self.preview_box.show_message("No preview")
             return
-
-        pixmap = QPixmap(path)
-        if pixmap.isNull():
-            self.preview_label.set_original_pixmap(None)
-            self.preview_label.setText("Preview unavailable")
-            return
-
-        self.preview_label.setText("")
-        self.preview_label.set_original_pixmap(pixmap)
+        self.preview_box.show_pixmap(QPixmap(path), "Preview unavailable")
 
     def set_preview_loading(self) -> None:
         """Placeholder while a thumbnail is generated in the background
         (see MainWindow._update_preview)."""
-        self.preview_label.set_original_pixmap(None)
-        self.preview_label.setText("Loading preview…")
+        self.preview_box.show_message("Loading preview\u2026")
 
     def set_preview_qimage(self, image: Optional[QImage]) -> None:
         """Shows an already-decoded thumbnail (decoded off the main
         thread by redactor_common's AsyncPreviewLoader); a null or None
         image shows "Preview unavailable"."""
-        if image is None or image.isNull():
-            self.preview_label.set_original_pixmap(None)
-            self.preview_label.setText("Preview unavailable")
-            return
-        self.preview_label.setText("")
-        self.preview_label.set_original_pixmap(QPixmap.fromImage(image))
+        self.preview_box.show_image(image, "Preview unavailable")
 
     def set_collapsed_indicator(self, collapsed: bool) -> None:
         """Updates the panel's own toggle button to reflect whether it's
