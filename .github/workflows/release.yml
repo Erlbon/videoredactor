@@ -1,0 +1,83 @@
+name: Release
+
+# Push a tag like v2026-09-24-01 (APP_VERSION 2026-09-24#01 with the #
+# turned into -) to build videoredactor.exe on Windows and publish it as a GitHub
+# Release, with that version's CHANGELOG.md section as the notes. Bumping
+# APP_VERSION and writing the CHANGELOG entry stay manual, as before.
+# Re-running on an existing tag (Actions tab > Release > Run workflow)
+# re-uploads the exe to that tag's release instead of failing.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build and publish, e.g. v2026-09-24-01"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      QT_QPA_PLATFORM: offscreen
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install ffmpeg
+        run: choco install ffmpeg -y --no-progress
+
+      # The .spec builds with upx=True; without UPX on PATH PyInstaller
+      # silently skips compression and the exe comes out larger.
+      - name: Install UPX
+        run: choco install upx -y --no-progress
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt pytest
+
+      - name: Check the tag against APP_VERSION and CHANGELOG.md
+        shell: python
+        run: |
+          import os, re, sys
+          sys.path.insert(0, ".")
+          from core.version import APP_NAME, APP_VERSION
+          tag = os.environ["TAG"]
+          expected = "v" + APP_VERSION.replace("#", "-")
+          if tag != expected:
+              sys.exit(f"Tag {tag} does not match APP_VERSION {APP_VERSION} (expected {expected})")
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          m = re.search(rf"^## {re.escape(APP_VERSION)}\b[^\n]*\n(.*?)(?=^## |\Z)", text, re.M | re.S)
+          if not m or not m.group(1).strip():
+              sys.exit(f"CHANGELOG.md has no '## {APP_VERSION}' section")
+          with open("release_notes.md", "w", encoding="utf-8") as f:
+              f.write(m.group(1).strip() + "\n")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
+              f.write(f"RELEASE_TITLE={APP_NAME} {tag}\n")
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Build exe
+        run: python -m PyInstaller videoredactor.spec --noconfirm
+
+      - name: Publish GitHub Release
+        shell: bash
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/videoredactor.exe --clobber
+          else
+            gh release create "$TAG" dist/videoredactor.exe --title "$RELEASE_TITLE" --notes-file release_notes.md
+          fi
