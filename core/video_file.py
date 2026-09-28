@@ -41,6 +41,9 @@ class VideoFile:
     save_error: str = ""   # mirrors EpubBook.save_error (v42/v43 lesson: track per-file, don't just retry blind)
     dirty: bool = False    # unsaved bulk-edit changes pending
     _thumbnail_path: Optional[Path] = field(default=None, repr=False, compare=False)
+    # Operations > Check Files... result (core/file_check.CheckResult);
+    # None until checked. Not saved anywhere -- a fresh load starts unchecked.
+    check: Optional[object] = field(default=None, repr=False, compare=False)
 
     @property
     def extension(self) -> str:

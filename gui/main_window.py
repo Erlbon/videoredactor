@@ -55,7 +55,9 @@ from redactor_common.gui.parse_filename_dialog import ParseFilenameDialog
 from redactor_common.gui.rename_pattern_dialog import RenamePatternDialog
 from redactor_common.gui.search_replace_dialog import FILENAME_FIELD_KEY, SearchReplaceDialog
 from redactor_common.gui.progress import ProgressReporter, run_with_progress
-from redactor_common.gui.colors import DIRTY_COLOR, ERROR_COLOR, HIGHLIGHT_TEXT_COLOR, TABLE_SELECTION_STYLESHEET
+from redactor_common.gui.colors import (
+    DIRTY_COLOR, ERROR_COLOR, HIGHLIGHT_TEXT_COLOR, SAVE_FAILED_COLOR, TABLE_SELECTION_STYLESHEET,
+)
 from redactor_common.gui.context_menu import show_table_context_menu
 from redactor_common.gui.quick_series_number import prompt_and_generate_series_numbers
 from redactor_common.gui.column_menu import show_column_header_context_menu
@@ -434,6 +436,7 @@ class MainWindow(QMainWindow):
                            self._on_convert_to_mp4, shortcut="Ctrl+Shift+C"),
                 MenuAction("rename_by_pattern", "Rena&me/Export by Pattern...",
                            self._on_rename_by_pattern, shortcut=shortcuts.RENAME_EXPORT_BY_PATTERN),
+                MenuAction("check_files", "Chec&k Files...", self._on_check_files),
                 Separator(),
                 MenuAction("case_conversion", "Case &Conversion...", self._on_case_conversion),
                 MenuAction(
@@ -1000,7 +1003,8 @@ class MainWindow(QMainWindow):
                         # Store the VideoFile reference on the filename cell --
                         # row->file mapping via UserRole, not row index.
                         item.setData(FILE_ROLE, vf)
-                    tooltip = vf.save_error or vf.load_error
+                    check_note = vf.check.summary() if vf.check is not None and vf.check.findings else ""
+                    tooltip = "\n".join(t for t in (vf.save_error or vf.load_error, check_note) if t)
                     if tooltip:
                         item.setToolTip(tooltip)
                     if row_colors is not None:
@@ -1038,6 +1042,12 @@ class MainWindow(QMainWindow):
             return (ERROR_COLOR, HIGHLIGHT_TEXT_COLOR)
         if vf.dirty:
             return (DIRTY_COLOR, HIGHLIGHT_TEXT_COLOR)
+        # Check Files results: damaged red like a load error, repairable
+        # in the shared soft orange (needs attention, not broken).
+        if vf.check is not None and vf.check.status == "DAMAGED":
+            return (ERROR_COLOR, HIGHLIGHT_TEXT_COLOR)
+        if vf.check is not None and vf.check.status == "REPAIRABLE":
+            return (SAVE_FAILED_COLOR, HIGHLIGHT_TEXT_COLOR)
         return None
 
     def _display_value(self, vf: VideoFile, field_name: str) -> str:
@@ -1047,11 +1057,20 @@ class MainWindow(QMainWindow):
             return str(vf.path)
         if field_name == "status":
             if vf.load_error:
+                # A file whose tags can't be read (e.g. an MKV without
+                # MKVToolNix installed) can still have been checked: a
+                # damaged/repairable result is what to act on, so it wins
+                # (the load error stays in the tooltip); otherwise a
+                # damaged file would look like any other load error.
+                if vf.check is not None and vf.check.status in ("DAMAGED", "REPAIRABLE"):
+                    return vf.check.status
                 return "LOAD ERROR"
             if vf.save_error:
                 return "SAVE FAILED"
             if vf.dirty:
                 return "UNSAVED"
+            if vf.check is not None:
+                return vf.check.status  # Operations > Check Files...
             return "OK"
         if field_name == "content_type":
             ct = vf.metadata.content_type
@@ -1649,6 +1668,19 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(status_msg)
 
     # --- Remux ---------------------------------------------------------
+
+    def _on_check_files(self) -> None:
+        """Operations > Check Files...: the quick health check for the
+        selected files (all loaded files when none are selected), then
+        the results and an optional lossless Repair -- see
+        gui/file_check_dialog.py and core/file_check.py."""
+        from gui.file_check_dialog import run_check_and_repair
+
+        files = self._selected_video_files() or list(self.video_files)
+        if not files:
+            QMessageBox.information(self, "Check Files", "Load some video files first.")
+            return
+        run_check_and_repair(self, files, _error_details)
 
     def _on_remux_selected(self) -> None:
         """Remux selected MKV files to MP4 (batch-capable, -c copy so

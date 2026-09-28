@@ -9,6 +9,7 @@
 
 PyQt6>=6.6
 mutagen>=1.47
+send2trash>=1.8
 
 # Shared UI/core code with the epub and mp3 Redactor tools -- a real
 # pip dependency (github.com/Erlbon/redactor_common), not a vendored
@@ -20,7 +21,7 @@ mutagen>=1.47
 # repo's README ("Releasing a new version") for how to bump this pin
 # deliberately when it changes, rather than floating and having one bad
 # push there break this project's next install.
-redactor_common @ git+https://github.com/Erlbon/redactor_common.git@2026-09-28-07
+redactor_common @ git+https://github.com/Erlbon/redactor_common.git@2026-09-28-08
 
 # For building the .exe:
 pyinstaller>=6.3

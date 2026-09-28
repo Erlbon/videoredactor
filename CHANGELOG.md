@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-09-28#03 — Check and repair video files
+
+- **Operations > Check Files...** (selected files, or all): a quick health
+  check -- seconds per file, nothing decoded. It reads every packet and
+  the file's own structure, and reports in the Status column (DAMAGED /
+  REPAIRABLE / NOTE / CHECKED OK, details in the tooltip) and a results
+  list:
+  - damaged: read errors, a file that ends early (an interrupted
+    download or copy: "plays 0:42:10 of 1:48:03"), a file that can't be
+    opened at all;
+  - repairable: an MKV without a seek index or duration, an MP4 whose
+    index is at the end (won't start playing until fully loaded), no
+    default audio track or several;
+  - notes: audio/subtitle tracks without a language.
+- **Repair** (from the results): rewrites each file losslessly -- no
+  re-encoding -- next to the original, fixing all of the above; a
+  damaged file keeps everything readable up to a second before the
+  break (what's missing can't be restored). The app's own tags and the
+  cover are written back and compared field by field, the copy is
+  checked, and only then does it replace the original, which goes to
+  the Recycle Bin. Files with unsaved edits are skipped. Needs ffmpeg;
+  restoring an MKV's tags needs MKVToolNix.
+- redactor_common 2026-09-28-08 (shared Recycle Bin helper); send2trash
+  is now a dependency.
+
 ## 2026-09-28#02 — Shared release notes
 
 No change to the app. The GitHub Release notes (every CHANGELOG section since the previous release) are now built by redactor_common's shared script instead of a copy in this repo (redactor_common 2026-09-28-07, from 2026-09-28-05).
