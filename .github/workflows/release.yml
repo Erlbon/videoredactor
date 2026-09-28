@@ -48,24 +48,29 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt pytest
 
-      - name: Check the tag against APP_VERSION and CHANGELOG.md
+      - name: Check the tag against APP_VERSION
         shell: python
         run: |
-          import os, re, sys
+          import os, sys
           sys.path.insert(0, ".")
           from core.version import APP_NAME, APP_VERSION
           tag = os.environ["TAG"]
           expected = "v" + APP_VERSION.replace("#", "-")
           if tag != expected:
               sys.exit(f"Tag {tag} does not match APP_VERSION {APP_VERSION} (expected {expected})")
-          text = open("CHANGELOG.md", encoding="utf-8").read()
-          m = re.search(rf"^## {re.escape(APP_VERSION)}\b[^\n]*\n(.*?)(?=^## |\Z)", text, re.M | re.S)
-          if not m or not m.group(1).strip():
-              sys.exit(f"CHANGELOG.md has no '## {APP_VERSION}' section")
-          with open("release_notes.md", "w", encoding="utf-8") as f:
-              f.write(m.group(1).strip() + "\n")
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
               f.write(f"RELEASE_TITLE={APP_NAME} {tag}\n")
+
+      # Every CHANGELOG.md section since the previous published release
+      # (release_notes.py; fails if the tagged version has no section) --
+      # not just the tagged version's own, which left check-ins between
+      # two releases unannounced.
+      - name: Build the release notes
+        shell: bash
+        run: |
+          gh release list --limit 100 --exclude-drafts --json tagName --jq '.[].tagName' > published_tags.txt
+          python release_notes.py "$TAG" published_tags.txt release_notes.md
+          cat release_notes.md
 
       - name: Run tests
         run: python -m pytest -q
