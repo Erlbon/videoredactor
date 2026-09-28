@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-09-28#01 — Linux version
+
+- **A Linux download** alongside the Windows one:
+  `videoredactor-linux-x86_64.tar.gz`, a single self-contained program for
+  64-bit desktop Linux (glibc 2.35+: Ubuntu 22.04+, Debian 12+, Fedora
+  36+, Mint 21+). Built with Python 3.12 like the Windows version; the
+  whole test suite runs on Linux as part of every release build.
+  External tools are found on your PATH, as on Windows.
+- redactor_common 2026-09-28-05 (from 2026-09-23-02): on Linux the settings live in `~/.config/videoredactor/`, the standard place, instead of next to the program (Windows unchanged); it also catches up with the shared library's other changes since 2026-09-23.
+
 ## 2026-09-23#02 — Shared resizable preview area
 
 The thumbnail preview's splitter is now redactor_common's shared

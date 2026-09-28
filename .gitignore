@@ -6,3 +6,7 @@ build/
 dist/
 *.spec.bak
 videoredactor_settings.ini
+
+# Linux builds (redactor-build-tools/linux-build/build.sh)
+build-linux/
+dist-linux/

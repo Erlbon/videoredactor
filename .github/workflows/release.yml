@@ -81,3 +81,34 @@ jobs:
           else
             gh release create "$TAG" dist/videoredactor.exe --title "$RELEASE_TITLE" --notes-file release_notes.md
           fi
+
+  # The Linux download, built after the Windows job has created the
+  # release: the same Docker toolchain as a local Linux build
+  # (github.com/Erlbon/redactor-build-tools -- Ubuntu 22.04, Python 3.12,
+  # tests run inside it first), packaged as a tarball with a short
+  # README and uploaded to the same release.
+  linux:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/checkout@v4
+        with:
+          repository: Erlbon/redactor-build-tools
+          path: build-tools
+
+      - name: Build and test in the Linux toolchain
+        run: bash build-tools/linux-build/build.sh . videoredactor.spec --test
+
+      - name: Package
+        run: bash build-tools/linux-build/package.sh . videoredactor "The Ʌideo Redactor"
+
+      - name: Upload to the release
+        run: gh release upload "$TAG" dist-linux/videoredactor-linux-x86_64.tar.gz --clobber

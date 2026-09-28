@@ -1,13 +1,31 @@
 """
-Tests for core/external_tools.py. Fully runnable here -- shutil.which()
-needs no network or GUI, and this sandbox conveniently has a real mixed
-environment to test against: ffmpeg genuinely installed, MKVToolNix
-genuinely not, which exercises both the "found" and "missing" paths for
-real rather than needing to fake either.
+Tests for core/external_tools.py. shutil.which() needs no network or
+GUI, so these run against a real mixed environment: ffmpeg genuinely
+installed, MKVToolNix absent -- which exercises both the "found" and
+"missing" paths for real. MKVToolNix's absence is ENFORCED rather than
+assumed (_without_mkvtoolnix hides it from PATH lookups): the Linux
+release build's container has it installed, and the tests must mean the
+same thing there as on a machine without it.
 """
 
+import shutil
 import unittest
 from pathlib import Path
+from unittest import mock
+
+_real_which = shutil.which
+
+
+def _which_without_mkvtoolnix(cmd, *args, **kwargs):
+    if Path(str(cmd)).name.lower().startswith("mkv"):
+        return None
+    return _real_which(cmd, *args, **kwargs)
+
+
+def _without_mkvtoolnix(test_case):
+    patcher = mock.patch("shutil.which", _which_without_mkvtoolnix)
+    patcher.start()
+    test_case.addCleanup(patcher.stop)
 
 from core.external_tools import (
     ToolInfo, is_tool_available, missing_tools, FFMPEG, MKVTOOLNIX,
@@ -17,6 +35,9 @@ from core.external_tools import (
 
 
 class TestExternalTools(unittest.TestCase):
+    def setUp(self):
+        _without_mkvtoolnix(self)
+
     def test_ffmpeg_detected_as_available(self):
         # This sandbox has ffmpeg installed -- a real positive case,
         # not a mock.
@@ -57,15 +78,15 @@ class TestToolOverrides(unittest.TestCase):
     """
 
     def setUp(self):
-        import shutil, tempfile
+        import tempfile
         import core.config as config
+        _without_mkvtoolnix(self)
         self.tmpdir = tempfile.mkdtemp()
         self._original_config_path = config.CONFIG_PATH
         config.CONFIG_PATH = Path(self.tmpdir) / "settings.ini"
-        self.real_ffmpeg = shutil.which("ffmpeg")  # genuinely exists in this sandbox
+        self.real_ffmpeg = shutil.which("ffmpeg")  # genuinely installed
 
     def tearDown(self):
-        import shutil
         import core.config as config
         config.CONFIG_PATH = self._original_config_path
         shutil.rmtree(self.tmpdir, ignore_errors=True)
