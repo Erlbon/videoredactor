@@ -62,14 +62,14 @@ jobs:
               f.write(f"RELEASE_TITLE={APP_NAME} {tag}\n")
 
       # Every CHANGELOG.md section since the previous published release
-      # (release_notes.py; fails if the tagged version has no section) --
+      # (redactor_common's core/release_notes.py; fails if the tagged version has no section) --
       # not just the tagged version's own, which left check-ins between
       # two releases unannounced.
       - name: Build the release notes
         shell: bash
         run: |
           gh release list --limit 100 --exclude-drafts --json tagName --jq '.[].tagName' > published_tags.txt
-          python release_notes.py "$TAG" published_tags.txt release_notes.md
+          python -m redactor_common.core.release_notes "$TAG" published_tags.txt release_notes.md
           cat release_notes.md
 
       - name: Run tests

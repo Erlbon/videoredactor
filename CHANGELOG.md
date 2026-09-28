@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-28#02 — Shared release notes
+
+No change to the app. The GitHub Release notes (every CHANGELOG section since the previous release) are now built by redactor_common's shared script instead of a copy in this repo (redactor_common 2026-09-28-07, from 2026-09-28-05).
+
 ## 2026-09-28#01 — Linux version
 
 - **A Linux download** alongside the Windows one:
