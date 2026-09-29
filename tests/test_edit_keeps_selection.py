@@ -36,10 +36,7 @@ def _select(window, vf):
 
 
 @pytest.fixture
-def sorted_window(window, tmp_path, monkeypatch):
-    # No thumbnail worker: with it, two FAILING tests here hung pytest at
-    # exit instead of reporting (the traceback keeps the window alive).
-    monkeypatch.setattr(window, "_update_preview", lambda selected: None)
+def sorted_window(window, tmp_path):
     path = tmp_path / "The Office S01E03.mkv"
     path.write_bytes(b"")
     window.video_files.append(VideoFile(path=path, metadata=VideoMetadata(show_title="the office", title="health care")))

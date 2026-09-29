@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-29#05 — Quitting while a thumbnail loads
+
+- **Fixed: the app could stay running after you closed it.** Quitting (or closing the window) while a file's preview thumbnail was still being generated left the process hung forever in the background -- more likely with a large or slow-to-seek file, or one on a network share. It now exits once that thumbnail finishes (at most the thumbnail timeout).
+- The same bug hung the test run at exit when two tests failed; a regression test now covers it.
+- redactor_common 2026-09-29-04 (from 2026-09-29-03).
+
 ## 2026-09-29#04 — Edits stay on the file you selected
 
 - **Fixed: an edit could land on the wrong file.** After Apply (or Search/Replace, Case Conversion, Auto-Numbering, a TMDB/TVDB import, Undo...) the table is redrawn, and in a table sorted by a column the selection stayed on the same row *number* -- which now held a different file. The panel then showed that other file, and the next Apply edited it. The selection now stays on the same files.
