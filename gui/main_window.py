@@ -2144,6 +2144,8 @@ class MainWindow(QMainWindow):
             item_noun="file",
             zero_pad_field="episode_number",
             zero_pad_label="Zero-pad episode # to:",
+            ascii_only=get_setting("rename", "ascii_only", "0") == "1",
+            on_ascii_only_changed=lambda on: set_setting("rename", "ascii_only", "1" if on else "0"),
             parent=self,
         )
         if dialog.exec() != dialog.DialogCode.Accepted:
