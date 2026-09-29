@@ -52,6 +52,9 @@ from redactor_common.gui.async_preview import AsyncPreviewLoader
 from redactor_common.gui.auto_numbering_dialog import AutoNumberingDialog
 from redactor_common.gui.case_conversion_dialog import CaseConversionDialog
 from redactor_common.gui.parse_filename_dialog import ParseFilenameDialog
+from redactor_common.core.rename_log import RenameLog
+from redactor_common.gui.rename_undo import undo_last_rename
+from core.app_paths import base_dir
 from redactor_common.gui.rename_pattern_dialog import RenamePatternDialog
 from redactor_common.gui.search_replace_dialog import FILENAME_FIELD_KEY, SearchReplaceDialog
 from redactor_common.gui.progress import ProgressReporter, run_with_progress
@@ -155,6 +158,12 @@ COLUMN_LABEL_LOOKUP = {**FIELD_LABELS, **TECHNICAL_LABELS, "filename": "Filename
 # labelled the same way as the bulk-edit panel.
 FILENAME_PLACEHOLDERS = [(field, FIELD_LABELS.get(field, field)) for field in EDITABLE_FIELDS]
 
+
+
+def _rename_log() -> RenameLog:
+    """The persistent log behind File > Undo Last Rename (redactor_common's
+    core/rename_log.py), next to this app's settings."""
+    return RenameLog(os.path.join(str(base_dir()), "videoredactor_rename_log.json"))
 
 def _field_text(vf: VideoFile, field_name: str) -> str:
     """A metadata field as the plain string the shared dialogs work on."""
@@ -388,6 +397,7 @@ class MainWindow(QMainWindow):
                     "rename_file", "&Rename File...", self.rename_selected_file,
                     shortcut=shortcuts.RENAME_SINGLE_FILE,
                 ),
+                MenuAction("undo_rename", "&Undo Last Rename...", self.undo_last_rename),
                 Separator(),
                 # F5 only, not the family's usual F5/Ctrl+R pair -- Ctrl+R
                 # is already "Remux Selected to MP4..." in this project's
@@ -1154,7 +1164,20 @@ class MainWindow(QMainWindow):
         redactor_common.gui.rename_single_file (imported above as
         prompt_rename_single_file to avoid shadowing this method's own
         name)."""
-        if prompt_rename_single_file(self, str(vf.path), lambda p: setattr(vf, "path", Path(p))):
+        if prompt_rename_single_file(self, str(vf.path), lambda p: setattr(vf, "path", Path(p)), log=_rename_log()):
+            self._refresh_table_rows()
+
+    def undo_last_rename(self) -> None:
+        """File > Undo Last Rename...: renames the newest logged rename back
+        (redactor_common's rename log -- renames aren't on the Undo stack,
+        which covers metadata edits only)."""
+        def restored(new_path: str, old_path: str) -> None:
+            wanted = os.path.normcase(os.path.abspath(new_path))
+            for item in self.video_files:
+                if os.path.normcase(os.path.abspath(str(item.path))) == wanted:
+                    item.path = Path(old_path)
+
+        if undo_last_rename(self, _rename_log(), restored):
             self._refresh_table_rows()
 
     def rename_selected_file(self) -> None:
@@ -2155,6 +2178,7 @@ class MainWindow(QMainWindow):
         export_mode = dialog.is_export_mode()
         done = 0
         errors: list[str] = []
+        renamed: list[tuple[str, str]] = []
         for vf, old_path, new_path in dialog.planned_renames():
             if os.path.normcase(os.path.abspath(old_path)) == os.path.normcase(os.path.abspath(new_path)):
                 continue
@@ -2164,9 +2188,11 @@ class MainWindow(QMainWindow):
                 else:
                     os.rename(old_path, new_path)
                     vf.path = Path(new_path)
+                    renamed.append((str(old_path), str(new_path)))
                 done += 1
             except OSError as exc:
                 errors.append(f"{os.path.basename(old_path)}: {exc}")
+        _rename_log().record("Rename by Pattern", renamed)
 
         self._refresh_table_rows()
         verb = "Exported" if export_mode else "Renamed"
@@ -2261,17 +2287,21 @@ class MainWindow(QMainWindow):
 
         errors: list[str] = []
         renamed = 0
+        logged: list[tuple[str, str]] = []
         for index, new_stem in changes.items():
             vf = targets[index]
             new_path = vf.path.with_name(new_stem + vf.path.suffix)
             try:
                 if new_path.exists() and new_path != vf.path:
                     raise FileExistsError(f"{new_path.name} already exists")
+                old_path = vf.path
                 os.rename(vf.path, new_path)
                 vf.path = new_path
+                logged.append((str(old_path), str(new_path)))
                 renamed += 1
             except OSError as exc:
                 errors.append(f"{vf.path.name}: {exc}")
+        _rename_log().record("Search/Replace (filename)", logged)
         self._after_batch_edit(f"Renamed {renamed} file(s)")
         if errors:
             QMessageBox.warning(self, "Some files failed to rename", _error_details(errors))

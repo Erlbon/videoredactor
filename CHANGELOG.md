@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-09-29#03 — Undo Last Rename
+
+- **File > Undo Last Rename...**: renames are now logged (Rename/Export by Pattern, a filename Search/Replace, Rename File) and the newest one can be taken back -- even after restarting the app. It shows what will be renamed back first, and never overwrites: a file that has moved since, or whose old name is taken again, is skipped and reported. The in-app Undo still covers metadata edits only.
+- redactor_common 2026-09-29-03 (from 2026-09-29-02).
+
 ## 2026-09-29#02 — Small fixes
 
 - Message boxes with several wide buttons keep their text next to the icon (on Linux the text could end up in a narrow strip far to the right) -- fixes the startup "Missing Required Tools" box.
