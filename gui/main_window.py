@@ -25,7 +25,7 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QComboBox, QLabel, QFileDialog,
     QStatusBar, QMessageBox, QToolBar,
 )
-from PyQt6.QtCore import Qt, QThread, QEventLoop, QSize, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QEventLoop, QItemSelection, QItemSelectionModel, QSize, pyqtSignal
 from PyQt6.QtGui import QColor, QImage, QKeySequence, QIcon
 
 from core.video_file import VideoFile, discover_video_files, has_subfolders
@@ -1002,6 +1002,12 @@ class MainWindow(QMainWindow):
     # --- Table rendering ---------------------------------------------------
 
     def _refresh_table_rows(self) -> None:
+        # Rows are refilled in self.video_files order and then re-sorted,
+        # so a selection kept by row number would land on whichever file
+        # now sits in that row. Found 2026-09-29: in a table sorted by a
+        # column, Apply on S01E01 left S01E03 selected, and the NEXT
+        # Apply silently edited S01E03. Reselect by file instead.
+        selected_ids = [id(vf) for vf in self._selected_video_files()]
         with suspend_sorting(self.table):
             self.table.setRowCount(len(self.video_files))
             for row, vf in enumerate(self.video_files):
@@ -1022,6 +1028,38 @@ class MainWindow(QMainWindow):
                         item.setBackground(bg)
                         item.setForeground(fg)
                     self.table.setItem(row, col, item)
+        self._reselect_files(selected_ids)
+
+    def _reselect_files(self, file_ids: list[int]) -> None:
+        """Selects exactly the rows holding these VideoFiles (by id()),
+        signals blocked so a pending panel edit isn't wiped. Only if a
+        file dropped out of the selection (e.g. it was removed) does the
+        panel get reloaded."""
+        wanted = set(file_ids)
+        selection = QItemSelection()
+        first_row = -1
+        found: list[int] = []
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            vf = item.data(FILE_ROLE) if item is not None else None
+            if vf is not None and id(vf) in wanted:
+                selection.select(self.table.model().index(row, 0),
+                                 self.table.model().index(row, self.table.columnCount() - 1))
+                found.append(id(vf))
+                if first_row < 0:
+                    first_row = row
+        model = self.table.selectionModel()
+        was_blocked = self.table.blockSignals(True)
+        try:
+            model.clearSelection()
+            if first_row >= 0:
+                model.setCurrentIndex(self.table.model().index(first_row, 0),
+                                      QItemSelectionModel.SelectionFlag.NoUpdate)
+                model.select(selection, QItemSelectionModel.SelectionFlag.Select)
+        finally:
+            self.table.blockSignals(was_blocked)
+        if len(found) != len(wanted):
+            self._on_selection_changed()
 
     def _make_table_item(self, vf: VideoFile, field_name: str, text: str) -> QTableWidgetItem:
         """Numeric-looking columns sort as numbers, not text ("2" before

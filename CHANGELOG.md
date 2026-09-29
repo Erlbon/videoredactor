@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-09-29#04 — Edits stay on the file you selected
+
+- **Fixed: an edit could land on the wrong file.** After Apply (or Search/Replace, Case Conversion, Auto-Numbering, a TMDB/TVDB import, Undo...) the table is redrawn, and in a table sorted by a column the selection stayed on the same row *number* -- which now held a different file. The panel then showed that other file, and the next Apply edited it. The selection now stays on the same files.
+- Checked for the stale-panel bug fixed in cbzredactor 2026-09-29#05: not present here (the panel only writes fields you changed, and is reloaded after batch edits); a regression test now covers it.
+
 ## 2026-09-29#03 — Undo Last Rename
 
 - **File > Undo Last Rename...**: renames are now logged (Rename/Export by Pattern, a filename Search/Replace, Rename File) and the newest one can be taken back -- even after restarting the app. It shows what will be renamed back first, and never overwrites: a file that has moved since, or whose old name is taken again, is skipped and reported. The in-app Undo still covers metadata edits only.
