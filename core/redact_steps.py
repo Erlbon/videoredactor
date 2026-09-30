@@ -44,11 +44,11 @@ import os
 import re
 import shutil
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable
 
-from redactor_common.core.move_plan import execute_move, plan_moves
+from redactor_common.core.move_plan import execute_move, plan_moves, render_relative_path
 from redactor_common.core.os_utils import rename_no_clobber
 from redactor_common.core.path_parser import is_path_pattern, parse_path_detailed
 from redactor_common.core.pipeline import (
@@ -59,6 +59,7 @@ from redactor_common.core.pipeline import (
     Step,
     StepResult,
     commit_in_place,
+    effective_option_source,
 )
 from redactor_common.core.rename_pattern import render_filename, unique_path, zero_pad_numeric_value
 from redactor_common.core.trash import move_to_trash
@@ -347,6 +348,125 @@ class VideoStep(Step):
         raise NotImplementedError
 
 
+# --- pattern trail (redactor_common's OptionSpec suggestions/fallback/preview) ------
+#
+# A saved recipe keeps the pattern it was saved with; an EMPTY stored value
+# follows the fallback below. The editor shows what is in effect, where it
+# came from and the recent patterns; the steps resolve through the same
+# effective_option_source so what the editor shows is what runs.
+
+SAMPLE_VALUES = {
+    "show_title": "Show", "season_number": "1", "episode_number": "1", "title": "Episode", "release_date": "2020",
+}
+
+
+def _pad_episode(values: dict[str, str], setting: Callable[[str, str, str], str]) -> dict[str, str]:
+    """`values` with the Rename dialog's saved zero-padding applied to the
+    episode number (a copy)."""
+    values = dict(values)
+    if setting("rename", "zero_pad", "0") == "1":
+        try:
+            width = int(setting("rename", "zero_pad_width", "2") or 2)
+        except ValueError:
+            width = 2
+        values["episode_number"] = zero_pad_numeric_value(values.get("episode_number", ""), width)
+    return values
+
+
+def _history(env: "RedactEnv") -> list[str]:
+    try:
+        return [p for p in env.pattern_history() if isinstance(p, str) and p]
+    except Exception:  # noqa: BLE001 -- a broken history must not break the editor
+        return []
+
+
+def _pattern_suggestions(env: "RedactEnv", kind: str) -> list[str]:
+    """The pattern history, newest first, the kind this option takes first
+    (file options: filename patterns, then path patterns; path options the
+    reverse), de-duplicated. The move option also offers the pattern last
+    used in Rename/Export's Move into folders."""
+    history = _history(env)
+    if kind == "move":
+        history.insert(0, env.setting("rename", "move_pattern", "").strip())
+    files = [p for p in history if p and not is_path_pattern(p)]
+    paths = [p for p in history if p and is_path_pattern(p)]
+    ordered = files + paths if kind == "file" else paths + files
+    return list(dict.fromkeys(ordered))
+
+
+def _pattern_fallback(env: "RedactEnv", kind: str) -> str:
+    history = _history(env)
+    if kind == "file":
+        return latest_file_pattern(history)
+    if kind == "path":
+        return latest_path_pattern(history) or DEFAULT_PATH_PATTERN
+    return env.setting("rename", "move_pattern", "").strip() or DEFAULT_MOVE_PATTERN
+
+
+_FALLBACK_LABELS = {
+    "file": "the latest filename pattern",
+    "path": "the latest path pattern (else the default)",
+    "move": "the last Rename/Export Move into folders pattern (else the default)",
+}
+
+
+def _pattern_preview(
+    env: "RedactEnv", kind: str, pattern: str, sample: Callable[[], dict[str, str] | None] | None
+) -> str:
+    """`pattern` rendered on the first loaded video's values (else a built-in
+    Show/Season/Episode sample) with the renderers Rename and Move use.
+    Cheap and never raises."""
+    try:
+        values = None
+        try:
+            values = sample() if sample else None
+        except Exception:  # noqa: BLE001
+            values = None
+        values = _pad_episode(values or SAMPLE_VALUES, env.setting)
+        if not pattern.strip():
+            return ""
+        if is_path_pattern(pattern):
+            return "/".join(render_relative_path(values, pattern))
+        return render_filename(values, pattern)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def pattern_trail_spec(
+    base: OptionSpec, kind: str, env: "RedactEnv", sample: Callable[[], dict[str, str] | None] | None = None
+) -> OptionSpec:
+    """`base` with the pattern-trail callables bound to `env`. kind is
+    "file" (filename patterns), "path" (path patterns) or "move"."""
+    return replace(
+        base,
+        suggestions=lambda: _pattern_suggestions(env, kind),
+        fallback=lambda: _pattern_fallback(env, kind),
+        fallback_label=_FALLBACK_LABELS[kind],
+        preview=lambda p: _pattern_preview(env, kind, p, sample),
+    )
+
+
+class PatternStep(VideoStep):
+    """A step with one "pattern" option shown as a pattern trail.
+    `trail_kind` is "file", "path" or "move"."""
+
+    trail_kind = "file"
+
+    def __init__(self, *args: Any, env: "RedactEnv | None" = None, sample: Callable | None = None, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self.options = tuple(
+            pattern_trail_spec(o, self.trail_kind, env or RedactEnv(), sample) if o.key == "pattern" else o
+            for o in type(self).options
+        )
+
+    def effective_pattern(self, ctx: "VideoCtx") -> str:
+        """The pattern to use: the stored one, else the fallback (resolved
+        against THIS run's settings/history)."""
+        spec = pattern_trail_spec(type(self).options[0], self.trail_kind, ctx.env)
+        value, _source = effective_option_source(spec, self.options_for(ctx)["pattern"].strip())
+        return value.strip()
+
+
 # --- step 1: check and repair --------------------------------------------------
 
 
@@ -429,7 +549,7 @@ class FieldFill:
         return ", ".join(f"{key}={value!r}" for key, value in self.fields.items())
 
 
-class FilenameTagsStep(VideoStep):
+class FilenameTagsStep(PatternStep):
     key = "filename_tags"
     label = "Fill empty tags from the filename"
     description = (
@@ -447,9 +567,7 @@ class FilenameTagsStep(VideoStep):
 
     def execute(self, ctx: VideoCtx) -> StepResult:
         stem = ctx.video.path.stem
-        pattern = self.options_for(ctx)["pattern"].strip()
-        if not pattern:
-            pattern = latest_file_pattern(ctx.env.pattern_history())
+        pattern = self.effective_pattern(ctx)
         if pattern:
             parsed = parse_filename(stem, pattern)
             if parsed:
@@ -478,8 +596,9 @@ class FilenameTagsStep(VideoStep):
         return _set_fields(ctx, result.value.fields)
 
 
-class PathTagsStep(VideoStep):
+class PathTagsStep(PatternStep):
     key = "path_tags"
+    trail_kind = "path"
     label = "Fill empty tags from the folder path"
     description = (
         "Reads the folders the file sits in, under the library root chosen in Rename/Export by Pattern > "
@@ -503,11 +622,7 @@ class PathTagsStep(VideoStep):
         path = str(ctx.video.path)
         if not _is_under(path, root):
             return StepResult.nothing()
-        pattern = (
-            self.options_for(ctx)["pattern"].strip()
-            or latest_path_pattern(ctx.env.pattern_history())
-            or DEFAULT_PATH_PATTERN
-        )
+        pattern = self.effective_pattern(ctx)
         if not is_path_pattern(pattern):
             return StepResult.nothing(note=f"folder path not read: {pattern!r} has no '/' (not a path pattern)")
         parsed = parse_path_detailed(
@@ -809,14 +924,7 @@ class RemuxStep(VideoStep):
 def _pattern_values(ctx: VideoCtx) -> dict[str, str]:
     """The live file's placeholder values with the Rename dialog's saved
     zero-padding applied to the episode number."""
-    values = placeholder_values(ctx.video.metadata)
-    if ctx.env.setting("rename", "zero_pad", "0") == "1":
-        try:
-            width = int(ctx.env.setting("rename", "zero_pad_width", "2") or 2)
-        except ValueError:
-            width = 2
-        values["episode_number"] = zero_pad_numeric_value(values.get("episode_number", ""), width)
-    return values
+    return _pad_episode(placeholder_values(ctx.video.metadata), ctx.env.setting)
 
 
 def _ascii_only(ctx: VideoCtx) -> bool:
@@ -839,7 +947,7 @@ def empty_required_tokens(pattern: str, values: dict[str, str]) -> list[str]:
     return [t for t in re.findall(r"%(\w+)%", required) if t in values and not values[t].strip()]
 
 
-class RenameStep(VideoStep):
+class RenameStep(PatternStep):
     key = "rename"
     label = "Rename by pattern"
     description = (
@@ -856,9 +964,7 @@ class RenameStep(VideoStep):
     def execute(self, ctx: VideoCtx) -> StepResult:
         if ctx.save_failed:
             return StepResult.nothing()
-        pattern = self.options_for(ctx)["pattern"].strip()
-        if not pattern:
-            pattern = latest_file_pattern(ctx.env.pattern_history())
+        pattern = self.effective_pattern(ctx)
         if not pattern:
             return StepResult.nothing(note="not renamed: no rename pattern saved yet (use Rename/Export by Pattern once)")
         values = _pattern_values(ctx)
@@ -891,8 +997,9 @@ class RenameStep(VideoStep):
         return _with_note(result, "; ".join(problems))
 
 
-class MoveIntoFoldersStep(VideoStep):
+class MoveIntoFoldersStep(PatternStep):
     key = "move_into_folders"
+    trail_kind = "move"
     label = "Move into folders under the library root"
     description = (
         "Moves the finished file into a folder tree under the library root chosen in Rename/Export by "
@@ -915,11 +1022,7 @@ class MoveIntoFoldersStep(VideoStep):
         root = ctx.env.setting("rename", "library_root", "").strip()
         if not root:
             return StepResult.nothing(note="not moved: no library root (choose one in Rename/Export by Pattern > Move into folders)")
-        pattern = (
-            self.options_for(ctx)["pattern"].strip()
-            or ctx.env.setting("rename", "move_pattern", "").strip()
-            or DEFAULT_MOVE_PATTERN
-        )
+        pattern = self.effective_pattern(ctx)
         values = _pattern_values(ctx)
         missing = empty_required_tokens(pattern.replace("/", " ").replace("\\", " "), values)
         if missing:
@@ -969,20 +1072,52 @@ class MoveIntoFoldersStep(VideoStep):
 # --- catalogue and recipe ----------------------------------------------------------------
 
 
-def build_catalogue(pattern_history: Callable[[], list[str]] = load_pattern_history) -> list[Step]:
+def build_catalogue(
+    pattern_history: Callable[[], list[str]] = load_pattern_history,
+    env: RedactEnv | None = None,
+    sample: Callable[[], dict[str, str] | None] | None = None,
+) -> list[Step]:
     """The steps, in default run order ("last" steps pinned after the
     rest by the engine). Rename starts enabled only once a rename
-    pattern exists."""
+    pattern exists. `env` supplies the history/settings the pattern trail
+    reads (default: the app's own); `sample` returns placeholder values
+    for the pattern previews (None: a built-in Show/Season/Episode)."""
+    if env is None:
+        env = RedactEnv(pattern_history=pattern_history)
     return [
         CheckRepairStep(),
-        FilenameTagsStep(),
-        PathTagsStep(),
+        FilenameTagsStep(env=env, sample=sample),
+        PathTagsStep(env=env, sample=sample),
         LookupStep(),
         SubtitlesStep(),
         RemuxStep(),
-        RenameStep(default_enabled=bool(latest_file_pattern(pattern_history()))),
-        MoveIntoFoldersStep(),
+        RenameStep(default_enabled=bool(latest_file_pattern(env.pattern_history())), env=env, sample=sample),
+        MoveIntoFoldersStep(env=env, sample=sample),
     ]
+
+
+def pin_patterns(recipe: Recipe, catalogue: list[Step]) -> Recipe:
+    """First-save pinning: `recipe` with every EMPTY pattern option set to
+    the pattern currently in effect, so saving it keeps today's Rename/Export
+    patterns even if those change later. Non-empty values are untouched;
+    a pattern with nothing to pin (no fallback value) stays empty."""
+    pinned = copy.deepcopy(recipe)
+    for step in catalogue:
+        for spec in step.options:
+            if spec.kind != "str" or spec.fallback is None:
+                continue
+            stored = pinned.options.setdefault(step.key, {})
+            if str(stored.get(spec.key, spec.default) or "").strip():
+                continue
+            value, _source = effective_option_source(spec, "")
+            if value.strip():
+                stored[spec.key] = value.strip()
+    return pinned
+
+
+def recipe_is_saved() -> bool:
+    """True once a recipe has been stored in the settings file."""
+    return bool(get_setting(RECIPE_SECTION, RECIPE_KEY, "").strip())
 
 
 def recipe_to_setting(recipe: Recipe) -> str:

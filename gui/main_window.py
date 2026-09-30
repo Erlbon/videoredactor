@@ -42,7 +42,7 @@ from core.tvdb_client import get_series_details, get_episode_details, download_i
 from core.release_name_parser import parse_release_name
 from core.sidecars import with_sidecars
 from core.redact_steps import (
-    RedactEnv, VideoCtx, build_catalogue, finalize_file, load_recipe, save_recipe,
+    RedactEnv, VideoCtx, build_catalogue, finalize_file, load_recipe, pin_patterns, recipe_is_saved, save_recipe,
 )
 from core.ffmpeg_backend import IMPORTABLE_EXTENSIONS, remux_to_mp4, transcode_to_mp4, verify_remux
 from core.transcode_settings import get_transcode_settings
@@ -1923,7 +1923,7 @@ class MainWindow(QMainWindow):
             return
 
         env = RedactEnv(rename_log=_rename_log(), background=call_in_background)
-        catalogue = build_catalogue()
+        catalogue = build_catalogue(sample=self._redact_sample_values)
         report = run_redact_dialog(
             self, targets, load_recipe(catalogue), catalogue,
             make_context=lambda vf: VideoCtx(vf, env),
@@ -1945,10 +1945,22 @@ class MainWindow(QMainWindow):
     def _on_edit_redact_recipe(self) -> None:
         """Operations > Redact Recipe...: the shared recipe editor over
         this app's steps; the result is stored in the settings file."""
-        catalogue = build_catalogue()
-        dialog = RecipeEditorDialog(catalogue, load_recipe(catalogue), self)
+        catalogue = build_catalogue(sample=self._redact_sample_values)
+        recipe = load_recipe(catalogue)
+        if not recipe_is_saved():
+            # First save: pre-fill each pattern with the one in effect now, so
+            # pressing OK keeps it even if Rename/Export changes later.
+            recipe = pin_patterns(recipe, catalogue)
+        dialog = RecipeEditorDialog(catalogue, recipe, self)
         if dialog.exec():
             save_recipe(dialog.recipe())
+
+    def _redact_sample_values(self) -> dict[str, str] | None:
+        """Placeholder values of the first loaded video, for the recipe
+        editor's pattern previews (None: the built-in sample)."""
+        if not self.video_files:
+            return None
+        return placeholder_values(self.video_files[0].metadata)
 
     def _on_remux_selected(self) -> None:
         """Remux selected MKV files to MP4 (batch-capable, -c copy so

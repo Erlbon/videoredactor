@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-30#13 — Redact pattern trail
+
+- **Redact > Redact Recipe...** now shows where each pattern comes from. The Filename, Path, Rename and Move-into-folders patterns are editable lists of your recent patterns (newest first), with a live line *In effect: <pattern> — set in this recipe / follows: the latest filename pattern* and a *Preview* on the first loaded video (or a built-in Show/Season/Episode sample). *Use fallback* clears the field so the step follows again.
+- **A saved recipe keeps the pattern it was saved with.** The first time you open the editor (no recipe saved yet) each pattern is pre-filled with the one in effect now, so pressing OK pins it: later changes in Rename/Export no longer steer Redact silently, and nothing has to be recreated. An existing recipe with a pattern keeps it; one with an empty pattern keeps following the latest.
+- At run time every pattern resolves the same way (stored value wins, empty follows the fallback). The recipe format is unchanged.
+- Uses redactor_common 2026-09-30-12.
+
 ## 2026-09-30#12 — Metadata from the folder path
 
 - **Operations > Import Metadata from Filename** now also reads folders: a pattern containing `/` (e.g. `%show_title%/Season %season_number%/%title%` or `%show_title%/%title%`) is matched against the file's path from the library root down (the same root as Move into folders, remembered between runs). The dialog shows a Library Root row and a confidence per file; plain filename patterns behave as before. `Season 02` gives season 2, `Season 0` gives 0; a `Specials` folder does not match `Season N`, so the season stays empty and the confidence drops.
