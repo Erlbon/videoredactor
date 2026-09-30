@@ -2533,10 +2533,11 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(f"Moved {moved} of {videos} file(s) into folders{note}")
 
     def _on_import_metadata_from_filename(self) -> None:
-        """Extract metadata from filenames into staged (unsaved) fields,
-        via redactor_common's shared ParseFilenameDialog. Season/Episode
-        #/Rating only match digits (so "S01E03" parses cleanly) and lose
-        their filename zero-padding."""
+        """Extract metadata from filenames (or, with a "/" pattern, the
+        folder path) into staged (unsaved) fields, via redactor_common's
+        shared ParseFilenameDialog. Season/Episode #/Rating only match
+        digits (so "S01E03" or a "Season 02" folder parses cleanly) and
+        lose their zero-padding."""
         targets = self._batch_targets("parse")
         if not targets:
             return
@@ -2549,6 +2550,9 @@ class MainWindow(QMainWindow):
             strip_leading_zeros_fields=set(PARSE_STRIP_ZEROS_FIELDS),
             title="Import Metadata from Filename",
             item_noun="file",
+            # A pattern with "/" reads the folders too; same root as Move into folders.
+            library_root=get_setting("rename", "library_root", ""),
+            on_library_root_changed=lambda folder: set_setting("rename", "library_root", folder),
             parent=self,
         )
         if dialog.exec() != dialog.DialogCode.Accepted:

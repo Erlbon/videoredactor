@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-30#12 — Metadata from the folder path
+
+- **Operations > Import Metadata from Filename** now also reads folders: a pattern containing `/` (e.g. `%show_title%/Season %season_number%/%title%` or `%show_title%/%title%`) is matched against the file's path from the library root down (the same root as Move into folders, remembered between runs). The dialog shows a Library Root row and a confidence per file; plain filename patterns behave as before. `Season 02` gives season 2, `Season 0` gives 0; a `Specials` folder does not match `Season N`, so the season stays empty and the confidence drops.
+- **Redact** gets a step *Fill empty tags from the folder path* (default on, right after the filename step and before the lookup, so TMDB/TheTVDB confirm and fill the rest). Empty fields only. A path matching every segment of the pattern (the most recent saved path pattern, else `%show_title%/Season %season_number%/%title%`) is applied at 90% or more; a partial match (for example a `Specials` folder) goes to Needs review naming the missing segments. It does nothing, and says so, without a library root, and ignores files outside it.
+- Path and filename patterns share the pattern history; Redact's Rename and filename steps still never pick a path pattern.
+- Uses redactor_common 2026-09-30-11.
+
 ## 2026-09-30#11 — Move into folders
 
 - **Operations > Rename/Export by Pattern** gains the shared "Move into folders under a library root" mode (redactor_common 2026-09-30-10): the pattern may contain `/` (e.g. `%show_title%/Season %season_number%/%title%`), missing folders are created, nothing is overwritten (a taken name becomes `Name (2)`), and the library root is remembered between runs. Apply shows the progress dialog with Cancel, reports per-file problems, and offers to remove source folders left empty.

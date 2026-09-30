@@ -126,11 +126,11 @@ def test_default_recipe_enabled_flags_and_pinned_last_steps():
     catalogue = rs.build_catalogue(lambda: [])
     recipe = Recipe.default_for(catalogue)
     assert recipe.enabled == {
-        "check_repair": True, "filename_tags": True, "lookup": True, "subtitles": False,
+        "check_repair": True, "filename_tags": True, "path_tags": True, "lookup": True, "subtitles": False,
         "remux_mkv_to_mp4": False, "rename": False, "move_into_folders": False,
     }
     assert recipe.order[-2:] == ["rename", "move_into_folders"]
-    assert [s.key for s, _o in recipe.resolve(catalogue)] == ["check_repair", "filename_tags", "lookup"]
+    assert [s.key for s, _o in recipe.resolve(catalogue)] == ["check_repair", "filename_tags", "path_tags", "lookup"]
     # Rename starts on only once a rename pattern exists.
     assert Recipe.default_for(rs.build_catalogue(lambda: ["%title%"])).enabled["rename"] is True
 
@@ -354,6 +354,110 @@ def test_a_save_that_fails_verification_leaves_the_original_untouched(clips, wor
     assert "NOT SAVED" in entry.failures[0] and "audio track" in entry.failures[0]
     assert path.read_bytes() == before and bin_.names() == [] and leftovers(work) == []
     assert vf.metadata.show_title == ""  # the live row did not take the unsaved guess
+
+
+# --- folder path tags ------------------------------------------------------------------
+
+
+def path_env(bin_, tmp_path, library, history=()):
+    settings = {("rename", "library_root"): str(library)} if library else None
+    return make_env(bin_, tmp_path, history=history, settings=settings)
+
+
+def path_run(video, env, threshold=0.9):
+    recipe, catalogue = only("path_tags", threshold=threshold)
+    return run_one(video, env, recipe, catalogue, finalize=False)
+
+
+def test_path_tags_order_and_recipe_round_trip():
+    catalogue = rs.build_catalogue(lambda: [])
+    recipe = Recipe.default_for(catalogue)
+    keys = [s.key for s, _o in recipe.resolve(catalogue)]
+    assert keys.index("filename_tags") + 1 == keys.index("path_tags") == keys.index("lookup") - 1
+    recipe.options["path_tags"] = {"pattern": "%show_title%/%title%"}
+    recipe.enabled["path_tags"] = False
+    back = rs.recipe_from_setting(rs.recipe_to_setting(recipe), catalogue)
+    assert back.enabled["path_tags"] is False and back.options["path_tags"] == {"pattern": "%show_title%/%title%"}
+    # A recipe saved before the step existed gets it, on, after the filename step.
+    old = Recipe.from_json('{"order":["check_repair","filename_tags","lookup"],"enabled":{"lookup":false}}')
+    assert [s.key for s, _o in old.resolve(catalogue)] == ["check_repair", "filename_tags", "path_tags"]
+
+
+def test_path_tags_fill_a_season_folder_path_and_strip_the_zero(work, bin_, tmp_path):
+    library = tmp_path / "library"
+    folder = library / "The Office" / "Season 02"
+    folder.mkdir(parents=True)
+    vf = stub(folder, "Halloween.mp4")
+    recipe, catalogue = only("path_tags")
+    env = path_env(bin_, tmp_path, library)
+    step = recipe.resolve(catalogue)[0][0]
+    ctx = rs.VideoCtx(vf, env)
+    ctx.step_options = {"pattern": ""}
+    result = step.run(ctx)
+    assert result.value.fields == {"show_title": "The Office", "season_number": "2", "title": "Halloween"}
+    assert result.confidence >= 0.9
+    step.apply_suggestion(ctx, result)
+    md = ctx.work.metadata
+    assert (md.show_title, md.season_number, md.title) == ("The Office", 2, "Halloween")
+    assert vf.metadata.show_title == ""  # the live row waits for the save
+    entry = path_run(vf, env)
+    assert entry.status is FileStatus.CHANGED and entry.review == []
+
+
+def test_path_tags_season_zero_and_specials(work, bin_, tmp_path):
+    library = tmp_path / "library"
+    (library / "Show" / "Season 0").mkdir(parents=True)
+    (library / "Show" / "Specials").mkdir(parents=True)
+    env = path_env(bin_, tmp_path, library)
+    season0 = stub(library / "Show" / "Season 0", "Pilot.mp4")
+    assert path_run(season0, env).status is FileStatus.CHANGED  # "Season 0" is season 0, like TMDB's specials
+    specials = stub(library / "Show" / "Specials", "Pilot.mp4")
+    entry = path_run(specials, env)
+    # 'Specials' does not match 'Season %season_number%': reviewed, not applied, season stays empty.
+    assert entry.status is FileStatus.NEEDS_REVIEW and entry.applied == []
+    assert entry.review[0].confidence < 0.9 and "Season %season_number%" in entry.review[0].reason
+    assert "season_number" not in entry.review[0].value.fields
+    assert path_run(specials, env, threshold=0.5).status is FileStatus.CHANGED
+
+
+def test_path_tags_fill_only_empty_fields(work, bin_, tmp_path):
+    library = tmp_path / "library"
+    folder = library / "The Office" / "Season 02"
+    folder.mkdir(parents=True)
+    vf = stub(folder, "Halloween.mp4", show_title="Kept Show", title="Kept Title", season_number=7)
+    entry = path_run(vf, path_env(bin_, tmp_path, library))
+    assert entry.status is FileStatus.UNCHANGED and entry.applied == [] and entry.review == []
+    vf = stub(folder, "Other.mp4", show_title="Kept Show")
+    recipe, catalogue = only("path_tags")
+    ctx = rs.VideoCtx(vf, path_env(bin_, tmp_path, library))
+    ctx.step_options = {"pattern": ""}
+    result = recipe.resolve(catalogue)[0][0].run(ctx)
+    assert result.value.fields == {"season_number": "2", "title": "Other"}
+
+
+def test_path_tags_without_a_root_or_outside_it_do_nothing(work, bin_, tmp_path):
+    library = tmp_path / "library"
+    (library / "Show" / "Season 1").mkdir(parents=True)
+    vf = stub(work, "a.mp4")
+    entry = path_run(vf, path_env(bin_, tmp_path, None))
+    assert entry.status is FileStatus.UNCHANGED and any("no library root" in n for n in entry.notes)
+    entry = path_run(vf, path_env(bin_, tmp_path, library))  # work/ is not under library/
+    assert entry.status is FileStatus.UNCHANGED and entry.notes == []
+
+
+def test_path_tags_pattern_comes_from_the_option_then_the_history(work, bin_, tmp_path):
+    library = tmp_path / "library"
+    (library / "Show").mkdir(parents=True)
+    vf = stub(library / "Show", "Pilot.mp4")
+    # A filename pattern in the history is never used as a path pattern.
+    env = path_env(bin_, tmp_path, library, history=["%title%", "%show_title%/%title%"])
+    entry = path_run(vf, env)  # a bare %show_title% folder is only 87% sure: reviewed
+    assert entry.status is FileStatus.NEEDS_REVIEW and "'%show_title%/%title%'" in entry.review[0].reason
+    assert rs.latest_path_pattern(["%title%", "%show_title%/%title%", "a/b"]) == "%show_title%/%title%"
+    assert rs.latest_path_pattern(["%title%"]) == ""
+    recipe, catalogue = only("path_tags", options={"path_tags": {"pattern": "%title%"}})
+    entry = run_one(vf, env, recipe, catalogue, finalize=False)
+    assert any("not a path pattern" in n for n in entry.notes)
 
 
 # --- lookup ------------------------------------------------------------------------------

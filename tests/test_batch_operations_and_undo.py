@@ -84,6 +84,41 @@ def test_parse_filename_fills_typed_fields(window, monkeypatch):
     assert window.video_files[0].metadata.episode_number is None
 
 
+def test_parse_path_pattern_uses_and_remembers_the_library_root(window, monkeypatch, tmp_path):
+    import gui.main_window as mw
+    from PyQt6.QtWidgets import QFileDialog
+
+    from core.config import get_setting, set_setting
+
+    library = tmp_path / "library"
+    folder = library / "The Office" / "Season 02"
+    folder.mkdir(parents=True)
+    for vf, name in zip(window.video_files, ["Pilot", "Diversity Day"]):
+        vf.path = folder / f"{name}.mkv"
+        vf.path.write_bytes(b"")
+        vf.metadata = VideoMetadata()
+    seen = {}
+
+    def set_pattern(dialog):
+        seen["root_before"] = dialog.library_root()
+        monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(library))
+        dialog.choose_root_btn.click()
+        dialog.pattern_edit.setText("%show_title%/Season %season_number%/%title%")
+        seen["path_mode"] = dialog.is_path_mode()
+
+    _auto_accept(monkeypatch, mw.ParseFilenameDialog, set_pattern)
+    window._on_import_metadata_from_filename()
+    assert seen == {"root_before": "", "path_mode": True}
+    assert get_setting("rename", "library_root") == str(library)
+    assert [(v.metadata.show_title, v.metadata.season_number, v.metadata.title) for v in window.video_files] == [
+        ("The Office", 2, "Pilot"), ("The Office", 2, "Diversity Day"),
+    ]
+    # Next time the remembered root is passed in.
+    _auto_accept(monkeypatch, mw.ParseFilenameDialog, lambda d: seen.update(root_before=d.library_root()))
+    window._on_import_metadata_from_filename()
+    assert seen["root_before"] == str(library)
+
+
 def test_auto_numbering_into_an_int_field(window, monkeypatch):
     import gui.main_window as mw
 

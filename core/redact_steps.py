@@ -50,6 +50,7 @@ from typing import Any, Callable
 
 from redactor_common.core.move_plan import execute_move, plan_moves
 from redactor_common.core.os_utils import rename_no_clobber
+from redactor_common.core.path_parser import is_path_pattern, parse_path_detailed
 from redactor_common.core.pipeline import (
     CommitError,
     FileReport,
@@ -66,7 +67,16 @@ from core import opensubtitles_client, tmdb_client, tvdb_client
 from core.config import get_setting, set_setting
 from core.ffmpeg_backend import _run, remux_to_mp4, verify_remux
 from core.file_check import RepairError, build_repaired_copy, quick_check
-from core.filename_pattern import field_text, load_pattern_history, parse_filename, placeholder_values, set_field_text
+from core.filename_pattern import (
+    PARSE_NUMERIC_FIELDS,
+    PARSE_STRIP_ZEROS_FIELDS,
+    VALID_FIELD_KEYS,
+    field_text,
+    load_pattern_history,
+    parse_filename,
+    placeholder_values,
+    set_field_text,
+)
 from core.release_name_parser import parse_release_name
 from core.sidecars import sidecar_moves, sidecar_pairs, sidecar_suffixes
 from core.video_file import VideoFile
@@ -95,6 +105,7 @@ _MOVIE_FIELDS = ("title", "description", "genre_tags", "release_date", "language
 _TV_FIELDS = ("show_title", "title", "description", "genre_tags", "network", "release_date")
 
 DEFAULT_MOVE_PATTERN = "%show_title%/Season %season_number%/%title%"
+DEFAULT_PATH_PATTERN = DEFAULT_MOVE_PATTERN
 
 
 def _direct(fn: Callable, *args: Any, **kwargs: Any) -> Any:
@@ -106,6 +117,13 @@ def latest_file_pattern(history: list[str]) -> str:
     "Move into folders" patterns (which contain a slash or backslash) share
     the same history but make no sense for renaming or parsing a filename."""
     return next((p for p in history if p and "/" not in p and "\\" not in p), "")
+
+
+def latest_path_pattern(history: list[str]) -> str:
+    """The most recent saved PATH pattern (contains a slash or backslash),
+    the counterpart of latest_file_pattern: what "Move into folders" and
+    a path-mode Import Metadata from Filename leave in the shared history."""
+    return next((p for p in history if p and is_path_pattern(p)), "")
 
 
 # --- run environment ---------------------------------------------------------
@@ -458,6 +476,65 @@ class FilenameTagsStep(VideoStep):
 
     def apply_suggestion(self, ctx: VideoCtx, result: StepResult) -> list[str]:
         return _set_fields(ctx, result.value.fields)
+
+
+class PathTagsStep(VideoStep):
+    key = "path_tags"
+    label = "Fill empty tags from the folder path"
+    description = (
+        "Reads the folders the file sits in, under the library root chosen in Rename/Export by Pattern > "
+        "Move into folders, with a path pattern (the most recent saved one, else %show_title%/Season "
+        "%season_number%/%title%) and fills fields that are EMPTY; existing values are never replaced. A "
+        "path that matches every segment is applied; a partial match (a 'Specials' folder instead of "
+        "'Season N', a file outside a show folder) goes to Needs review with the missing segments named. "
+        "Does nothing without a library root or for a file outside it. 'Season 02' gives season 2."
+    )
+    options = (
+        OptionSpec(
+            "pattern", "Path pattern (empty: the most recent saved one)", "str", "", max_length=300,
+            tooltip=f"A %field% pattern with '/', e.g. {DEFAULT_PATH_PATTERN}",
+        ),
+    )
+
+    def execute(self, ctx: VideoCtx) -> StepResult:
+        root = ctx.env.setting("rename", "library_root", "").strip()
+        if not root:
+            return StepResult.nothing(note="folder path not read: no library root (choose one in Rename/Export by Pattern > Move into folders)")
+        path = str(ctx.video.path)
+        if not _is_under(path, root):
+            return StepResult.nothing()
+        pattern = (
+            self.options_for(ctx)["pattern"].strip()
+            or latest_path_pattern(ctx.env.pattern_history())
+            or DEFAULT_PATH_PATTERN
+        )
+        if not is_path_pattern(pattern):
+            return StepResult.nothing(note=f"folder path not read: {pattern!r} has no '/' (not a path pattern)")
+        parsed = parse_path_detailed(
+            path, pattern, root, set(VALID_FIELD_KEYS), set(PARSE_NUMERIC_FIELDS),
+            strip_leading_zeros_fields=set(PARSE_STRIP_ZEROS_FIELDS),
+        )
+        if not parsed.matched:
+            return StepResult.nothing(note=f"folder path not read: the file name doesn't match the pattern {pattern!r}")
+        fills = {k: v for k, v in parsed.values.items() if v and _is_empty(ctx, k)}
+        if not fills:
+            return StepResult.nothing()
+        reason = f"the folder path matches the pattern {pattern!r}"
+        if parsed.missing_segments:
+            reason += "; no match for " + ", ".join(repr(m) for m in parsed.missing_segments)
+        return StepResult.suggestion(FieldFill(fills), parsed.confidence, reason)
+
+    def apply_suggestion(self, ctx: VideoCtx, result: StepResult) -> list[str]:
+        return _set_fields(ctx, result.value.fields)
+
+
+def _is_under(path: str, root: str) -> bool:
+    """True when `path` is inside `root` (case-insensitive on Windows)."""
+    norm_root = os.path.normcase(os.path.abspath(root))
+    try:
+        return os.path.commonpath([os.path.normcase(os.path.abspath(path)), norm_root]) == norm_root
+    except ValueError:  # different drives
+        return False
 
 
 # --- step 3: TMDB / TheTVDB lookup ---------------------------------------------------
@@ -899,6 +976,7 @@ def build_catalogue(pattern_history: Callable[[], list[str]] = load_pattern_hist
     return [
         CheckRepairStep(),
         FilenameTagsStep(),
+        PathTagsStep(),
         LookupStep(),
         SubtitlesStep(),
         RemuxStep(),
