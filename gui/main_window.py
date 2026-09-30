@@ -32,7 +32,7 @@ from core.video_file import VideoFile, discover_video_files, has_subfolders
 from core.video_metadata import ContentType, EDITABLE_FIELDS, NUMERIC_FIELDS, TEXT_FIELDS
 from core.filename_pattern import (
     DEFAULT_RENAME_PATTERN, PARSE_NUMERIC_FIELDS, PARSE_STRIP_ZEROS_FIELDS, VALID_FIELD_KEYS,
-    field_text, load_pattern_history, placeholder_values, save_pattern_to_history,
+    field_text, load_pattern_history, placeholder_values, save_pattern_to_history, set_field_text,
 )
 from core.tmdb_client import (
     get_movie_details, get_tv_show_details, get_tv_episode_details,
@@ -40,6 +40,9 @@ from core.tmdb_client import (
 )
 from core.tvdb_client import get_series_details, get_episode_details, download_image, TVDBError
 from core.release_name_parser import parse_release_name
+from core.redact_steps import (
+    RedactEnv, VideoCtx, build_catalogue, finalize_file, load_recipe, save_recipe,
+)
 from core.ffmpeg_backend import IMPORTABLE_EXTENSIONS, remux_to_mp4, transcode_to_mp4, verify_remux
 from core.transcode_settings import get_transcode_settings
 from core.opensubtitles_client import download_subtitle_text, OpenSubtitlesError
@@ -49,6 +52,7 @@ from core.config import get_setting, set_setting
 from redactor_common.gui.action_factory import make_action
 from redactor_common.gui.menu_builder import MenuAction, Separator, Submenu, build_menu_bar
 from redactor_common.gui.async_preview import AsyncPreviewLoader
+from redactor_common.gui.background_call import call_in_background
 from redactor_common.gui.auto_numbering_dialog import AutoNumberingDialog
 from redactor_common.gui.case_conversion_dialog import CaseConversionDialog
 from redactor_common.gui.parse_filename_dialog import ParseFilenameDialog
@@ -58,6 +62,10 @@ from core.app_paths import base_dir
 from redactor_common.gui.rename_pattern_dialog import RenamePatternDialog
 from redactor_common.gui.search_replace_dialog import FILENAME_FIELD_KEY, SearchReplaceDialog
 from redactor_common.gui.progress import ProgressReporter, run_with_progress
+from redactor_common.gui.redact_dialog import (
+    RecipeEditorDialog, RedactResultsDialog, edit_recipe_menu_action, redact_menu_action,
+)
+from redactor_common.gui.redact_dialog import run_redact as run_redact_dialog
 from redactor_common.gui.colors import (
     DIRTY_COLOR, ERROR_COLOR, HIGHLIGHT_TEXT_COLOR, SAVE_FAILED_COLOR, TABLE_SELECTION_STYLESHEET,
 )
@@ -174,29 +182,11 @@ def _field_text(vf: VideoFile, field_name: str) -> str:
 
 
 def _set_field_from_text(vf: VideoFile, field_name: str, text: str) -> bool:
-    """Stores a string from a shared dialog back into its typed field.
-    Returns False (and leaves the field untouched) for a value that
-    doesn't fit: a non-number for an int field, or an unknown Content
-    Type -- skipping one field beats crashing the whole batch or writing
-    a string into an int field."""
-    text = (text or "").strip()
-    if field_name in NUMERIC_FIELDS:
-        if not text:
-            setattr(vf.metadata, field_name, None)
-            return True
-        try:
-            setattr(vf.metadata, field_name, int(float(text)))
-        except ValueError:
-            return False
-        return True
-    if field_name == "content_type":
-        try:
-            vf.metadata.content_type = ContentType(text)
-        except ValueError:
-            return False
-        return True
-    setattr(vf.metadata, field_name, text)
-    return True
+    """Stores a string from a shared dialog back into its typed field
+    (see core.filename_pattern.set_field_text). Returns False (and leaves
+    the field untouched) for a value that doesn't fit: skipping one field
+    beats crashing the whole batch or writing a string into an int field."""
+    return set_field_text(vf.metadata, field_name, text)
 
 
 def _error_details(lines: list[str]) -> str:
@@ -505,6 +495,13 @@ class MainWindow(QMainWindow):
                 MenuAction("check_files", "Chec&k Files...", self._on_check_files),
                 MenuAction("find_duplicates", "Find &Duplicates...", self._on_find_duplicates),
                 Separator(),
+                # One click: the recipe's check/repair, filename and lookup
+                # fills, optional remux/rename/move on the selected files (or
+                # all loaded), saved in place with each original in the
+                # Recycle Bin. See _on_redact().
+                redact_menu_action(self._on_redact, text="Redac&t"),
+                edit_recipe_menu_action(self._on_edit_redact_recipe, text="Redact Reci&pe..."),
+                Separator(),
                 MenuAction("case_conversion", "Case &Conversion...", self._on_case_conversion),
                 MenuAction(
                     "search_replace", "Search/&Replace...", self._on_search_replace,
@@ -538,6 +535,7 @@ class MainWindow(QMainWindow):
         self.save_all_action = actions["save_all"]
         self.rename_file_action = actions["rename_file"]
         self.undo_action = actions["undo"]
+        self.redact_action = actions["redact"]
         self.redo_action = actions["redo"]
         self.undo_action.setEnabled(False)
         self.redo_action.setEnabled(False)
@@ -585,6 +583,8 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.save_selected_action)
         toolbar.addAction(self.save_all_action)
 
+        toolbar.addSeparator()
+        toolbar.addAction(self.redact_action)
         toolbar.addSeparator()
 
         # +/- table-font zoom, matching the epub tool's toolbar control
@@ -1879,6 +1879,74 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Find Duplicates", "Load at least two video files first.")
             return
         find_duplicates_flow(self, list(self.video_files))
+
+    # --- Redact ---------------------------------------------------------
+
+    def _redact_targets(self) -> list[VideoFile]:
+        """The selected files, else -- after asking -- every loaded file
+        (Redact is meant to be one click on a whole folder, so nothing
+        selected is not an error)."""
+        targets = self._selected_video_files()
+        if targets:
+            return targets
+        if not self.video_files:
+            QMessageBox.information(self, "Redact", "Load some video files first.")
+            return []
+        answer = QMessageBox.question(
+            self, "Redact all files?",
+            f"Nothing is selected. Redact all {len(self.video_files)} loaded file(s)?\n\n"
+            "Each changed file is saved in place; the original goes to the Recycle Bin.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+        )
+        return list(self.video_files) if answer == QMessageBox.StandardButton.Yes else []
+
+    def _on_redact(self) -> None:
+        """Operations > Redact (Ctrl+Shift+E, toolbar): runs the saved recipe
+        (core/redact_steps.py) on the targets through redactor_common's
+        engine -- progress, Cancel, then the report with Needs review. A
+        file with unsaved edits or a load error is skipped and named in the
+        report, never overwritten. Redact isn't on the Undo stack (the
+        Recycle Bin copy of each original is the undo), so the stack is
+        cleared rather than left pointing at old states."""
+        targets = self._redact_targets()
+        if not targets:
+            return
+        unsaved = [vf for vf in targets if vf.dirty and not vf.stamp_only_dirty]
+        if unsaved and QMessageBox.question(
+            self, "Unsaved changes",
+            f"{len(unsaved)} of the {len(targets)} file(s) have unsaved edits. Redact works on saved "
+            "files, so those will be skipped (and listed in the report). Continue with the rest?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+
+        env = RedactEnv(rename_log=_rename_log(), background=call_in_background)
+        catalogue = build_catalogue()
+        report = run_redact_dialog(
+            self, targets, load_recipe(catalogue), catalogue,
+            make_context=lambda vf: VideoCtx(vf, env),
+            describe=lambda vf: vf.path.name,
+            title="Redact", show_results=False,
+            finalize=finalize_file, finalize_label="Save",
+        )
+        self._clear_undo()
+        self._after_batch_edit("Redact finished")
+        if report is not None:
+            RedactResultsDialog(
+                report, self, title="Redact results",
+                header=(
+                    "Each changed file was saved in place; its original is in the Recycle Bin -- restore "
+                    "it from there to undo. A rename or move is also listed under File > Undo Last Rename."
+                ),
+            ).exec()
+
+    def _on_edit_redact_recipe(self) -> None:
+        """Operations > Redact Recipe...: the shared recipe editor over
+        this app's steps; the result is stored in the settings file."""
+        catalogue = build_catalogue()
+        dialog = RecipeEditorDialog(catalogue, load_recipe(catalogue), self)
+        if dialog.exec():
+            save_recipe(dialog.recipe())
 
     def _on_remux_selected(self) -> None:
         """Remux selected MKV files to MP4 (batch-capable, -c copy so

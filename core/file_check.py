@@ -407,20 +407,23 @@ class RepairOutcome:
     note: str = ""      # e.g. tags that couldn't be restored
 
 
-def repair(
+def build_repaired_copy(
     path: str,
     before: CheckResult,
+    target: Optional[str] = None,
     run: Callable = _run,
-    trash: Callable[[str], None] = move_to_trash,
     restore: Callable[[str, str], str] = restore_app_metadata,
 ) -> RepairOutcome:
-    """Remuxes `path` losslessly (see the module docstring), restores the
-    app's metadata onto the copy, checks it, sends the original to the
-    Recycle Bin and puts the copy in its place. Raises RepairError (the
-    original untouched, the copy removed) when anything fails."""
+    """The first half of repair(): remuxes `path` losslessly into `target`
+    (default repair_path(path)), restores the app's metadata onto it and
+    checks it -- the original is not touched, and nothing is trashed or
+    swapped. Raises RepairError (the copy removed) when anything fails;
+    otherwise the verified copy is at `target` and the caller commits it
+    (repair() below, or Redact's commit_in_place). `RepairOutcome.check`
+    is the copy's own check."""
     if not before.can_repair:
         raise RepairError("nothing a remux can fix")
-    target = repair_path(path)
+    target = target or repair_path(path)
     if os.path.exists(target):
         raise RepairError(f"{os.path.basename(target)} already exists -- remove it first")
     suffix = Path(path).suffix.lower()
@@ -480,6 +483,27 @@ def repair(
                 f"the repaired copy is shorter than the readable original "
                 f"({_format_seconds(after.readable_seconds)} vs {_format_seconds(expected)})"
             )
+    except BaseException:
+        if os.path.exists(target):
+            os.remove(target)
+        raise
+    return RepairOutcome(check=after, note=note)
+
+
+def repair(
+    path: str,
+    before: CheckResult,
+    run: Callable = _run,
+    trash: Callable[[str], None] = move_to_trash,
+    restore: Callable[[str, str], str] = restore_app_metadata,
+) -> RepairOutcome:
+    """Remuxes `path` losslessly (see the module docstring), restores the
+    app's metadata onto the copy, checks it, sends the original to the
+    Recycle Bin and puts the copy in its place. Raises RepairError (the
+    original untouched, the copy removed) when anything fails."""
+    target = repair_path(path)
+    built = build_repaired_copy(path, before, target, run, restore)
+    try:
         try:
             trash(path)
         except TrashError as exc:
@@ -497,4 +521,4 @@ def repair(
             f"the original is in the Recycle Bin, but the repaired copy couldn't take its name "
             f"({exc}); it's kept as {os.path.basename(target)}"
         ) from exc
-    return RepairOutcome(check=quick_check(path, run), note=note)
+    return RepairOutcome(check=quick_check(path, run), note=built.note)

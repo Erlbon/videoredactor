@@ -38,6 +38,31 @@ def field_text(metadata: VideoMetadata, field_name: str) -> str:
     return str(value)
 
 
+def set_field_text(metadata: VideoMetadata, field_name: str, text: str) -> bool:
+    """Stores a string (from a shared dialog or a filename parse) back
+    into its typed field. Returns False (and leaves the field untouched)
+    for a value that doesn't fit: a non-number for an int field, or an
+    unknown Content Type."""
+    text = (text or "").strip()
+    if field_name in NUMERIC_FIELDS:
+        if not text:
+            setattr(metadata, field_name, None)
+            return True
+        try:
+            setattr(metadata, field_name, int(float(text)))
+        except ValueError:
+            return False
+        return True
+    if field_name == "content_type":
+        try:
+            metadata.content_type = ContentType(text)
+        except ValueError:
+            return False
+        return True
+    setattr(metadata, field_name, text)
+    return True
+
+
 def placeholder_values(metadata: VideoMetadata) -> dict[str, str]:
     return {field: field_text(metadata, field) for field in EDITABLE_FIELDS}
 
