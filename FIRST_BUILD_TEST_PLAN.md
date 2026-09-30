@@ -321,14 +321,14 @@ functions those tests already exercise.
 
 - [ ] Confirm the menu bar now shows **Settings** where **Tools** used
       to be, and that it contains, in order: Locate External Tools...,
-      Add External APIs..., a separator, Add/Remove Columns...,
+      API Keys…, a separator, Add/Remove Columns...,
       Add/Remove Languages..., Add/Remove Genres...
 - [ ] Confirm **About** is NOT in this Settings menu at all — it should
       only appear under Help, exactly as before this change (it was
       already a standalone Help action; the thing that got removed was
       a REDUNDANT About tab inside the old Settings dialog wrapper,
       which no longer exists)
-- [ ] Settings → Add External APIs... — enter a TMDB key, click Save,
+- [ ] Settings → API Keys… — enter a TMDB key, click Save,
       reopen the dialog, confirm the key you entered is still there
       (this is the first real exercise of `ApiKeysDialog` specifically,
       though the underlying settings.ini read/write it uses is already
@@ -400,7 +400,7 @@ the exact same `get_setting`/`set_setting` calls already covered by
       matching titles in their own title bars (not just the menu
       label) — "Import Metadata from Filename (N file(s))" and "Import
       Subtitles from OpenSubtitles"
-- [ ] Settings → Add External APIs... — confirm a third field for
+- [ ] Settings → API Keys… — confirm a third field for
       OpenSubtitles now appears alongside TMDB and TVDB, saves and
       reloads correctly, and shows the environment-variable-priority
       note if `OPENSUBTITLES_API_KEY` is set
