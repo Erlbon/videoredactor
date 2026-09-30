@@ -234,7 +234,8 @@ class TestTitleAndTagsAreSeparateInvocations(unittest.TestCase):
         captured: list[list[str]] = []
 
         def fake_run(args, **kwargs):
-            captured.append(args)
+            if "mkvpropedit" in args[0]:  # not the mkvextract/mkvmerge reads
+                captured.append(args)
             return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
 
         with mock.patch("subprocess.run", side_effect=fake_run):
@@ -258,7 +259,8 @@ class TestTitleAndTagsAreSeparateInvocations(unittest.TestCase):
         captured: list[list[str]] = []
 
         def fake_run(args, **kwargs):
-            captured.append(args)
+            if "mkvpropedit" in args[0]:  # not the mkvextract/mkvmerge reads
+                captured.append(args)
             return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
 
         with mock.patch("subprocess.run", side_effect=fake_run):
@@ -276,7 +278,8 @@ class TestTitleAndTagsAreSeparateInvocations(unittest.TestCase):
         captured: list[list[str]] = []
 
         def fake_run(args, **kwargs):
-            captured.append(args)
+            if "mkvpropedit" in args[0]:  # not the mkvextract/mkvmerge reads
+                captured.append(args)
             return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
 
         with mock.patch("subprocess.run", side_effect=fake_run):

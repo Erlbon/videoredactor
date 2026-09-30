@@ -166,7 +166,9 @@ def write_mp4_metadata(path: str, meta: VideoMetadata) -> None:
 
     for field_name, atom in NATIVE_ATOM_MAP.items():
         value = getattr(meta, field_name, "")
-        if value:
+        # Not `if value:` -- a Season/Episode of 0 (specials) is a real
+        # value and must be written, not deleted.
+        if value not in (None, ""):
             if atom in INTEGER_ATOMS:
                 try:
                     mp4.tags[atom] = [int(value)]

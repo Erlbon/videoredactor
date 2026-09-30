@@ -290,6 +290,84 @@ def read_mkv_metadata(path: str, diagnostics: Optional[dict] = None) -> VideoMet
     return meta
 
 
+def _extract_tags_xml(path: str) -> Optional[str]:
+    """The file's current Tags XML ("" when it has none), or None when
+    mkvextract couldn't be read (the caller then leaves tags alone rather
+    than guess)."""
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as tmp_file:
+            tmp_path = tmp_file.name
+        result = run_tool(
+            [get_executable_path("mkvextract"), path, "tags", tmp_path],
+            timeout=MKV_TOOL_TIMEOUT_SECONDS,
+        )
+        if result.returncode not in (0, 1):  # mkvextract: 1 = finished with warnings
+            return None
+        if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
+            with open(tmp_path, "r", encoding="utf-8") as f:
+                return f.read()
+        return result.stdout or ""
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+def _current_native_title(path: str) -> str:
+    """The Segment Info title now ("" when none or unreadable)."""
+    result = run_tool([get_executable_path("mkvmerge"), "-J", path], timeout=MKV_TOOL_TIMEOUT_SECONDS)
+    try:
+        info = json.loads(result.stdout) if result.stdout else {}
+        title = ((info.get("container") or {}).get("properties") or {}).get("title")
+    except (json.JSONDecodeError, AttributeError):
+        return ""
+    return title or ""
+
+
+def plan_global_tags(existing_xml: str, ours: dict[str, str]) -> Optional[str]:
+    """What to hand `mkvpropedit --tags global:` so THIS APP's tags equal
+    `ours` without touching anyone else's: the file's existing global
+    tags minus the ones this app manages (FIELD_TO_MKV_TAG), plus `ours`.
+    mkvpropedit replaces all global tags with whatever it's given, so
+    tags written by other tools (and targeted ones, which `global` leaves
+    alone anyway) must be carried over by hand.
+
+    Returns the XML to write, "" when no global tag should remain at all
+    (written as an empty filename, which deletes them), or None when
+    nothing needs writing (nothing of ours to set, none to clear)."""
+    kept: list[ET.Element] = []
+    had_ours = False
+    if existing_xml.strip():
+        try:
+            root = ET.fromstring(existing_xml)
+        except ET.ParseError:
+            root = None
+        if root is None:
+            # Unreadable: writing would replace tags we can't see, and
+            # there's nothing of ours to clear that we can find.
+            return build_tags_xml(ours) if ours else None
+        for tag in root.findall("Tag"):
+            targets = tag.find("Targets")
+            if targets is not None and any(child.tag.endswith("UID") for child in targets):
+                continue  # track/chapter/attachment tags: `global` doesn't replace them
+            for simple in tag.findall("Simple"):
+                name = simple.find("Name")
+                if name is not None and name.text in REVERSE_FIELD_MAP:
+                    tag.remove(simple)
+                    had_ours = True
+            if tag.findall("Simple"):
+                kept.append(tag)
+    if not ours and not had_ours:
+        return None
+    new_root = ET.Element("Tags")
+    new_root.extend(kept)
+    if ours:
+        new_root.extend(ET.fromstring(build_tags_xml(ours)))
+    if not len(new_root):
+        return ""
+    return ET.tostring(new_root, encoding="unicode", xml_declaration=False)
+
+
 def write_mkv_metadata(path: str, meta: VideoMetadata) -> subprocess.CompletedProcess:
     """Write VideoMetadata's editable fields to an MKV file.
 
@@ -299,6 +377,14 @@ def write_mkv_metadata(path: str, meta: VideoMetadata) -> subprocess.CompletedPr
     file passed via `--tags global:...`. `global` (not `all` -- see
     module docstring for the real bug this was) matches
     build_tags_xml()'s Targets-less, whole-file-scoped output.
+
+    A field that was emptied is REMOVED from the file, so clearing a
+    field persists: an empty title is deleted with `--edit info --delete
+    title` (only when the file has one), and the tags file is rebuilt
+    without the emptied keys (see plan_global_tags). `--tags global:`
+    replaces ALL global tags, so the ones other tools wrote are read
+    first and carried over untouched; if the current tags can't be read,
+    nothing is cleared (only non-empty values are written).
 
     Issued as TWO SEPARATE mkvpropedit invocations when both a title
     and custom tags need writing, not combined into one call. This is
@@ -334,28 +420,36 @@ def write_mkv_metadata(path: str, meta: VideoMetadata) -> subprocess.CompletedPr
             continue
         tag_values[mkv_tag] = str(value)
 
-    if not title and not tag_values:
-        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-
     results: list[subprocess.CompletedProcess] = []
 
     if title:
         results.append(run_mkvpropedit(path, ["--edit", "info", "--set", f"title={title}"]))
+    elif _current_native_title(path):
+        results.append(run_mkvpropedit(path, ["--edit", "info", "--delete", "title"]))
 
-    if tag_values:
+    existing_xml = _extract_tags_xml(path)
+    if existing_xml is None:
+        planned = build_tags_xml(tag_values) if tag_values else None
+    else:
+        planned = plan_global_tags(existing_xml, tag_values)
+
+    if planned is not None:
         tmp_xml_path = None
         try:
-            xml_content = build_tags_xml(tag_values)
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".xml", delete=False, encoding="utf-8"
-            ) as tmp_file:
-                tmp_file.write(xml_content)
-                tmp_xml_path = tmp_file.name
-            results.append(run_mkvpropedit(path, ["--tags", f"global:{tmp_xml_path}"]))
+            if planned:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".xml", delete=False, encoding="utf-8"
+                ) as tmp_file:
+                    tmp_file.write(planned)
+                    tmp_xml_path = tmp_file.name
+            # An empty filename deletes the global tags.
+            results.append(run_mkvpropedit(path, ["--tags", f"global:{tmp_xml_path or ''}"]))
         finally:
             if tmp_xml_path and os.path.exists(tmp_xml_path):
                 os.remove(tmp_xml_path)
 
+    if not results:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
     combined_returncode = max(r.returncode for r in results)
     combined_stdout = "\n".join(r.stdout for r in results if r.stdout)
     combined_stderr = "\n".join(r.stderr for r in results if r.stderr)

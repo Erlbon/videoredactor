@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-30#03 — Clearing a field now sticks
+
+- **Fixed: emptying a field never reached the file.** Clearing a value and saving skipped it (and a file with every field emptied wasn't written at all), so the old value came back on the next load. MKV now deletes an emptied title (`mkvpropedit --delete title`) and rebuilds the tags without the emptied keys; MP4 already removed its atoms. Save verification now checks emptied fields read back empty too, so a clear that didn't stick is reported instead of passing.
+- MKV: writing tags no longer wipes global tags other tools put in the file (encoder info and so on) -- they're read first and carried over; the app's own tags are the only ones replaced. If the existing tags can't be read, nothing is cleared.
+- **Fixed: MP4 Season/Episode 0 (specials) was deleted** instead of written, and then flagged as a save mismatch.
+- An `mkvpropedit` exit code 1 (finished with warnings) is no longer treated as a failed save; the read-back check decides, as it already did for repairs.
+- Note: the MKV tag deletion was tested against a simulated mkvpropedit only (MKVToolNix wasn't available here).
+
 ## 2026-09-30#02 — Remux no longer loses tracks, runs in the background, leaves no partial files
 
 - **Fixed: Remux to MP4 kept only one audio track and dropped subtitles and attachments**, then permanently deleted the original MKV. It now keeps every track (falling back to fewer streams only when MP4 refuses some), compares the result with the original (tracks and length) and only offers to delete the original when nothing is missing -- otherwise the original is kept and you're told why. The original goes to the Recycle Bin instead of being erased.

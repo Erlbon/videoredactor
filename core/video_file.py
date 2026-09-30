@@ -166,7 +166,9 @@ class VideoFile:
         try:
             if self.is_mkv:
                 result = write_mkv_metadata(str(self.path), self.metadata)
-                if result.returncode != 0:
+                # 1 = finished with warnings (restore_app_metadata accepts
+                # it too): the re-read below decides whether it stuck.
+                if result.returncode not in (0, 1):
                     self.save_error = result.stderr.strip() or "mkvpropedit failed"
                     return
                 # Captured even on success -- a tool can print a warning
@@ -198,7 +200,7 @@ class VideoFile:
 
     def _verify_write(self, write_diagnostic: str = "") -> str:
         """Re-read the just-saved file and compare every EDITABLE_FIELDS
-        field that currently holds a non-empty value in self.metadata
+        field in self.metadata
         against what's actually on disk now. Reports EVERY mismatch
         found, not just the first -- an earlier version stopped at the
         first disagreement, which (now that content_type sorts first in
@@ -221,10 +223,9 @@ class VideoFile:
         parameter and appended here too, in case a genuine extraction
         failure is the actual culprit and just needed a way to surface.
 
-        Only checks fields that are currently non-empty in
-        self.metadata -- a field that was never set and still reads
-        back empty is correct, expected agreement, not something to
-        flag.
+        An empty field is checked too: it must read back empty (a
+        field that was never set and still reads back empty is correct,
+        expected agreement, not something to flag).
         """
         read_diagnostics: dict = {}
         try:
@@ -240,10 +241,15 @@ class VideoFile:
         mismatches = []
         for field_name in EDITABLE_FIELDS:
             expected = getattr(self.metadata, field_name, None)
-            if expected in (None, ""):
-                continue
             actual = getattr(reread, field_name, None)
-            if actual != expected:
+            if expected in (None, ""):
+                # An emptied field must be gone from the file too (the
+                # writers delete it) -- otherwise the old value comes
+                # back on the next load and the save "succeeded" for
+                # nothing.
+                if actual not in (None, ""):
+                    mismatches.append(f"'{field_name}' (cleared, file still reads {actual!r})")
+            elif actual != expected:
                 mismatches.append(f"'{field_name}' (wrote {expected!r}, file now reads {actual!r})")
 
         if not mismatches:
