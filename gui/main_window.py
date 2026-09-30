@@ -47,7 +47,7 @@ from core.table_settings import PROTECTED_COLUMNS, merge_column_order, is_column
 from core.format_helpers import format_duration, format_file_size
 from core.config import get_setting, set_setting
 from redactor_common.gui.action_factory import make_action
-from redactor_common.gui.menu_builder import MenuAction, Separator, build_menu_bar
+from redactor_common.gui.menu_builder import MenuAction, Separator, Submenu, build_menu_bar
 from redactor_common.gui.async_preview import AsyncPreviewLoader
 from redactor_common.gui.auto_numbering_dialog import AutoNumberingDialog
 from redactor_common.gui.case_conversion_dialog import CaseConversionDialog
@@ -239,6 +239,11 @@ class _TranscodeWorker(QThread):
                 cancel_event=self.cancel_event,
             )
             self.file_finished.emit(i, ok, message)
+
+
+def _remember_zero_pad(enabled: bool, width: int) -> None:
+    set_setting("rename", "zero_pad", "1" if enabled else "0")
+    set_setting("rename", "zero_pad_width", str(width))
 
 
 class MainWindow(QMainWindow):
@@ -1170,6 +1175,15 @@ class MainWindow(QMainWindow):
             # the same name doesn't make sense.
             if len(files) == 1 and not files[0].load_error:
                 items.append(self.rename_file_action)
+            # Every lookup from the Import menu, so none needs a trip to
+            # the menu bar (no shortcuts here: they already live on the
+            # Import menu's own actions).
+            items.append(Submenu("Look Up", [
+                MenuAction("ctx_tmdb_movie", "TMDB (Movie)...", lambda: self._on_import_tmdb("movie")),
+                MenuAction("ctx_tmdb_tv", "TMDB (TV Show)...", lambda: self._on_import_tmdb("tv")),
+                MenuAction("ctx_tvdb", "TheTVDB (TV Show)...", self._on_import_tvdb),
+                MenuAction("ctx_subtitles", "Subtitles from OpenSubtitles...", self._on_import_subtitles),
+            ]))
             items.append(MenuAction(
                 "number_episodes", "Number Episodes...", lambda: self._quick_number_episodes(files)
             ))
@@ -2207,6 +2221,11 @@ class MainWindow(QMainWindow):
             zero_pad_label="Zero-pad episode # to:",
             ascii_only=get_setting("rename", "ascii_only", "0") == "1",
             on_ascii_only_changed=lambda on: set_setting("rename", "ascii_only", "1" if on else "0"),
+            zero_pad_initial=(
+                get_setting("rename", "zero_pad", "0") == "1",
+                int(get_setting("rename", "zero_pad_width", "2") or 2),
+            ),
+            on_zero_pad_changed=_remember_zero_pad,
             parent=self,
         )
         if dialog.exec() != dialog.DialogCode.Accepted:
@@ -2397,7 +2416,10 @@ class MainWindow(QMainWindow):
             for field in NUMERIC_FIELDS + TEXT_FIELDS
         ]
         dialog = AutoNumberingDialog(
-            targets, fields, _field_text, lambda vf: vf.path.name, item_noun="file", parent=self,
+            targets, fields, _field_text, lambda vf: vf.path.name, item_noun="file",
+            padding=int(get_setting("auto_numbering", "padding", "2") or 2),
+            on_padding_changed=lambda width: set_setting("auto_numbering", "padding", str(width)),
+            parent=self,
         )
         if dialog.exec() != dialog.DialogCode.Accepted:
             return

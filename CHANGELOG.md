@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-09-30#01 — Lookups in the right-click menu, zero-padding remembered
+
+- Right-clicking a file now has a **Look Up** submenu with TMDB (Movie),
+  TMDB (TV Show), TheTVDB and OpenSubtitles, same as the Import menu.
+- Rename / Export by Pattern remembers the zero-pad checkbox and width,
+  and Auto-Numbering remembers its "Zero-pad to" width.
+- redactor_common 2026-09-30-01 (from 2026-09-29-04): the shared dialogs
+  that make the padding memory possible.
+
 ## 2026-09-29#05 — Quitting while a thumbnail loads
 
 - **Fixed: the app could stay running after you closed it.** Quitting (or closing the window) while a file's preview thumbnail was still being generated left the process hung forever in the background -- more likely with a large or slow-to-seek file, or one on a network share. It now exits once that thumbnail finishes (at most the thumbnail timeout).
