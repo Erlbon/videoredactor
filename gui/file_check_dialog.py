@@ -11,6 +11,9 @@ Each file is checked/repaired on a worker thread
 while ffmpeg reads a multi-GB file; Cancel takes effect between files.
 Results land on VideoFile.check and show in the Status column
 (DAMAGED / REPAIRABLE / NOTE / CHECKED OK, the findings as a tooltip).
+Each real result is also stamped into the file's metadata (status, time,
+video fingerprint -- VideoFile.record_check), which marks the file unsaved;
+Save writes it inside the file.
 """
 
 from __future__ import annotations
@@ -34,6 +37,7 @@ from redactor_common.gui.progress import run_with_progress
 
 from core.file_check import quick_check, repair
 from core.video_file import VideoFile
+from core.video_fingerprint import video_fingerprint
 
 TITLE = "Check Files"
 
@@ -93,6 +97,15 @@ class FileCheckResultsDialog(QDialog):
         layout.addWidget(buttons)
 
 
+def _check_and_fingerprint(path: str):
+    """The quick check plus the video fingerprint it is stamped with, for
+    one worker call. The fingerprint is skipped when there was no real scan."""
+    result = quick_check(path)
+    if not result.openable:
+        return result, ""
+    return result, video_fingerprint(path)
+
+
 def check_files(window, files: list[VideoFile], errors: Optional[list[str]] = None) -> list[VideoFile]:
     """Runs the quick check on `files`; returns the ones checked (fewer
     if cancelled). A file whose check blows up (OSError, a timeout...) is
@@ -101,11 +114,12 @@ def check_files(window, files: list[VideoFile], errors: Optional[list[str]] = No
 
     def step(vf: VideoFile, _index: int) -> None:
         try:
-            vf.check = call_in_background(quick_check, str(vf.path))
+            result, fingerprint = call_in_background(_check_and_fingerprint, str(vf.path))
         except Exception as exc:
             if errors is not None:
                 errors.append(f"{vf.path.name}: {exc}")
             return
+        vf.record_check(result, fingerprint)
         checked.append(vf)
 
     run_with_progress(window, files, step, "Checking files...", threshold=1,
@@ -122,7 +136,7 @@ def repair_files(window, files: list[VideoFile]) -> tuple[list[VideoFile], list[
     notes: list[str] = []
     ready = []
     for vf in files:
-        if vf.dirty:
+        if vf.dirty and not vf.stamp_only_dirty:
             errors.append(f"{vf.path.name}: has unsaved changes -- save or discard them first")
         else:
             ready.append(vf)
@@ -130,11 +144,12 @@ def repair_files(window, files: list[VideoFile]) -> tuple[list[VideoFile], list[
     def step(vf: VideoFile, _index: int) -> None:
         try:
             outcome = call_in_background(repair, str(vf.path), vf.check)
+            fingerprint = call_in_background(video_fingerprint, str(vf.path))
         except Exception as exc:  # RepairError, or anything unexpected: keep going with the rest
             errors.append(f"{vf.path.name}: {exc}")
             return
         vf.load()  # fresh duration and technical details from the repaired file
-        vf.check = outcome.check
+        vf.record_check(outcome.check, fingerprint)
         vf._thumbnail_path = None
         repaired.append(vf)
         if outcome.note:

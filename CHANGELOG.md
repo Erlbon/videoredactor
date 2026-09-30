@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-30#07 — Check Files results are stamped into the file
+
+- **Scan stamp**: Check Files now records "scanned at <time>, result <status>" inside the video (MKV global tag `REDACTOR_CHECK`, MP4 freeform atom `REDACTOR_CHECK`), so the result follows the file when it's copied around. It is held in memory after a scan and written only when you Save, like other metadata; the file shows as unsaved until then. Other tools' MKV tags are kept. No stamp for files that failed to load or when ffprobe is missing.
+- The Status column shows the stamp (`CHECKED OK · 2026-09-30 14:05`) instead of the plain "OK" of an unscanned file. The stamp carries a video fingerprint (stream parameters, rounded duration and a hash of the first 200 video and audio packets, no decoding): tag edits and a copy-remux of the same streams keep it, a truncation or re-encode changes it, and then the stamp is shown as `(changed since)` and not counted as a current result. A stamp that can't be verified says `(unverified)`.
+- Repair after a scan is no longer refused because of the scan's own unsaved stamp; real unsaved edits still block it. Undo keeps a stamp recorded after the edit.
+- Uses redactor_common 2026-09-30-06 (scan stamp format). MKV stamp writing was tested against a simulated MKVToolNix only.
+
 ## 2026-09-30#06 — Open in Default App
 
 - Right-click menu gains Open in Default App (redactor_common 2026-09-30-04).

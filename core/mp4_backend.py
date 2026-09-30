@@ -76,11 +76,15 @@ CUSTOM_FIELDS = [
     "sort_title", "language", "personal_rating", "content_type",
     "director", "cast", "writer", "studio", "collection",
     "track_title",
+    "scan_stamp",
 ]
+
+# Freeform atom names that differ from the field name.
+CUSTOM_ATOM_NAMES = {"scan_stamp": "REDACTOR_CHECK"}
 
 
 def _custom_key(field_name: str) -> str:
-    return f"{CUSTOM_ATOM_PREFIX}{field_name}"
+    return f"{CUSTOM_ATOM_PREFIX}{CUSTOM_ATOM_NAMES.get(field_name, field_name)}"
 
 
 def read_mp4_metadata(path: str) -> VideoMetadata:

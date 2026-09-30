@@ -64,6 +64,14 @@ class VideoMetadata:
     track_title: str = ""         # distinct from `title`, if they differ
     composer: str = ""
 
+    # --- Scan stamp (core.scan_stamp wire text) ---
+    # "STATUS;UTC-time;fingerprint" from the last Check Files scan, kept
+    # inside the file (MKV global tag / MP4 freeform atom REDACTOR_CHECK).
+    # Not in EDITABLE_FIELDS (the panel never edits it) and compare=False
+    # so it doesn't count as a metadata difference; the backends read and
+    # write it, VideoFile.record_check sets it.
+    scan_stamp: str = field(default="", compare=False)
+
     # --- Read-only / technical (populated from file, never hand-edited) ---
     resolution: str = field(default="", compare=False)
     video_codec: str = field(default="", compare=False)

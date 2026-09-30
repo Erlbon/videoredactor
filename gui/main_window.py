@@ -1076,7 +1076,9 @@ class MainWindow(QMainWindow):
                         # row->file mapping via UserRole, not row index.
                         item.setData(FILE_ROLE, vf)
                     check_note = vf.check.summary() if vf.check is not None and vf.check.findings else ""
-                    tooltip = "\n".join(t for t in (vf.save_error or vf.load_error, check_note) if t)
+                    stamp = vf.stamp
+                    stamp_note = stamp.tooltip() if stamp is not None and field_name == "status" else ""
+                    tooltip = "\n".join(t for t in (vf.save_error or vf.load_error, check_note, stamp_note) if t)
                     if tooltip:
                         item.setToolTip(tooltip)
                     if row_colors is not None:
@@ -1146,11 +1148,13 @@ class MainWindow(QMainWindow):
             return (ERROR_COLOR, HIGHLIGHT_TEXT_COLOR)
         if vf.dirty:
             return (DIRTY_COLOR, HIGHLIGHT_TEXT_COLOR)
-        # Check Files results: damaged red like a load error, repairable
-        # in the shared soft orange (needs attention, not broken).
-        if vf.check is not None and vf.check.status == "DAMAGED":
+        # Check Files results (this session's, or a current stamp read
+        # from the file): damaged red like a load error, repairable in
+        # the shared soft orange (needs attention, not broken).
+        scan_status = vf.scan_status()
+        if scan_status == "DAMAGED":
             return (ERROR_COLOR, HIGHLIGHT_TEXT_COLOR)
-        if vf.check is not None and vf.check.status == "REPAIRABLE":
+        if scan_status == "REPAIRABLE":
             return (SAVE_FAILED_COLOR, HIGHLIGHT_TEXT_COLOR)
         return None
 
@@ -1172,10 +1176,12 @@ class MainWindow(QMainWindow):
             if vf.save_error:
                 return "SAVE FAILED"
             if vf.dirty:
-                return "UNSAVED"
-            if vf.check is not None:
-                return vf.check.status  # Operations > Check Files...
-            return "OK"
+                # A fresh scan marks the file dirty (its stamp is unsaved);
+                # keep its result visible.
+                return f"UNSAVED · {vf.check.status}" if vf.check is not None else "UNSAVED"
+            # Operations > Check Files...: the stamp (status + when) in
+            # place of the unscanned text; a stale one says so.
+            return vf.stamp_text() or (vf.check.status if vf.check is not None else "OK")
         if field_name == "content_type":
             ct = vf.metadata.content_type
             return ct.value if isinstance(ct, ContentType) else str(ct or "")
@@ -2592,7 +2598,13 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _restore(vf: VideoFile, snapshot: tuple) -> None:
+        # A scan isn't an undoable edit: undo keeps the file's current
+        # stamp (and stays dirty while that stamp is still unsaved).
+        stamp_changed = vf.metadata.scan_stamp != snapshot[0].scan_stamp
+        scan_stamp = vf.metadata.scan_stamp
         vf.metadata, vf.dirty = copy.deepcopy(snapshot[0]), snapshot[1]
+        vf.metadata.scan_stamp = scan_stamp
+        vf.dirty = vf.dirty or stamp_changed
 
     def _push_undo(self, label: str, files: list[VideoFile]) -> None:
         """Call BEFORE mutating `files`, to capture their prior state."""

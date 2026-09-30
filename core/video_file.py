@@ -16,6 +16,7 @@ import hashlib
 import tempfile
 
 from redactor_common.core.save_errors import describe_save_error
+from redactor_common.core.scan_stamp import ScanStamp, make_stamp, parse_stamp
 
 from core.video_metadata import VideoMetadata, EDITABLE_FIELDS, ContentType
 from core.mp4_backend import read_mp4_metadata, write_mp4_metadata
@@ -23,6 +24,7 @@ from core.mkv_backend import read_mkv_metadata, write_mkv_metadata
 from core.ffmpeg_backend import extract_thumbnail, probe_technical_info
 from core.external_tools import is_tool_available, MKVTOOLNIX, FFMPEG
 from core.opensubtitles_client import clean_language_code
+from core.video_fingerprint import video_fingerprint
 
 SUPPORTED_EXTENSIONS = {".mp4", ".m4v", ".mkv"}
 
@@ -43,8 +45,23 @@ class VideoFile:
     dirty: bool = False    # unsaved bulk-edit changes pending
     _thumbnail_path: Optional[Path] = field(default=None, repr=False, compare=False)
     # Operations > Check Files... result (core/file_check.CheckResult);
-    # None until checked. Not saved anywhere -- a fresh load starts unchecked.
+    # None until checked this session. Its persistent record is the scan
+    # stamp in metadata.scan_stamp (see record_check / stamp).
     check: Optional[object] = field(default=None, repr=False, compare=False)
+    # Whether a stamp read from the file still matches the video: True =
+    # its fingerprint differs (or can't be recomputed), False = matches,
+    # None = can't be verified (no fingerprint in the stamp, or ffmpeg
+    # missing). Set by load() and record_check(); meaningless without a stamp.
+    stamp_stale: Optional[bool] = field(default=None, repr=False, compare=False)
+    # True while the ONLY unsaved change is a fresh scan stamp (no edits),
+    # so a repair right after a scan isn't refused for "unsaved changes".
+    # Any other assignment to `dirty` clears it (see __setattr__).
+    stamp_only_dirty: bool = field(default=False, repr=False, compare=False)
+
+    def __setattr__(self, name, value):
+        if name == "dirty":
+            object.__setattr__(self, "stamp_only_dirty", False)
+        object.__setattr__(self, name, value)
 
     @property
     def extension(self) -> str:
@@ -110,6 +127,61 @@ class VideoFile:
             technical = probe_technical_info(str(self.path))
             for key, value in technical.items():
                 setattr(self.metadata, key, value)
+            self._refresh_stamp_staleness()
+
+    @property
+    def stamp(self) -> Optional[ScanStamp]:
+        """The scan stamp recorded in the file (None if none/garbled)."""
+        return parse_stamp(self.metadata.scan_stamp)
+
+    def record_check(self, result, fingerprint: str = "") -> bool:
+        """Keeps a Check Files result: sets `check`, and stamps the scan
+        (status, now, `fingerprint`) into the metadata, marking the file
+        dirty so Save writes it like any other tag. A result that isn't a
+        real scan (the tool was missing) or a file that failed to load
+        gets no stamp. Returns whether a stamp was recorded."""
+        self.check = result
+        if self.load_error or any(f.code == "no_tool" for f in result.findings):
+            return False
+        self.metadata.scan_stamp = make_stamp(result.status, fingerprint).to_text()
+        self.stamp_stale = False if fingerprint else None
+        only_stamp = not self.dirty or self.stamp_only_dirty
+        self.dirty = True
+        self.stamp_only_dirty = only_stamp
+        return True
+
+    def scan_status(self) -> str:
+        """The scan result to show: this session's check, else the
+        status of a stamp read from the file that still matches the
+        video ("" when unscanned, or the stamp is stale)."""
+        if self.check is not None:
+            return self.check.status
+        stamp = self.stamp
+        if stamp is None or self.stamp_stale is not False:
+            return ""
+        return stamp.status
+
+    def _refresh_stamp_staleness(self) -> None:
+        """Compares a loaded stamp's fingerprint with the video now."""
+        stamp = self.stamp
+        self.stamp_stale = None
+        if stamp is None or not stamp.fingerprint or not is_tool_available(FFMPEG):
+            return
+        self.stamp_stale = video_fingerprint(str(self.path)) != stamp.fingerprint
+
+    def stamp_text(self) -> str:
+        """The stamp as the Status column shows it ("" without one):
+        `<STATUS> · <date time>`, plus "(changed since)" when the video no
+        longer matches it, or "(unverified)" when that can't be told."""
+        stamp = self.stamp
+        if stamp is None:
+            return ""
+        text = stamp.display()
+        if self.stamp_stale:
+            return f"{text} (changed since)"
+        if self.stamp_stale is None:
+            return f"{text} (unverified)"
+        return text
 
     @property
     def size_bytes(self) -> Optional[int]:
@@ -240,6 +312,10 @@ class VideoFile:
             return f"Save verification failed: could not re-read the file afterward ({e})"
 
         mismatches = []
+        if reread.scan_stamp != self.metadata.scan_stamp:
+            mismatches.append(
+                f"'scan_stamp' (wrote {self.metadata.scan_stamp!r}, file now reads {reread.scan_stamp!r})"
+            )
         for field_name in EDITABLE_FIELDS:
             expected = getattr(self.metadata, field_name, None)
             actual = getattr(reread, field_name, None)

@@ -80,6 +80,10 @@ FIELD_TO_MKV_TAG = {
     "album": "ALBUM",
     "track_title": "TRACK_TITLE",
     "composer": "COMPOSER",
+    # Check Files scan stamp (core.scan_stamp text). Listed here so
+    # plan_global_tags treats it as this app's own tag (replaced, and
+    # cleared when empty) while other tools' tags are carried over.
+    "scan_stamp": "REDACTOR_CHECK",
 }
 
 REVERSE_FIELD_MAP = {v: k for k, v in FIELD_TO_MKV_TAG.items()}
