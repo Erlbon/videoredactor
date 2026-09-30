@@ -34,6 +34,7 @@ def test_file_menu_group_order(window):
         "Open Files…", "Open Folder…", "Import and Convert…", "-",
         "Save All", "-",
         "Rename File…", "Undo Last Rename", "Rename / Export / Move…", "-",
+        "Export Settings…", "Import Settings…", "-",
         "Remove from List", "Clear List", "-",
         "Exit",
     ]
@@ -98,7 +99,8 @@ HANDLERS = {
     "lookup_subtitles": "_on_import_subtitles", "import_convert": "_on_import_and_convert",
     "number_episodes": "_on_number_episodes", "refresh_list": "_refresh_list",
     "parse_filename": "_on_import_metadata_from_filename", "rename_file": "rename_selected_file",
-    "undo_last_rename": "undo_last_rename", "changelog": "_on_show_changelog",
+    "undo_last_rename": "undo_last_rename", "export_settings": "_on_export_settings",
+    "import_settings": "_on_import_settings", "changelog": "_on_show_changelog",
     "credits": "_on_show_credits", "about": "_on_show_about",
 }
 

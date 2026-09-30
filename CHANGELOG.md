@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-30#18 — Export / Import Settings
+
+- **File > Export Settings… and Import Settings… are back**, between Rename / Export / Move and Remove from List. They write and read one file, `videoredactor-settings.json`; importing shows every change as old and new, grouped by section, and applies nothing until you confirm.
+- **Ticked by default (portable):** Redact recipe; rename/move/parse pattern history and the move pattern; table columns (order, hidden, widths); field defaults (zero-pad, ASCII names, auto-number padding); genre and language lists; conversion settings (CRF, audio bitrate, threads) and the duplicate-detection threshold.
+- **Unticked, "this computer only":** external tool paths (ffmpeg, ffprobe, MKVToolNix) and last-used folders plus the library root. After an import you can re-check the tools on this computer.
+- **Passwords and API keys are never exported or imported**, nor the unencrypted-fallback consent: the TMDB, TheTVDB and OpenSubtitles keys stay in the credential store on each computer. Imported columns and lists show up at once, without a restart.
+
 ## 2026-09-30#17 — Double-click rename in a sorted table
 
 - **Fix: double-clicking a Filename cell renamed the wrong file when the table was sorted.** The handler used the row number as an index into the load order; it now reads the file from the row itself, like selection does.

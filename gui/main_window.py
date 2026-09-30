@@ -45,6 +45,7 @@ from core.redact_steps import (
     RedactEnv, VideoCtx, build_catalogue, finalize_file, load_recipe, pin_patterns, recipe_is_saved, save_recipe,
 )
 from core.ffmpeg_backend import IMPORTABLE_EXTENSIONS, remux_to_mp4, transcode_to_mp4, verify_remux
+from core.settings_adapter import REFRESH_COLUMNS, REFRESH_PANEL, VideoSettingsAdapter
 from core.transcode_settings import get_transcode_settings
 from core.opensubtitles_client import download_subtitle_text, OpenSubtitlesError
 from core.table_settings import PROTECTED_COLUMNS, merge_column_order, is_column_visible, sanitize_hidden_fields
@@ -54,6 +55,7 @@ from redactor_common.gui.action_factory import make_action
 from redactor_common.core import labels
 from redactor_common.gui.command_palette import add_command_palette
 from redactor_common.gui.menu_builder import MenuAction, MenuItems, Separator, Submenu
+from redactor_common.gui.settings_bundle_dialogs import export_settings, import_settings
 from redactor_common.gui.standard_menus import (
     AppMenu, StandardMenuSpec, build_standard_menu_bar, get_action_registry, look_up_submenu,
     set_apply_count, standard_edit_items, standard_file_items, standard_help_items,
@@ -456,17 +458,17 @@ class MainWindow(QMainWindow):
                 # Ctrl+Shift+A). A save-selected-only entry is gone: it was
                 # almost never wanted, and two Saves next to each other only
                 # invite the wrong one. The helper's separate Save entry would
-                # be a dead duplicate, and Export/Import Settings have no
-                # settings adapter in this app yet, so both are dropped
-                # rather than shown greyed out.
+                # be a dead duplicate, so it is dropped rather than shown greyed.
                 save_all=self._on_save_all,
                 rename_file=self.rename_selected_file,
                 undo_last_rename=self.undo_last_rename,
                 rename_export_move=self._on_rename_by_pattern,
+                export_settings=self._on_export_settings,
+                import_settings=self._on_import_settings,
                 remove_from_list=self._on_remove_from_list,
                 clear_list=self._on_clear_list,
                 exit_slot=self.close,
-            ), {"save", "export_settings", "import_settings"})),
+            ), {"save"})),
             edit=standard_edit_items(
                 undo=self.undo_last_action,
                 redo=self.redo_last_action,
@@ -676,6 +678,37 @@ class MainWindow(QMainWindow):
             # Acceptable for v1 (the warning text still lists everything
             # missing either way) but worth revisiting if this ever
             # needs to handle "open every missing tool's page."
+
+    # --- File > Export Settings / Import Settings --------------------------
+
+    def _on_export_settings(self) -> None:
+        export_settings(self, VideoSettingsAdapter(redetect_tools=self._redetect_tools))
+
+    def _on_import_settings(self) -> None:
+        import_settings(
+            self, VideoSettingsAdapter(redetect_tools=self._redetect_tools),
+            on_applied=self._after_settings_import,
+        )
+
+    def _after_settings_import(self, result) -> None:
+        """Refreshes what reads its settings only when built: the table
+        columns (order, visibility, widths) and the panel's fields (hidden
+        columns, genre/language lists). Recipe, patterns and the defaults are
+        read fresh each time their dialog opens, so they need nothing."""
+        applied = set(result.applied)
+        if applied & REFRESH_COLUMNS:
+            self._rebuild_table_columns(self.filter_combo.currentData())
+        if applied & REFRESH_PANEL:
+            self.tag_panel.refresh_fields()
+        self.status_bar.showMessage("Settings imported.")
+
+    def _redetect_tools(self) -> None:
+        """Offered after an import: tool lookup isn't cached, so re-detecting
+        is just checking again (and prompting if something is missing)."""
+        if missing_tools():
+            self._check_external_tools_on_startup()
+        else:
+            self.status_bar.showMessage("All required tools are detected.")
 
     def _on_locate_tools(self) -> None:
         """Open the tool-location settings dialog (Tools menu, or
