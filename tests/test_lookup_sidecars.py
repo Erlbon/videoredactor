@@ -261,3 +261,20 @@ def test_failed_tvdb_fetch_changes_nothing_and_adds_no_undo_entry(window, monkey
     assert vf.metadata.content_type == ContentType.UNSET and not vf.dirty
     if before is not None:
         assert len(window.undo_manager._undo) == before
+
+
+def test_save_config_rides_out_a_transient_replace_failure(tmp_path, monkeypatch):
+    import core.config as config
+
+    monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "settings.ini")
+    real_replace, calls = os.replace, []
+
+    def flaky(src, dst):
+        calls.append(1)
+        if len(calls) < 3:
+            raise PermissionError("held by another process")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(config.os, "replace", flaky)
+    config.set_setting("a", "k", "v")
+    assert config.get_setting("a", "k") == "v" and len(calls) == 3

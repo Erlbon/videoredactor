@@ -20,6 +20,7 @@ wrote last.
 from __future__ import annotations
 import configparser
 import os
+import time
 from pathlib import Path
 
 from core.app_paths import settings_ini_path
@@ -51,7 +52,16 @@ def save_config(parser: configparser.ConfigParser) -> None:
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             parser.write(f)
-        os.replace(tmp, CONFIG_PATH)
+        # Windows: os.replace can fail for a moment when an antivirus or
+        # indexer has the target open; a short retry rides that out.
+        for attempt in range(10):
+            try:
+                os.replace(tmp, CONFIG_PATH)
+                break
+            except PermissionError:
+                if attempt == 9:
+                    raise
+                time.sleep(0.05)
     except BaseException:
         try:
             os.remove(tmp)

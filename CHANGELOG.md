@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-30#05 — Settings save survives a briefly locked file
+
+- Saving settings retries for a moment when Windows reports the settings file as busy (antivirus / indexer), instead of failing the save -- follow-up to the atomic settings save in 2026-09-30#04.
+
 ## 2026-09-30#04 — Lookups don't freeze the window; safer sidecars and renames
 
 - **Lookups no longer freeze the window.** TMDB / TheTVDB / OpenSubtitles searches, episode pickers, detail, poster and subtitle downloads now run in the background (the window you're working in is greyed with a wait cursor meanwhile) instead of blocking for up to 15 seconds per request.
