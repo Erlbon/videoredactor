@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-30#17 — Double-click rename in a sorted table
+
+- **Fix: double-clicking a Filename cell renamed the wrong file when the table was sorted.** The handler used the row number as an index into the load order; it now reads the file from the row itself, like selection does.
+
 ## 2026-09-30#16 — Shortcut fixes and one Save
 
 - **One Save: it saves every changed file.** *Save All* (File, and the one Save button on the toolbar) is now **Ctrl+Shift+A**, the family key, and **Ctrl+S saves all changed files too**. The separate *Save Selected* is gone: it was almost never wanted. Pending edits typed in the panel are applied first, as before. **Ctrl+Shift+S** (the old Save All Changed) keeps working as a second shortcut for one more release, and is then freed for a future Save As.

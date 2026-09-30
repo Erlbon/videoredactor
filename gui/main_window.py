@@ -1299,6 +1299,12 @@ class MainWindow(QMainWindow):
 
     # --- Selection -> TagPanel -------------------------------------------
 
+    def _file_for_row(self, row: int) -> Optional[VideoFile]:
+        """Table row -> VideoFile via FILE_ROLE. The table is sortable, so a
+        visual row is NOT an index into self.video_files."""
+        item = self.table.item(row, 0)
+        return item.data(FILE_ROLE) if item else None
+
     def _selected_video_files(self) -> list[VideoFile]:
         files: list[VideoFile] = []
         seen_rows = set()
@@ -1350,10 +1356,8 @@ class MainWindow(QMainWindow):
     def _on_cell_double_clicked(self, row: int, col: int) -> None:
         if not (0 <= col < len(self._column_order)) or self._column_order[col] != "filename":
             return
-        if not (0 <= row < len(self.video_files)):
-            return
-        vf = self.video_files[row]
-        if not vf.load_error:
+        vf = self._file_for_row(row)
+        if vf is not None and not vf.load_error:
             self.rename_single_file(vf)
 
     def rename_single_file(self, vf: VideoFile) -> None:
