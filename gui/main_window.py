@@ -52,6 +52,7 @@ from core.format_helpers import format_duration, format_file_size
 from core.config import get_setting, set_setting
 from redactor_common.gui.action_factory import make_action
 from redactor_common.core import labels
+from redactor_common.gui.command_palette import add_command_palette
 from redactor_common.gui.menu_builder import MenuAction, Separator, Submenu
 from redactor_common.gui.standard_menus import (
     AppMenu, StandardMenuSpec, build_standard_menu_bar, get_action_registry, look_up_submenu,
@@ -537,6 +538,9 @@ class MainWindow(QMainWindow):
         self.redo_action = registry["redo"]
         self.undo_action.setEnabled(False)
         self.redo_action.setEnabled(False)
+
+        # Ctrl+K: searches every action above by name, menu path or key.
+        add_command_palette(self, registry)
 
     def _build_toolbar(self) -> None:
         """Toolbar beneath the menu bar for the most-used actions, in the

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-09-30#15 — Command palette
+
+- **Ctrl+K opens a command palette** (also View > Command Palette): type part of any command's name, menu or shortcut ("remux", "look up", "Ctrl+H") and press Enter to run it; greyed commands are listed but cannot be run. It covers every menu action.
+- The menu bar is now checked against the family's menu-skeleton lint in the test suite (heading order, unique mnemonics per menu, no shortcut bound twice, canonical labels). Two findings are known and documented until the next step moves the keys: Ctrl+O is still Open Folder and Ctrl+Shift+S still Save All.
+
 ## 2026-09-30#14 — Standard menu skeleton: new menu structure
 
 - **The menus are rearranged** into the family's standard skeleton (redactor_common 2026-09-30-13): **File, Edit, View, Metadata, Media, Tools, Help**. The old Import, Operations and Settings menus are gone. Where things went: *Import Metadata from TMDB / TheTVDB / Subtitles* are now **Metadata > Look Up >** TMDB (Movie), TMDB (TV Show), TheTVDB (TV Show), Subtitles (OpenSubtitles); *Import Metadata from Filename* is **Metadata > Parse Filename**; *Number Episodes* (was right-click only) is **Metadata > Number Episodes**. *Undo, Redo, Search/Replace, Case Conversion, Auto-Numbering, Redact, Redact Recipe* are in **Edit** (as Undo, Redo, Search and Replace, Change Case, Auto-Number, Redact, Edit Redact Recipe). *Remux, Convert to MP4, Check Files, Find Duplicates* are in **Media**. *Rename/Export by Pattern* (incl. Move into folders) is **File > Rename / Export / Move**. *Import & Convert to MP4* is **File > Import and Convert**. *Save Selected* / *Save All Changed* are **File > Save** / **Save All**. *Refresh List* moved to **View**. *Locate External Tools, API Keys, Add/Remove Columns / Languages / Genres* are in **Tools** (External Tools, API Keys, Columns, Genres, Languages). Changelog, Credits and About are in **Help**.

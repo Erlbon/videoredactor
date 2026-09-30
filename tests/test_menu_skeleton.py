@@ -299,3 +299,35 @@ def test_number_episodes_menu_entry_needs_a_selection(window, monkeypatch):
     window.table.selectAll()
     window._on_number_episodes()
     assert numbered == [2]
+
+
+# --- Command palette and lint -----------------------------------------------------
+
+# Violations the lint reports on purpose until the shortcut step moves the keys
+# (Ctrl+O is still Open Folder, Ctrl+Shift+S still Save All).
+DOCUMENTED_LINT_EXCEPTIONS = {
+    "File > Open Folder is bound to Ctrl+O: Ctrl+O is Open Files",
+    "File > Save All is bound to Ctrl+Shift+S: Ctrl+Shift+S is Save As (platform standard)",
+}
+
+
+def test_menu_bar_passes_the_skeleton_lint(window):
+    from redactor_common.gui.menu_lint import lint_menu_bar
+
+    assert set(lint_menu_bar(window)) == DOCUMENTED_LINT_EXCEPTIONS
+
+
+def test_command_palette_is_on_ctrl_k_and_finds_every_action(window):
+    from redactor_common.gui.command_palette import CommandPalette, collect_commands
+
+    action = window.actions_by_key["command_palette"]
+    assert action.shortcut() == QKeySequence("Ctrl+K")
+    assert isinstance(window.command_palette, CommandPalette)
+    titles = {c.title for c in collect_commands(window, window.actions_by_key, exclude=action)}
+    for wanted in ("Open Files", "Remove from List", "Redact", "Remux to MP4", "TMDB (Movie)",
+                   "Number Episodes", "External Tools", "Reset Zoom"):
+        assert wanted in titles
+    window.command_palette.show_palette()
+    window.command_palette.set_filter("remux")
+    assert [c.title for c in window.command_palette.visible_commands()][0] == "Remux to MP4"
+    window.command_palette.close()
