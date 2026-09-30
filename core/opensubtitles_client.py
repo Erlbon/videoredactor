@@ -25,13 +25,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 import os
+import re
 
 from core.config import get_setting
 from core.opensubtitles_hash import compute_moviehash
+from core.version import APP_VERSION
 from redactor_common.core.lookup_client import build_request, fetch_bytes, fetch_json, make_default_fetch
 
 BASE_URL = "https://api.opensubtitles.com/api/v1"
-USER_AGENT = "TheVideoRedactor v0.1"  # OpenSubtitles requires a descriptive User-Agent
+USER_AGENT = f"TheVideoRedactor v{APP_VERSION}"  # OpenSubtitles requires a descriptive User-Agent
 _RATE_LIMITED = "OpenSubtitles rate/quota limit hit -- try again later."
 # Injectable for tests; see redactor_common.core.lookup_client.
 _fetch = make_default_fetch(USER_AGENT, timeout=10)
@@ -50,6 +52,18 @@ class SubtitleCandidate:
     release_name: str      # e.g. "Movie.Name.2020.1080p.BluRay"
     download_count: int
     hash_matched: bool     # True = fingerprint-verified sync; False = title search, sync NOT guaranteed
+
+
+_LANGUAGE_RE = re.compile(r"[A-Za-z-]{2,8}")
+
+
+def clean_language_code(language: object) -> str:
+    """`language` when it looks like a language code ("en", "pt-BR"),
+    else "und". The server's value ends up in a sidecar FILENAME, so
+    anything with a path separator, "..", or other odd characters must
+    never get through."""
+    text = language if isinstance(language, str) else ""
+    return text if _LANGUAGE_RE.fullmatch(text) else "und"
 
 
 def get_api_key() -> Optional[str]:
@@ -134,7 +148,7 @@ def _parse_results(data: dict, hash_matched: bool) -> list[SubtitleCandidate]:
             continue
         results.append(SubtitleCandidate(
             file_id=files[0].get("file_id"),
-            language=attrs.get("language", ""),
+            language=clean_language_code(attrs.get("language", "")),
             release_name=attrs.get("release", "") or attrs.get("feature_details", {}).get("title", ""),
             download_count=attrs.get("download_count", 0),
             hash_matched=hash_matched,

@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
+from gui.lookup import run_lookup
 from core.tmdb_client import (
     search_movies, search_tv, MovieCandidate, TVCandidate, TMDBError,
 )
@@ -106,9 +107,9 @@ class TMDBSearchDialog(QDialog):
         try:
             if self.mode == "movie":
                 year = self.year_edit.text().strip() if self.year_edit else ""
-                self._candidates = search_movies(query, year=year or None)
+                self._candidates = run_lookup(self, search_movies, query, year=year or None)
             else:
-                self._candidates = search_tv(query)
+                self._candidates = run_lookup(self, search_tv, query)
         except TMDBError as e:
             QMessageBox.warning(self, "TMDB Search Failed", str(e))
             self._candidates = []

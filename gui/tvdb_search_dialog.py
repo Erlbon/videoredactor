@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
+from gui.lookup import run_lookup
 from core.tvdb_client import search_series, SeriesCandidate, TVDBError
 
 
@@ -85,7 +86,7 @@ class TVDBSearchDialog(QDialog):
         self.select_button.setEnabled(False)
 
         try:
-            self._candidates = search_series(query)
+            self._candidates = run_lookup(self, search_series, query)
         except TVDBError as e:
             QMessageBox.warning(self, "TheTVDB Search Failed", str(e))
             self._candidates = []

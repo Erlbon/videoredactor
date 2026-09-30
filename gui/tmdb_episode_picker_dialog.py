@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
+from gui.lookup import run_lookup
 from core.tmdb_client import get_tv_seasons, get_season_episodes, TMDBError, EpisodeInfo
 
 
@@ -83,7 +84,7 @@ class TVEpisodePickerDialog(QDialog):
 
     def _load_seasons(self) -> None:
         try:
-            seasons = get_tv_seasons(self.tmdb_id)
+            seasons = run_lookup(self, get_tv_seasons, self.tmdb_id)
         except TMDBError as e:
             QMessageBox.warning(self, "Could Not Load Seasons", str(e))
             self.reject()
@@ -113,7 +114,7 @@ class TVEpisodePickerDialog(QDialog):
         self.select_button.setEnabled(False)
 
         try:
-            episodes = get_season_episodes(self.tmdb_id, season_number)
+            episodes = run_lookup(self, get_season_episodes, self.tmdb_id, season_number)
         except TMDBError as e:
             QMessageBox.warning(self, "Could Not Load Episodes", str(e))
             return

@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 
+from gui.lookup import run_lookup
 from core.opensubtitles_client import (
     search_by_hash, search_by_title, SubtitleCandidate, OpenSubtitlesError,
 )
@@ -91,8 +92,8 @@ class SubtitleSearchDialog(QDialog):
 
     def _run_hash_search(self) -> None:
         try:
-            results = search_by_hash(self.video_path, self.language)
-        except OpenSubtitlesError as e:
+            results = run_lookup(self, search_by_hash, self.video_path, self.language)
+        except (OpenSubtitlesError, OSError) as e:  # OSError: the file couldn't be read for hashing
             QMessageBox.warning(self, "Subtitle Search Failed", str(e))
             self.status_label.setText(
                 "Hash search failed -- you can still try a title search below."
@@ -115,7 +116,7 @@ class SubtitleSearchDialog(QDialog):
         if not query:
             return
         try:
-            results = search_by_title(query, self.language)
+            results = run_lookup(self, search_by_title, query, self.language)
         except OpenSubtitlesError as e:
             QMessageBox.warning(self, "Subtitle Search Failed", str(e))
             return

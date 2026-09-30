@@ -19,6 +19,7 @@ wrote last.
 
 from __future__ import annotations
 import configparser
+import os
 from pathlib import Path
 
 from core.app_paths import settings_ini_path
@@ -42,8 +43,21 @@ def load_config() -> configparser.ConfigParser:
 
 
 def save_config(parser: configparser.ConfigParser) -> None:
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        parser.write(f)
+    # Temp file + os.replace: opening CONFIG_PATH with "w" truncates it
+    # first, so a crash (or a full disk) mid-write left an empty or
+    # half-written settings file -- API keys, tool paths and pattern
+    # history gone.
+    tmp = CONFIG_PATH.with_name(CONFIG_PATH.name + ".tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            parser.write(f)
+        os.replace(tmp, CONFIG_PATH)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def get_setting(section: str, key: str, default: str = "") -> str:

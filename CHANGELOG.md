@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-09-30#04 — Lookups don't freeze the window; safer sidecars and renames
+
+- **Lookups no longer freeze the window.** TMDB / TheTVDB / OpenSubtitles searches, episode pickers, detail, poster and subtitle downloads now run in the background (the window you're working in is greyed with a wait cursor meanwhile) instead of blocking for up to 15 seconds per request.
+- **Sidecar files**: a poster or subtitle that can't be written (read-only folder, disk full) is now reported instead of crashing the import; an existing `-poster.jpg` / `.lang.srt` is never replaced without asking (with Yes/No to All for a batch); and the subtitle language from OpenSubtitles is checked before it goes into a filename, so a hostile value can't write outside the folder. Subtitle files are written with the line endings as downloaded.
+- **Rename / Export by Pattern and Search & Replace (filename)** never overwrite an existing file, on Linux/macOS too (export copies are also refused rather than replacing a file).
+- TheTVDB import no longer marks the file as TV or adds an Undo step when the fetch fails.
+- A failed subtitle hash (file vanished or unreadable) no longer crashes the subtitle dialog.
+- Settings are saved atomically (a crash mid-save can't leave an empty settings file); OpenSubtitles requests now send the real app version.
+
 ## 2026-09-30#03 — Clearing a field now sticks
 
 - **Fixed: emptying a field never reached the file.** Clearing a value and saving skipped it (and a file with every field emptied wasn't written at all), so the old value came back on the next load. MKV now deletes an emptied title (`mkvpropedit --delete title`) and rebuilds the tags without the emptied keys; MP4 already removed its atoms. Save verification now checks emptied fields read back empty too, so a clear that didn't stick is reported instead of passing.

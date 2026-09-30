@@ -22,6 +22,7 @@ from core.mp4_backend import read_mp4_metadata, write_mp4_metadata
 from core.mkv_backend import read_mkv_metadata, write_mkv_metadata
 from core.ffmpeg_backend import extract_thumbnail, probe_technical_info
 from core.external_tools import is_tool_available, MKVTOOLNIX, FFMPEG
+from core.opensubtitles_client import clean_language_code
 
 SUPPORTED_EXTENSIONS = {".mp4", ".m4v", ".mkv"}
 
@@ -274,7 +275,7 @@ class VideoFile:
             message += f" | read-back tool output: {read_errors}"
         return message
 
-    def save_poster_sidecar(self, image_bytes: bytes) -> Path:
+    def save_poster_sidecar(self, image_bytes: bytes, overwrite: bool = False) -> Path:
         """Write poster art as a sidecar JPEG next to the video file
         (`<stem>-poster.jpg`), the convention Plex/Jellyfin/Kodi already
         prefer over embedded cover art. Used for BOTH MP4 and MKV in v1
@@ -287,12 +288,16 @@ class VideoFile:
         Unlike metadata edits, this is NOT staged/dirty -- it writes a
         brand-new sidecar file, which never risks corrupting the actual
         video file, so there's no reason to gate it behind Save.
+
+        Raises FileExistsError (not silently replacing a poster the
+        user may have picked by hand) unless `overwrite`; OSError for
+        anything else -- the caller reports it.
         """
         out_path = self.path.with_name(f"{self.path.stem}-poster.jpg")
-        out_path.write_bytes(image_bytes)
+        _write_sidecar(out_path, image_bytes, overwrite)
         return out_path
 
-    def save_subtitle_sidecar(self, subtitle_text: str, language: str = "en") -> Path:
+    def save_subtitle_sidecar(self, subtitle_text: str, language: str = "en", overwrite: bool = False) -> Path:
         """Write a subtitle as a sidecar file (`<stem>.<lang>.srt`), the
         same convention Plex/Jellyfin/Kodi expect for external subtitle
         tracks. Sidecar for BOTH MP4 and MKV -- mkvpropedit cannot add a
@@ -305,9 +310,14 @@ class VideoFile:
         Language code goes in the filename (Plex/Jellyfin/Kodi convention
         for identifying which sidecar is which language) rather than
         needing to be read back out of file content.
+
+        `language` must look like a language code (anything else, e.g.
+        a value with a path separator from the server, becomes "und" --
+        it's part of a filename). Raises FileExistsError unless
+        `overwrite`, OSError for anything else, like save_poster_sidecar.
         """
-        out_path = self.path.with_name(f"{self.path.stem}.{language}.srt")
-        out_path.write_text(subtitle_text, encoding="utf-8")
+        out_path = self.path.with_name(f"{self.path.stem}.{clean_language_code(language)}.srt")
+        _write_sidecar(out_path, subtitle_text.encode("utf-8"), overwrite)
         return out_path
 
     def get_thumbnail(self, force_regenerate: bool = False) -> Optional[Path]:
@@ -341,6 +351,13 @@ class VideoFile:
             return None
         self._thumbnail_path = out_path
         return out_path
+
+
+def _write_sidecar(out_path: Path, data: bytes, overwrite: bool) -> None:
+    """Writes `data` to `out_path`; without `overwrite`, never replaces
+    an existing file (FileExistsError, atomically -- mode "xb")."""
+    with open(out_path, "wb" if overwrite else "xb") as handle:
+        handle.write(data)
 
 
 def has_subfolders(folder: Path) -> bool:

@@ -73,9 +73,11 @@ from redactor_common.gui.sortable_table import NumericTableWidgetItem, suspend_s
 from redactor_common.gui import standard_shortcuts as shortcuts
 from redactor_common.core.error_summary import summarize_errors
 from redactor_common.core.trash import TrashError, move_to_trash
+from redactor_common.core.os_utils import rename_no_clobber
 from redactor_common.core.undo import UndoManager
 from redactor_common.core.folder_refresh import find_new_files_in_loaded_folders
 from redactor_common.core.version import REDACTOR_COMMON_REPO_URL, REDACTOR_COMMON_VERSION
+from gui.lookup import run_lookup
 from gui.tag_panel import TagPanel, FIELD_LABELS
 from gui.tmdb_search_dialog import TMDBSearchDialog
 from gui.tmdb_episode_picker_dialog import TVEpisodePickerDialog
@@ -270,6 +272,24 @@ def _claim_output(output: Path, claimed: set[str]) -> bool:
         return False
     claimed.add(key)
     return True
+
+
+def _copy_no_clobber(src: str, dst: str) -> None:
+    """shutil.copy2 that refuses to replace an existing `dst` (copy2
+    silently overwrites, and "Export" must never destroy a file): copies
+    to a temporary name, then renames without clobbering."""
+    if os.path.exists(dst):
+        raise FileExistsError(f"{os.path.basename(dst)} already exists")
+    tmp = f"{dst}.copying"
+    try:
+        shutil.copy2(src, tmp)
+        rename_no_clobber(tmp, dst)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _remember_zero_pad(enabled: bool, width: int) -> None:
@@ -1535,6 +1555,7 @@ class MainWindow(QMainWindow):
         skipped_no_match = 0
         poster_saved = 0
         fetch_failures: list[tuple] = []
+        overwrite_choice: dict = {}  # "Replace existing poster?" answer, kept across the batch
 
         # One undo entry for the whole batch (the stack keeps only the
         # last few entries, so one per file would lose the earlier ones).
@@ -1551,7 +1572,7 @@ class MainWindow(QMainWindow):
             candidate = dialog.selected_candidate
 
             try:
-                details = get_movie_details(candidate.tmdb_id)
+                details = run_lookup(self, get_movie_details, candidate.tmdb_id)
             except TMDBError as e:
                 fetch_failures.append((vf, str(e)))
                 continue
@@ -1565,15 +1586,21 @@ class MainWindow(QMainWindow):
 
             if poster_path:
                 try:
-                    image_bytes = download_poster(poster_path)
-                    vf.save_poster_sidecar(image_bytes)
-                    poster_saved += 1
+                    image_bytes = run_lookup(self, download_poster, poster_path)
                 except TMDBError as e:
                     # A poster failure doesn't undo the metadata import
                     # that already succeeded -- collected alongside
                     # fetch failures for the end-of-batch summary rather
                     # than interrupting the loop with its own dialog.
                     fetch_failures.append((vf, f"poster download failed: {e}"))
+                else:
+                    status, detail = self._save_sidecar(
+                        lambda overwrite: vf.save_poster_sidecar(image_bytes, overwrite), overwrite_choice,
+                    )
+                    if status == "saved":
+                        poster_saved += 1
+                    elif status == "error":
+                        fetch_failures.append((vf, f"poster not saved: {detail}"))
 
         self._refresh_table_rows()
         if self._selected_video_files():
@@ -1602,7 +1629,7 @@ class MainWindow(QMainWindow):
         candidate = dialog.selected_candidate
 
         try:
-            show_details = get_tv_show_details(candidate.tmdb_id)
+            show_details = run_lookup(self, get_tv_show_details, candidate.tmdb_id)
         except TMDBError as e:
             QMessageBox.warning(self, "TMDB Fetch Failed", str(e))
             return
@@ -1612,10 +1639,12 @@ class MainWindow(QMainWindow):
         poster_error = ""
         if poster_path:
             try:
-                poster_bytes = download_poster(poster_path)
+                poster_bytes = run_lookup(self, download_poster, poster_path)
             except TMDBError as e:
                 poster_error = str(e)
 
+        posters_saved = 0
+        overwrite_choice: dict = {}  # "Replace existing poster?" answer, kept across the batch
         self._push_undo("TMDB Import", files)
         for vf in files:
             vf.metadata.content_type = ContentType.TV
@@ -1623,7 +1652,13 @@ class MainWindow(QMainWindow):
                 setattr(vf.metadata, field_name, value)
             vf.dirty = True
             if poster_bytes:
-                vf.save_poster_sidecar(poster_bytes)
+                status, detail = self._save_sidecar(
+                    lambda overwrite: vf.save_poster_sidecar(poster_bytes, overwrite), overwrite_choice,
+                )
+                if status == "saved":
+                    posters_saved += 1
+                elif status == "error":
+                    poster_error = f"{vf.path.name}: {detail}"
 
         # Episode-level details still need per-file confirmation --
         # each episode genuinely is different, so this deliberately
@@ -1646,8 +1681,8 @@ class MainWindow(QMainWindow):
             if not episode_dialog.exec() or episode_dialog.selected_episode is None:
                 continue
             try:
-                episode_details = get_tv_episode_details(
-                    candidate.tmdb_id, episode_dialog.selected_season,
+                episode_details = run_lookup(
+                    self, get_tv_episode_details, candidate.tmdb_id, episode_dialog.selected_season,
                     episode_dialog.selected_episode.episode_number,
                 )
             except TMDBError as e:
@@ -1662,10 +1697,10 @@ class MainWindow(QMainWindow):
             self._on_selection_changed()
 
         parts = [f"Imported \"{candidate.name}\" show-level metadata for {len(files)} file(s)", f"{episodes_set} episode(s) matched"]
-        if poster_bytes:
-            parts.append("poster saved")
-        elif poster_error:
-            parts.append(f"poster download failed: {poster_error}")
+        if posters_saved:
+            parts.append(f"{posters_saved} poster(s) saved")
+        if poster_error:
+            parts.append(f"poster problem: {poster_error}")
         if skipped_load_errors:
             parts.append(f"{skipped_load_errors} skipped (load errors)")
         if episode_failures:
@@ -1697,8 +1732,8 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            episode_details = get_episode_details(
-                tvdb_id, episode_dialog.selected_season,
+            episode_details = run_lookup(
+                self, get_episode_details, tvdb_id, episode_dialog.selected_season,
                 episode_dialog.selected_episode.episode_number,
             )
         except TVDBError as e:
@@ -1743,15 +1778,17 @@ class MainWindow(QMainWindow):
             return
         candidate = dialog.selected_candidate
 
-        self._push_undo("TheTVDB Import", [vf])
+        # Nothing is touched (no undo entry, no content type change)
+        # until the fetch has succeeded.
         try:
-            details = get_series_details(candidate.tvdb_id)
-            vf.metadata.content_type = ContentType.TV
+            details = run_lookup(self, get_series_details, candidate.tvdb_id)
             self._apply_tvdb_episode_details(candidate.tvdb_id, details, vf.path.stem)
         except TVDBError as e:
             QMessageBox.warning(self, "TheTVDB Fetch Failed", str(e))
             return
 
+        self._push_undo("TheTVDB Import", [vf])
+        vf.metadata.content_type = ContentType.TV
         poster_url = details.pop("_poster_path", None)
         for field_name, value in details.items():
             setattr(vf.metadata, field_name, value)
@@ -1762,16 +1799,53 @@ class MainWindow(QMainWindow):
             status_msg += " (show-level only -- episode selection was skipped)"
         if poster_url:
             try:
-                image_bytes = download_image(poster_url)
-                saved = vf.save_poster_sidecar(image_bytes)
-                status_msg += f"; poster saved as {saved.name}"
+                image_bytes = run_lookup(self, download_image, poster_url)
             except TVDBError as e:
                 status_msg += f"; poster download failed: {e}"
+            else:
+                status, detail = self._save_sidecar(lambda overwrite: vf.save_poster_sidecar(image_bytes, overwrite), {})
+                if status == "saved":
+                    status_msg += f"; poster saved as {detail.name}"
+                elif status == "kept":
+                    status_msg += "; existing poster kept"
+                else:
+                    status_msg += f"; poster not saved: {detail}"
 
         self._refresh_table_rows()
-        if vf in self._selected_video_files():
+        if any(selected_vf is vf for selected_vf in self._selected_video_files()):
             self._on_selection_changed()
         self.status_bar.showMessage(status_msg)
+
+    def _save_sidecar(self, write, choice: dict) -> tuple[str, object]:
+        """Runs `write(overwrite)` (VideoFile.save_poster_sidecar /
+        save_subtitle_sidecar) and reports the outcome as ("saved",
+        path), ("kept", None) -- the file exists and the user declined to
+        replace it -- or ("error", message) for an OSError. Never
+        replaces an existing file unasked; `choice` carries a "to all"
+        answer ({"all": True/False}) across a batch."""
+        try:
+            return "saved", write(bool(choice.get("all")))
+        except FileExistsError as exc:
+            if choice.get("all") is False:
+                return "kept", None
+            name = os.path.basename(exc.filename) if exc.filename else "The file"
+            button = QMessageBox.StandardButton
+            answer = QMessageBox.question(
+                self, "Replace Existing File?", f"{name} already exists. Replace it?",
+                button.Yes | button.YesToAll | button.No | button.NoToAll, button.No,
+            )
+            if answer == button.NoToAll:
+                choice["all"] = False
+            if answer not in (button.Yes, button.YesToAll):
+                return "kept", None
+            if answer == button.YesToAll:
+                choice["all"] = True
+            try:
+                return "saved", write(True)
+            except OSError as retry_exc:
+                return "error", str(retry_exc)
+        except OSError as exc:
+            return "error", str(exc)
 
     # --- Remux ---------------------------------------------------------
 
@@ -2246,15 +2320,24 @@ class MainWindow(QMainWindow):
         candidate = dialog.selected_candidate
 
         try:
-            subtitle_text = download_subtitle_text(candidate.file_id)
+            subtitle_text = run_lookup(self, download_subtitle_text, candidate.file_id)
         except OpenSubtitlesError as e:
             QMessageBox.warning(self, "Subtitle Download Failed", str(e))
             return
 
-        saved_path = vf.save_subtitle_sidecar(subtitle_text, language=candidate.language)
+        status, detail = self._save_sidecar(
+            lambda overwrite: vf.save_subtitle_sidecar(subtitle_text, language=candidate.language, overwrite=overwrite),
+            {},
+        )
+        if status == "error":
+            QMessageBox.warning(self, "Subtitle Not Saved", f"Couldn't write the subtitle file: {detail}")
+            return
+        if status == "kept":
+            self.status_bar.showMessage("Kept the existing subtitle file")
+            return
 
         sync_note = "exact match" if candidate.hash_matched else "title match -- sync not guaranteed"
-        self.status_bar.showMessage(f"Saved subtitle to {saved_path.name} ({sync_note})")
+        self.status_bar.showMessage(f"Saved subtitle to {detail.name} ({sync_note})")
 
     # --- Filename patterns -------------------------------------------------
 
@@ -2316,9 +2399,9 @@ class MainWindow(QMainWindow):
                 continue
             try:
                 if export_mode:
-                    shutil.copy2(old_path, new_path)
+                    _copy_no_clobber(old_path, new_path)
                 else:
-                    os.rename(old_path, new_path)
+                    rename_no_clobber(old_path, new_path)
                     vf.path = Path(new_path)
                     renamed.append((str(old_path), str(new_path)))
                 done += 1
@@ -2427,7 +2510,7 @@ class MainWindow(QMainWindow):
                 if new_path.exists() and new_path != vf.path:
                     raise FileExistsError(f"{new_path.name} already exists")
                 old_path = vf.path
-                os.rename(vf.path, new_path)
+                rename_no_clobber(str(vf.path), str(new_path))
                 vf.path = new_path
                 logged.append((str(old_path), str(new_path)))
                 renamed += 1

@@ -33,6 +33,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
+from gui.lookup import run_lookup
 from core.tvdb_client import (
     get_series_episodes, group_episodes_into_seasons, TVDBError, EpisodeInfo,
 )
@@ -91,7 +92,7 @@ class TVDBEpisodePickerDialog(QDialog):
 
     def _load_episodes_and_seasons(self) -> None:
         try:
-            self._all_episodes = get_series_episodes(self.tvdb_id)
+            self._all_episodes = run_lookup(self, get_series_episodes, self.tvdb_id)
         except TVDBError as e:
             QMessageBox.warning(self, "Could Not Load Episodes", str(e))
             self.reject()
