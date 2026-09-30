@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-30#06 — Open in Default App
+
+- Right-click menu gains Open in Default App (redactor_common 2026-09-30-04).
+
 ## 2026-09-30#05 — Settings save survives a briefly locked file
 
 - Saving settings retries for a moment when Windows reports the settings file as busy (antivirus / indexer), instead of failing the save -- follow-up to the atomic settings save in 2026-09-30#04.
