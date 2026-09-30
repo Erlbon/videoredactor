@@ -32,9 +32,8 @@ def test_file_menu_group_order(window):
     shape = ["-" if a.isSeparator() else a.text().replace("&", "") for a in _menus(window)["File"].actions()]
     assert shape == [
         "Open Files…", "Open Folder…", "Import and Convert…", "-",
-        "Save", "Save All", "-",
+        "Save All", "-",
         "Rename File…", "Undo Last Rename", "Rename / Export / Move…", "-",
-        "Export Settings…", "Import Settings…", "-",
         "Remove from List", "Clear List", "-",
         "Exit",
     ]
@@ -65,7 +64,7 @@ def test_other_menus_hold_what_the_spec_says(window):
 
 # Every action key of the old menus -> where it lives now.
 OLD_ACTIONS_NOW = {
-    "open_folder": "open_folder", "save_selected": "save", "save_all": "save_all",
+    "open_folder": "open_folder", "save_selected": "save_all", "save_all": "save_all",
     "rename_file": "rename_file", "undo_rename": "undo_last_rename", "refresh_list": "refresh_list",
     "exit": "exit", "import_tmdb_movie": "lookup_tmdb_movie", "import_tmdb_tv": "lookup_tmdb_tv",
     "import_tvdb": "lookup_tvdb", "import_from_filename": "parse_filename",
@@ -87,8 +86,8 @@ def test_every_old_action_is_still_registered(window):
 
 
 HANDLERS = {
-    "open_files": "_on_open_files", "open_folder": "_on_open_folder", "save": "_on_save_selected",
-    "save_all": "_on_save_all", "rename_export_move": "_on_rename_by_pattern",
+    "open_files": "_on_open_files", "open_folder": "_on_open_folder", "save_all": "_on_save_all",
+    "rename_export_move": "_on_rename_by_pattern",
     "remove_from_list": "_on_remove_from_list", "clear_list": "_on_clear_list", "redact": "_on_redact",
     "redact_recipe": "_on_edit_redact_recipe", "search_replace": "_on_search_replace",
     "change_case": "_on_case_conversion", "auto_number": "_on_auto_numbering", "remux": "_on_remux_selected",
@@ -130,8 +129,9 @@ def test_toolbar_reuses_the_menu_actions_in_order(window):
     toolbar = window.findChildren(QToolBar)[0]
     acts = [a for a in toolbar.actions() if not a.isSeparator()]
     reg = window.actions_by_key
-    assert acts[:8] == [reg["open_files"], reg["open_folder"], reg["apply"], reg["save"], reg["save_all"],
+    assert acts[:7] == [reg["open_files"], reg["open_folder"], reg["apply"], reg["save_all"],
                         reg["redact"], reg["undo"], reg["redo"]]
+    assert "save" not in reg  # one Save button: Save All
     assert window.zoom.zoom_out_action in acts and window.zoom.zoom_in_action in acts
     assert window.undo_action is reg["undo"] and window.redo_action is reg["redo"]
     assert acts[-1].text() == "Panel"
@@ -303,10 +303,10 @@ def test_number_episodes_menu_entry_needs_a_selection(window, monkeypatch):
 
 # --- Command palette and lint -----------------------------------------------------
 
-# Violations the lint reports on purpose until the shortcut step moves the keys
-# (Ctrl+O is still Open Folder, Ctrl+Shift+S still Save All).
+# Violations the lint reports on purpose: Save All keeps its old Ctrl+Shift+S as
+# a secondary shortcut for one release (there is no Save As in this app, so the
+# key is not ambiguous). Delete this entry, and the alias, in the next release.
 DOCUMENTED_LINT_EXCEPTIONS = {
-    "File > Open Folder is bound to Ctrl+O: Ctrl+O is Open Files",
     "File > Save All is bound to Ctrl+Shift+S: Ctrl+Shift+S is Save As (platform standard)",
 }
 
@@ -331,3 +331,54 @@ def test_command_palette_is_on_ctrl_k_and_finds_every_action(window):
     window.command_palette.set_filter("remux")
     assert [c.title for c in window.command_palette.visible_commands()][0] == "Remux to MP4"
     window.command_palette.close()
+
+
+# --- Shortcuts ---------------------------------------------------------------------
+
+
+def _keys(action) -> list:
+    return [k.toString() for k in action.shortcuts()]
+
+
+def test_skeleton_shortcuts_and_one_release_aliases(window):
+    reg = window.actions_by_key
+    assert _keys(reg["open_files"]) == ["Ctrl+O"]
+    assert _keys(reg["open_folder"]) == ["Ctrl+Shift+O"]
+    # Save All is Ctrl+Shift+A; the old Save Selected and Save All Changed keys
+    # still work, and all of them save every changed file.
+    assert _keys(reg["save_all"]) == ["Ctrl+Shift+A", "Ctrl+S", "Ctrl+Shift+S"]
+    assert _keys(reg["lookup_subtitles"]) == ["Ctrl+Shift+L"]  # was Ctrl+Shift+O
+    assert _keys(reg["lookup_tmdb_movie"]) == ["Ctrl+M"] and _keys(reg["lookup_tmdb_tv"]) == ["Ctrl+T"]
+    assert _keys(reg["lookup_tvdb"]) == ["Ctrl+Shift+T"] and _keys(reg["convert_to_mp4"]) == ["Ctrl+Shift+C"]
+    assert _keys(reg["refresh_list"]) == ["F5"]  # Ctrl+R is Remux here
+    assert _keys(reg["remux"]) == ["Ctrl+R"]
+    assert _keys(reg["apply"]) == ["Ctrl+Return"]
+    assert _keys(reg["redact"]) == ["Ctrl+Shift+E"]
+    assert _keys(reg["command_palette"]) == ["Ctrl+K"]
+    assert _keys(reg["about"]) == []  # F1 is not About any more
+
+
+def test_no_key_sequence_is_bound_to_two_actions(window):
+    """A sequence on two enabled actions in one window is ambiguous and fires
+    neither; covers the menu bar, toolbar and zoom buttons together."""
+    from PyQt6.QtGui import QAction
+
+    seen: dict = {}
+    for act in window.findChildren(QAction):
+        for seq in _keys(act):
+            seen.setdefault(seq, set()).add(id(act))
+    assert {seq for seq, owners in seen.items() if len(owners) > 1} == set()
+    assert window.zoom.zoom_in_action.shortcuts() == [] and window.zoom.zoom_out_action.shortcuts() == []
+
+
+def test_old_save_keys_trigger_save_all(window, monkeypatch):
+    calls = []
+    monkeypatch.setattr(mw.MainWindow, "_save_files", lambda self, files, skipped_error_count=0: calls.append(files))
+    window.video_files[1].dirty = True
+    window.actions_by_key["save_all"].trigger()
+    assert calls == [[window.video_files[1]]]  # only the changed file, selection or not
+
+
+def test_save_all_with_nothing_changed_says_so(window):
+    window.actions_by_key["save_all"].trigger()
+    assert window.status_bar.currentMessage() == "Nothing to save -- no unsaved changes"

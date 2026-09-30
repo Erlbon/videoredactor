@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-09-30#16 — Shortcut fixes and one Save
+
+- **One Save: it saves every changed file.** *Save All* (File, and the one Save button on the toolbar) is now **Ctrl+Shift+A**, the family key, and **Ctrl+S saves all changed files too**. The separate *Save Selected* is gone: it was almost never wanted. Pending edits typed in the panel are applied first, as before. **Ctrl+Shift+S** (the old Save All Changed) keeps working as a second shortcut for one more release, and is then freed for a future Save As.
+- **Ctrl+O is Open Files and Ctrl+Shift+O is Open Folder**, the same as cbz, epub and mp3. The old Ctrl+O (Open Folder) and Ctrl+Shift+O (Import Subtitles) cannot be kept as second keys because they are these actions now.
+- **Look Up > Subtitles (OpenSubtitles)** moved from Ctrl+Shift+O to **Ctrl+Shift+L**. TMDB (Movie) Ctrl+M, TMDB (TV Show) Ctrl+T, TheTVDB Ctrl+Shift+T, Remux Ctrl+R and Convert to MP4 Ctrl+Shift+C are unchanged (these four lost their keys in the menu restructure of the previous entry and are back).
+- **F1 no longer opens About** (F1 is Help contents everywhere else; About is in the Help menu). No replacement key.
+- Zoom In / Zoom Out own Ctrl++ and Ctrl+- (and any other key the +/- buttons listed); the buttons keep only their click.
+- Export Settings / Import Settings are no longer listed in File until they work.
+
 ## 2026-09-30#15 — Command palette
 
 - **Ctrl+K opens a command palette** (also View > Command Palette): type part of any command's name, menu or shortcut ("remux", "look up", "Ctrl+H") and press Enter to run it; greyed commands are listed but cannot be run. It covers every menu action.

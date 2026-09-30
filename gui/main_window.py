@@ -53,11 +53,11 @@ from core.config import get_setting, set_setting
 from redactor_common.gui.action_factory import make_action
 from redactor_common.core import labels
 from redactor_common.gui.command_palette import add_command_palette
-from redactor_common.gui.menu_builder import MenuAction, Separator, Submenu
+from redactor_common.gui.menu_builder import MenuAction, MenuItems, Separator, Submenu
 from redactor_common.gui.standard_menus import (
     AppMenu, StandardMenuSpec, build_standard_menu_bar, get_action_registry, look_up_submenu,
     set_apply_count, standard_edit_items, standard_file_items, standard_help_items,
-    standard_tools_items, standard_view_items,
+    standard_tools_items, standard_view_items, with_aliases,
 )
 from redactor_common.gui.async_preview import AsyncPreviewLoader
 from redactor_common.gui.background_call import call_in_background
@@ -289,6 +289,23 @@ def _copy_no_clobber(src: str, dst: str) -> None:
         raise
 
 
+def _drop_keys(items: MenuItems, keys: set[str]) -> MenuItems:
+    """Copies `items` without the actions whose key is in `keys`."""
+    return [i for i in items if not (isinstance(i, MenuAction) and i.key in keys)]
+
+
+def _tidy(items: MenuItems) -> MenuItems:
+    """Removes leading, trailing and doubled separators left by _drop_keys."""
+    out: MenuItems = []
+    for item in items:
+        if isinstance(item, Separator) and (not out or isinstance(out[-1], Separator)):
+            continue
+        out.append(item)
+    while out and isinstance(out[-1], Separator):
+        out.pop()
+    return out
+
+
 def _remember_zero_pad(enabled: bool, width: int) -> None:
     set_setting("rename", "zero_pad", "1" if enabled else "0")
     set_setting("rename", "zero_pad_width", str(width))
@@ -404,23 +421,20 @@ class MainWindow(QMainWindow):
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
 
-    def _look_up_entries(self, key_prefix: str) -> list[MenuAction]:
+    def _look_up_entries(self, key_prefix: str, with_shortcuts: bool = True) -> list[MenuAction]:
         """The four online sources under Metadata > Look Up, and again in the
         row right-click menu (key_prefix keeps the keys unique; the context
         menu's copy carries no shortcuts, the menu bar's own actions hold
         them)."""
-        def entry(key: str, text: str, slot, shortcut=None) -> MenuAction:
-            return MenuAction(key_prefix + key, text, slot, shortcut=shortcut)
+        def entry(key: str, text: str, slot, shortcut: str) -> MenuAction:
+            return MenuAction(key_prefix + key, text, slot, shortcut=shortcut if with_shortcuts else None)
 
         return [
-            entry("tmdb_movie", "TMDB (&Movie)…", lambda: self._on_import_tmdb("movie"),
-                  "Ctrl+M" if not key_prefix else None),
-            entry("tmdb_tv", "TMDB (&TV Show)…", lambda: self._on_import_tmdb("tv"),
-                  "Ctrl+T" if not key_prefix else None),
-            entry("tvdb", "TheTVDB (T&V Show)…", self._on_import_tvdb,
-                  "Ctrl+Shift+T" if not key_prefix else None),
-            entry("subtitles", "&Subtitles (OpenSubtitles)…", self._on_import_subtitles,
-                  "Ctrl+Shift+O" if not key_prefix else None),
+            entry("tmdb_movie", "TMDB (&Movie)…", lambda: self._on_import_tmdb("movie"), "Ctrl+M"),
+            entry("tmdb_tv", "TMDB (&TV Show)…", lambda: self._on_import_tmdb("tv"), "Ctrl+T"),
+            entry("tvdb", "TheTVDB (T&V Show)…", self._on_import_tvdb, "Ctrl+Shift+T"),
+            # Was Ctrl+Shift+O, which is Open Folder in the rest of the family.
+            entry("subtitles", "&Subtitles (OpenSubtitles)…", self._on_import_subtitles, "Ctrl+Shift+L"),
         ]
 
     def _build_menu_bar(self) -> None:
@@ -434,11 +448,17 @@ class MainWindow(QMainWindow):
         menu: they come from the ActionRegistry the builder attaches to the
         window."""
         spec = StandardMenuSpec(
-            file=standard_file_items(
+            file=_tidy(_drop_keys(standard_file_items(
                 open_files=self._on_open_files,
                 open_folder=self._on_open_folder,
                 import_and_convert=self._on_import_and_convert,
-                save=self._on_save_selected,
+                # One Save: it saves EVERY changed file (Ctrl+S and
+                # Ctrl+Shift+A). A save-selected-only entry is gone: it was
+                # almost never wanted, and two Saves next to each other only
+                # invite the wrong one. The helper's separate Save entry would
+                # be a dead duplicate, and Export/Import Settings have no
+                # settings adapter in this app yet, so both are dropped
+                # rather than shown greyed out.
                 save_all=self._on_save_all,
                 rename_file=self.rename_selected_file,
                 undo_last_rename=self.undo_last_rename,
@@ -446,10 +466,7 @@ class MainWindow(QMainWindow):
                 remove_from_list=self._on_remove_from_list,
                 clear_list=self._on_clear_list,
                 exit_slot=self.close,
-                # No export_settings / import_settings yet: they need a
-                # SettingsAdapter over this app's settings file, so they show
-                # greyed (disable, never hide) until that is written.
-            ),
+            ), {"save", "export_settings", "import_settings"})),
             edit=standard_edit_items(
                 undo=self.undo_last_action,
                 redo=self.redo_last_action,
@@ -505,13 +522,15 @@ class MainWindow(QMainWindow):
         registry = get_action_registry(self)
         self.actions_by_key = registry
 
-        # Keys and pre-skeleton labels are NOT the skeleton's yet: this step
-        # only moves the items (mouse paths); the shortcut fixes are a later
-        # step, so Ctrl+O is still Open Folder and Ctrl+Shift+S still Save All.
-        # Open Files gets a temporary key of its own until Ctrl+O is freed.
-        registry["open_files"].setShortcut(QKeySequence("Ctrl+Alt+O"))
-        registry["open_folder"].setShortcut(QKeySequence("Ctrl+O"))
-        registry["save_all"].setShortcut(QKeySequence("Ctrl+Shift+S"))
+        # Shortcuts that moved keep their old key as a secondary one for one
+        # release (remove these aliases in the release after this one):
+        # Save All is Ctrl+Shift+A; Ctrl+S was Save Selected and Ctrl+Shift+S
+        # was Save All Changed, and both now save every changed file. The old
+        # Ctrl+O (Open Folder) and Ctrl+Shift+O (Subtitles) cannot be kept:
+        # they are Open Files and Open Folder now.
+        with_aliases(registry["save_all"], "Ctrl+S", "Ctrl+Shift+S")
+        # F1 used to open About; F1 is Help contents everywhere else, so it is
+        # simply unbound now (no alias: lint forbids F1 on About).
 
         # Apply used to be toolbar-only; it is a menu entry now (so the command
         # palette finds it) and keeps its toolbar button.
@@ -527,7 +546,6 @@ class MainWindow(QMainWindow):
         # as self.<x>_action attributes directly.
         self.open_files_action = registry["open_files"]
         self.open_folder_action = registry["open_folder"]
-        self.save_selected_action = registry["save"]
         self.save_all_action = registry["save_all"]
         self.rename_file_action = registry["rename_file"]
         self.remove_from_list_action = registry["remove_from_list"]
@@ -568,7 +586,6 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.apply_action)
         toolbar.addSeparator()
 
-        toolbar.addAction(self.save_selected_action)
         toolbar.addAction(self.save_all_action)
         toolbar.addSeparator()
 
@@ -586,12 +603,14 @@ class MainWindow(QMainWindow):
         # +/- table-font zoom, matching the epub tool's toolbar control
         # (this project never had one before) -- redactor_common's
         # TableZoomController owns the QAction pair + percentage label;
-        # this window just places them. Ctrl++ / Ctrl+- belong to the View
-        # menu's Zoom In / Zoom Out now: the controller binds the same
-        # StandardKeys, which would make both ambiguous (and dead).
+        # this window just places them. View > Zoom In/Out own Ctrl++ / Ctrl+-
+        # now: the buttons were built from the same StandardKey bindings,
+        # which would make the keys ambiguous, so the menu actions take over
+        # every binding the buttons had and the buttons keep only their click.
         self.zoom = TableZoomController(self.table, parent=self)
-        self.zoom.zoom_in_action.setShortcut(QKeySequence())
-        self.zoom.zoom_out_action.setShortcut(QKeySequence())
+        for menu_key, button in (("zoom_in", self.zoom.zoom_in_action), ("zoom_out", self.zoom.zoom_out_action)):
+            with_aliases(self.actions_by_key[menu_key], *[k.toString() for k in button.shortcuts()])
+            button.setShortcuts([])
         toolbar.addAction(self.zoom.zoom_out_action)
         toolbar.addWidget(self.zoom.label)
         toolbar.addAction(self.zoom.zoom_in_action)
@@ -1313,7 +1332,7 @@ class MainWindow(QMainWindow):
             # Every lookup from the Metadata menu, so none needs a trip to
             # the menu bar (no shortcuts here: they already live on the
             # menu's own actions).
-            items.append(Submenu("Look Up", self._look_up_entries("ctx_")))
+            items.append(Submenu("Look Up", self._look_up_entries("ctx_", with_shortcuts=False)))
             items.append(Submenu("Organize", [
                 self.actions_by_key["rename_export_move"],
                 MenuAction("ctx_number_episodes", "Number Episodes…", lambda: self._quick_number_episodes(files)),
@@ -1462,29 +1481,13 @@ class MainWindow(QMainWindow):
 
     # --- Saving ------------------------------------------------------------
 
-    def _on_save_selected(self) -> None:
-        # "Hit Save" implies "I meant to Apply first" -- flush any
-        # typed-but-not-yet-Applied panel edits onto the selected
-        # file(s)' metadata before saving, so Save never silently
-        # writes stale data just because Apply wasn't clicked separately.
-        self.tag_panel.apply_pending_changes()
-
-        selected = self._selected_video_files()
-        if not selected:
-            self.status_bar.showMessage("No files selected")
-            return
-        saveable, skipped = self._split_saveable(selected)
-        if not saveable:
-            self.status_bar.showMessage(
-                f"Nothing to save -- all {len(skipped)} selected file(s) have load errors"
-            )
-            return
-        self._save_files(saveable, skipped_error_count=len(skipped))
-
     def _on_save_all(self) -> None:
-        # Same implicit-Apply-first reasoning as _on_save_selected --
-        # done before computing the dirty list, since applying pending
-        # panel changes can itself be what makes a file dirty.
+        # "Hit Save" implies "I meant to Apply first" -- flush any
+        # typed-but-not-yet-Applied panel edits onto the selected file(s)
+        # before saving, so Save never silently writes stale data just
+        # because Apply wasn't clicked separately. Done before computing the
+        # dirty list, since applying pending panel changes can itself be what
+        # makes a file dirty.
         self.tag_panel.apply_pending_changes()
 
         dirty = [vf for vf in self.video_files if vf.dirty]
