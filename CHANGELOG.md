@@ -38,6 +38,8 @@
 - *Export Settings / Import Settings* (File) are listed but greyed: not built for this app yet.
 - Uses redactor_common 2026-09-30-13.
 
+- *Correction (added later): "Keyboard shortcuts are unchanged" above was wrong for this release's end state: shortcuts did change and Save Selected was removed; see #16.*
+
 ## 2026-09-30#13 — Redact pattern trail
 
 - **Redact > Redact Recipe...** now shows where each pattern comes from. The Filename, Path, Rename and Move-into-folders patterns are editable lists of your recent patterns (newest first), with a live line *In effect: <pattern> — set in this recipe / follows: the latest filename pattern* and a *Preview* on the first loaded video (or a built-in Show/Season/Episode sample). *Use fallback* clears the field so the step follows again.
