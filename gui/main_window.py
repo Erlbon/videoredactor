@@ -40,6 +40,7 @@ from core.tmdb_client import (
 )
 from core.tvdb_client import get_series_details, get_episode_details, download_image, TVDBError
 from core.release_name_parser import parse_release_name
+from core.sidecars import with_sidecars
 from core.redact_steps import (
     RedactEnv, VideoCtx, build_catalogue, finalize_file, load_recipe, save_recipe,
 )
@@ -61,6 +62,7 @@ from redactor_common.gui.rename_undo import undo_last_rename
 from core.app_paths import base_dir
 from redactor_common.gui.rename_pattern_dialog import RenamePatternDialog
 from redactor_common.gui.search_replace_dialog import FILENAME_FIELD_KEY, SearchReplaceDialog
+from redactor_common.gui.move_runner import run_planned_moves
 from redactor_common.gui.progress import ProgressReporter, run_with_progress
 from redactor_common.gui.redact_dialog import (
     RecipeEditorDialog, RedactResultsDialog, edit_recipe_menu_action, redact_menu_action,
@@ -2470,12 +2472,18 @@ class MainWindow(QMainWindow):
                 int(get_setting("rename", "zero_pad_width", "2") or 2),
             ),
             on_zero_pad_changed=_remember_zero_pad,
+            library_root=get_setting("rename", "library_root", ""),
+            on_library_root_changed=lambda folder: set_setting("rename", "library_root", folder),
             parent=self,
         )
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
 
         save_pattern_to_history(dialog.pattern_edit.text())
+        if dialog.is_move_mode():
+            set_setting("rename", "move_pattern", dialog.pattern_edit.text())
+            self._move_into_folders(dialog.planned_moves())
+            return
         export_mode = dialog.is_export_mode()
         done = 0
         errors: list[str] = []
@@ -2500,6 +2508,29 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(f"{verb} {done} file(s)")
         if errors:
             QMessageBox.warning(self, "Some files failed", _error_details(errors))
+
+    def _move_into_folders(self, planned) -> None:
+        """The Rename dialog's "Move into folders" mode: the shared runner
+        moves the files (progress, Cancel, per-file errors, the empty-folder
+        tidy-up question) and records them -- with the folders it created --
+        as one batch in the rename log, so File > Undo Last Rename puts them
+        back. Each video's poster/subtitle sidecar files (see core/sidecars)
+        are planned right after it, so they travel with it. Like a rename it
+        isn't on the Undo stack; the rows just take on their new paths."""
+        videos = len(planned)
+        summary = run_planned_moves(
+            self, with_sidecars(planned), copy=False, rename_log=_rename_log(), label="Move into Folders",
+            trash=move_to_trash,
+        )
+        moved = 0
+        for item, _old_path, new_path in summary.done:
+            if item is not None:  # None: a sidecar file
+                item.path = Path(new_path)
+                moved += 1
+        self._refresh_table_rows()
+        sidecars = len(summary.done) - moved
+        note = f" (+{sidecars} sidecar file(s))" if sidecars else ""
+        self.status_bar.showMessage(f"Moved {moved} of {videos} file(s) into folders{note}")
 
     def _on_import_metadata_from_filename(self) -> None:
         """Extract metadata from filenames into staged (unsaved) fields,

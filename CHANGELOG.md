@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-30#11 — Move into folders
+
+- **Operations > Rename/Export by Pattern** gains the shared "Move into folders under a library root" mode (redactor_common 2026-09-30-10): the pattern may contain `/` (e.g. `%show_title%/Season %season_number%/%title%`), missing folders are created, nothing is overwritten (a taken name becomes `Name (2)`), and the library root is remembered between runs. Apply shows the progress dialog with Cancel, reports per-file problems, and offers to remove source folders left empty.
+- A video's poster and subtitle files (`-poster.jpg`, `.srt`, `.lang.srt`) move into the folder with it. The dialog's preview lists the videos only; the sidecar files are moved right after their video, so a cancelled run never leaves a moved video without its subtitles. If a sidecar's destination name is taken, that one file stays behind and is reported.
+- The whole move is one entry for **File > Undo Last Rename** (videos and sidecars together, the created folders offered for tidy-up). Like a rename it is not on the in-app Undo stack. Rename and Export are unchanged.
+- **Redact** uses the same library root and the pattern last used in Move into folders (the Move step; still off by default). Move patterns share the pattern history but are no longer picked as "the most recent rename/parse pattern" by Redact's Rename and filename steps.
+
 ## 2026-09-30#10 — Redact
 
 - **Operations > Redact** (Ctrl+Shift+E, also on the toolbar) runs a recipe on the selected files, or on all loaded files after asking when nothing is selected, with no further questions. Each changed file is rewritten on a scratch copy next to it, verified (tags read back, same streams and duration as the original) and swapped in; the original goes to the Recycle Bin, so restoring it from there is the undo. Redact is not on the in-app Undo stack (the stack is cleared after a run). **Operations > Redact Recipe...** chooses the steps, their order, their options and the confidence threshold; it is saved in the settings file (no keys in it).

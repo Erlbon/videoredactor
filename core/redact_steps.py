@@ -101,6 +101,13 @@ def _direct(fn: Callable, *args: Any, **kwargs: Any) -> Any:
     return fn(*args, **kwargs)
 
 
+def latest_file_pattern(history: list[str]) -> str:
+    """The most recent saved pattern that names a FILE: the Rename dialog's
+    "Move into folders" patterns (which contain a slash or backslash) share
+    the same history but make no sense for renaming or parsing a filename."""
+    return next((p for p in history if p and "/" not in p and "\\" not in p), "")
+
+
 # --- run environment ---------------------------------------------------------
 
 
@@ -424,8 +431,7 @@ class FilenameTagsStep(VideoStep):
         stem = ctx.video.path.stem
         pattern = self.options_for(ctx)["pattern"].strip()
         if not pattern:
-            history = ctx.env.pattern_history()
-            pattern = history[0] if history else ""
+            pattern = latest_file_pattern(ctx.env.pattern_history())
         if pattern:
             parsed = parse_filename(stem, pattern)
             if parsed:
@@ -775,8 +781,7 @@ class RenameStep(VideoStep):
             return StepResult.nothing()
         pattern = self.options_for(ctx)["pattern"].strip()
         if not pattern:
-            history = ctx.env.pattern_history()
-            pattern = history[0] if history else ""
+            pattern = latest_file_pattern(ctx.env.pattern_history())
         if not pattern:
             return StepResult.nothing(note="not renamed: no rename pattern saved yet (use Rename/Export by Pattern once)")
         values = _pattern_values(ctx)
@@ -814,14 +819,17 @@ class MoveIntoFoldersStep(VideoStep):
     label = "Move into folders under the library root"
     description = (
         "Moves the finished file into a folder tree under the library root chosen in Rename/Export by "
-        "Pattern > Move into folders (the pattern here may contain '/': e.g. %show_title%/Season "
-        "%season_number%/%title%). Missing folders are created, nothing is overwritten, and the move is "
+        "Pattern > Move into folders (the pattern may contain '/': e.g. %show_title%/Season "
+        "%season_number%/%title%, the default when none was used before). Missing folders are created, nothing is overwritten, and the move is "
         "logged for Undo Last Rename. Sidecar files move with the video. Off by default; needs a library root."
     )
     position = "last"
     default_enabled = False
     options = (
-        OptionSpec("pattern", "Folder/file pattern", "str", DEFAULT_MOVE_PATTERN, max_length=300),
+        OptionSpec(
+            "pattern", "Folder/file pattern (empty: the last one used)", "str", "", max_length=300,
+            tooltip=f"Empty: the pattern last used in Rename/Export by Pattern > Move into folders, else {DEFAULT_MOVE_PATTERN}",
+        ),
     )
 
     def execute(self, ctx: VideoCtx) -> StepResult:
@@ -830,7 +838,11 @@ class MoveIntoFoldersStep(VideoStep):
         root = ctx.env.setting("rename", "library_root", "").strip()
         if not root:
             return StepResult.nothing(note="not moved: no library root (choose one in Rename/Export by Pattern > Move into folders)")
-        pattern = self.options_for(ctx)["pattern"].strip() or DEFAULT_MOVE_PATTERN
+        pattern = (
+            self.options_for(ctx)["pattern"].strip()
+            or ctx.env.setting("rename", "move_pattern", "").strip()
+            or DEFAULT_MOVE_PATTERN
+        )
         values = _pattern_values(ctx)
         missing = empty_required_tokens(pattern.replace("/", " ").replace("\\", " "), values)
         if missing:
@@ -890,7 +902,7 @@ def build_catalogue(pattern_history: Callable[[], list[str]] = load_pattern_hist
         LookupStep(),
         SubtitlesStep(),
         RemuxStep(),
-        RenameStep(default_enabled=bool(pattern_history())),
+        RenameStep(default_enabled=bool(latest_file_pattern(pattern_history()))),
         MoveIntoFoldersStep(),
     ]
 
