@@ -503,6 +503,7 @@ class MainWindow(QMainWindow):
                 MenuAction("rename_by_pattern", "Rena&me/Export by Pattern...",
                            self._on_rename_by_pattern, shortcut=shortcuts.RENAME_EXPORT_BY_PATTERN),
                 MenuAction("check_files", "Chec&k Files...", self._on_check_files),
+                MenuAction("find_duplicates", "Find &Duplicates...", self._on_find_duplicates),
                 Separator(),
                 MenuAction("case_conversion", "Case &Conversion...", self._on_case_conversion),
                 MenuAction(
@@ -1867,6 +1868,17 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Check Files", "Load some video files first.")
             return
         run_check_and_repair(self, files, _error_details)
+
+    def _on_find_duplicates(self) -> None:
+        """Operations > Find Duplicates...: groups the loaded files that
+        look like the same video, for review only -- see
+        gui/duplicates_dialog.py and core/video_duplicates.py."""
+        from gui.duplicates_dialog import find_duplicates_flow
+
+        if len(self.video_files) < 2:
+            QMessageBox.information(self, "Find Duplicates", "Load at least two video files first.")
+            return
+        find_duplicates_flow(self, list(self.video_files))
 
     def _on_remux_selected(self) -> None:
         """Remux selected MKV files to MP4 (batch-capable, -c copy so

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-30#08 — Find Duplicates
+
+- **Operations > Find Duplicates...** groups loaded files that are probably the same video, for review. Files are first grouped by length (within 2 seconds), then only those with a same-length neighbour get one frame hashed (a 64-bit perceptual hash of the frame at 10% of the video -- the first frame is often black or a logo -- falling back to the first frame); two files match when at most 6 of the 64 bits differ (you're asked for the number, and it's remembered). A re-encode, another bitrate or resolution still matches.
+- The results list each group's files with folder, length, resolution, size and codec. Nothing is changed automatically: Reveal in Folder, Open, Select These in the List, or Move Selected to the Recycle Bin (asks first).
+- Runs in the background with a progress dialog and Cancel; nothing is cached on disk. Tested with generated clips only, not real-world libraries.
+
 ## 2026-09-30#07 — Check Files results are stamped into the file
 
 - **Scan stamp**: Check Files now records "scanned at <time>, result <status>" inside the video (MKV global tag `REDACTOR_CHECK`, MP4 freeform atom `REDACTOR_CHECK`), so the result follows the file when it's copied around. It is held in memory after a scan and written only when you Save, like other metadata; the file shows as unsaved until then. Other tools' MKV tags are kept. No stamp for files that failed to load or when ffprobe is missing.
