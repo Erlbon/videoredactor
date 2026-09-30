@@ -1,4 +1,4 @@
-"""Every lookup in the Import menu is also in the row right-click menu,
+"""Every lookup in the Metadata > Look Up menu is also in the row right-click menu,
 and the zero-pad choices are remembered."""
 
 import os
@@ -20,7 +20,7 @@ def test_every_lookup_is_in_the_right_click_menu(window, monkeypatch):
     sub = next(i for i in seen["items"] if isinstance(i, mw.Submenu))
     assert sub.text == "Look Up"
     assert [i.text for i in sub.items] == [
-        "TMDB (Movie)...", "TMDB (TV Show)...", "TheTVDB (TV Show)...", "Subtitles from OpenSubtitles...",
+        "TMDB (&Movie)…", "TMDB (&TV Show)…", "TheTVDB (T&V Show)…", "&Subtitles (OpenSubtitles)…",
     ]
 
 

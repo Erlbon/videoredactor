@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-09-30#14 — Standard menu skeleton: new menu structure
+
+- **The menus are rearranged** into the family's standard skeleton (redactor_common 2026-09-30-13): **File, Edit, View, Metadata, Media, Tools, Help**. The old Import, Operations and Settings menus are gone. Where things went: *Import Metadata from TMDB / TheTVDB / Subtitles* are now **Metadata > Look Up >** TMDB (Movie), TMDB (TV Show), TheTVDB (TV Show), Subtitles (OpenSubtitles); *Import Metadata from Filename* is **Metadata > Parse Filename**; *Number Episodes* (was right-click only) is **Metadata > Number Episodes**. *Undo, Redo, Search/Replace, Case Conversion, Auto-Numbering, Redact, Redact Recipe* are in **Edit** (as Undo, Redo, Search and Replace, Change Case, Auto-Number, Redact, Edit Redact Recipe). *Remux, Convert to MP4, Check Files, Find Duplicates* are in **Media**. *Rename/Export by Pattern* (incl. Move into folders) is **File > Rename / Export / Move**. *Import & Convert to MP4* is **File > Import and Convert**. *Save Selected* / *Save All Changed* are **File > Save** / **Save All**. *Refresh List* moved to **View**. *Locate External Tools, API Keys, Add/Remove Columns / Languages / Genres* are in **Tools** (External Tools, API Keys, Columns, Genres, Languages). Changelog, Credits and About are in **Help**.
+- **Keyboard shortcuts are unchanged in this step** (only the mouse paths moved): Ctrl+O is still Open Folder, Ctrl+Shift+S still Save All, Ctrl+Shift+O still Subtitles. The one new action, **Open Files**, has the temporary key Ctrl+Alt+O until the shortcut fixes land.
+- **New: Open Files** (File) adds individual videos to the list (Open Folder still replaces it; files already in the list are skipped).
+- **New: Remove from List** (File, Delete key, right-click) drops the selected files from the list, and **Clear List** empties it. Nothing on disk is touched; unsaved edits on the affected files are confirmed first, and the Undo stack is cleared.
+- **Apply is now in the Edit menu** as *Apply to N Selected* (Ctrl+Return, greyed with no selection), as well as on the toolbar.
+- **View** gains *Show Metadata Panel* (tracks the toolbar's Panel button), *Zoom In / Zoom Out / Reset Zoom* (Ctrl++, Ctrl+-, Ctrl+0) and a *Command Palette* slot (the palette itself comes in the next step). The toolbar's +/- zoom buttons keep working; the two zoom keys now belong to the View menu so they are not ambiguous.
+- **Toolbar**: Open Files, Open Folder | Apply | Save, Save All | **Redact** (bold) | Undo, Redo | zoom | Panel.
+- **Right-click menu**: Open in Default App, Open Containing Folder, Copy Path | Rename File (one file) | Look Up > | **Organize >** (Rename / Export / Move, Number Episodes) | Redact | Remove from List.
+- *Export Settings / Import Settings* (File) are listed but greyed: not built for this app yet.
+- Uses redactor_common 2026-09-30-13.
+
 ## 2026-09-30#13 — Redact pattern trail
 
 - **Redact > Redact Recipe...** now shows where each pattern comes from. The Filename, Path, Rename and Move-into-folders patterns are editable lists of your recent patterns (newest first), with a live line *In effect: <pattern> — set in this recipe / follows: the latest filename pattern* and a *Preview* on the first loaded video (or a built-in Show/Season/Episode sample). *Use fallback* clears the field so the step follows again.

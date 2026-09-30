@@ -79,13 +79,13 @@ def stub_files(window, tmp_path, names):
     return files
 
 
-def test_redact_is_in_the_operations_menu_and_the_toolbar_with_the_family_shortcut(window):
+def test_redact_is_in_the_edit_menu_and_the_toolbar_with_the_family_shortcut(window):
     assert window.redact_action.shortcut().toString() == "Ctrl+Shift+E"
     toolbar = window.findChildren(QToolBar)[0]
     assert window.redact_action in toolbar.actions()
     menus = {m.text().replace("&", ""): m.menu() for m in window.menuBar().actions() if m.menu()}
-    operations = [a.text().replace("&", "") for a in menus["Operations"].actions()]
-    assert "Redact" in operations and "Redact Recipe..." in operations
+    edit = [a.text().replace("&", "") for a in menus["Edit"].actions()]
+    assert "Redact" in edit and "Edit Redact Recipe…" in edit
 
 
 def test_nothing_loaded_says_so_and_nothing_selected_asks_first(window, monkeypatch, tmp_path):

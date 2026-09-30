@@ -96,7 +96,7 @@ def _require_api_key() -> str:
     key = get_api_key()
     if not key:
         raise TMDBError(
-            "No TMDB API key configured. Add one under Settings > "
+            "No TMDB API key configured. Add one under Tools > "
             "API Keys... (or set the TMDB_API_KEY environment variable)."
         )
     return key

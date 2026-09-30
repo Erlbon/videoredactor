@@ -21,7 +21,7 @@ from core.external_tools import get_executable_path
 from redactor_common.core.os_utils import rename_no_clobber
 from redactor_common.core.subprocess_utils import popen_tool, run_tool
 
-# Extensions offered in the Import menu's "Import & Convert to MP4..."
+# Extensions offered in the File menu's "Import & Convert to MP4..."
 # file picker -- anything ffmpeg's own demuxers commonly handle for a
 # "bring this into my video library" workflow. Not exhaustive (ffmpeg
 # reads far more than this), just the formats someone converting video

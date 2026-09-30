@@ -1,7 +1,7 @@
 """
 core/file_check.py
 
-Operations > Check Files... -- a QUICK health check of a video file, and
+Media > Check Files... -- a QUICK health check of a video file, and
 Repair for what a lossless remux can fix.
 
 The check (seconds per file, no decoding):

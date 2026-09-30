@@ -1,7 +1,7 @@
 """
 gui/file_check_dialog.py
 
-Operations > Check Files... (core/file_check.py): the quick check for
+Media > Check Files... (core/file_check.py): the quick check for
 the selected files (or all loaded ones), then a results dialog listing
 every file with something to report, and Repair for those a lossless
 remux can fix -- each original goes to the Recycle Bin.
@@ -161,7 +161,7 @@ def repair_files(window, files: list[VideoFile]) -> tuple[list[VideoFile], list[
 
 
 def run_check_and_repair(window, files: list[VideoFile], error_details) -> None:
-    """The whole Operations > Check Files... flow. `error_details` formats
+    """The whole Media > Check Files... flow. `error_details` formats
     a list of lines for a message box (the main window's helper)."""
     check_errors: list[str] = []
     checked = check_files(window, files, check_errors)

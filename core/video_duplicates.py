@@ -1,7 +1,7 @@
 """
 core/video_duplicates.py
 
-Operations > Find Duplicates...: groups loaded files that are probably the
+Media > Find Duplicates...: groups loaded files that are probably the
 same video, for the user to review -- nothing here deletes or changes a file.
 
 Two steps, cheapest first:

@@ -34,7 +34,7 @@ The check never acts on a failed tool: a scan where ffprobe/ffmpeg was
 missing or stopped is never stamped and never triggers a repair. A
 repair is only automatic when a lossless remux fully fixes the file
 (REPAIRABLE); a DAMAGED file (whose unreadable end a repair would drop)
-is reported and left for Operations > Check Files.
+is reported and left for Media > Check Files.
 """
 
 from __future__ import annotations
@@ -474,7 +474,7 @@ class CheckRepairStep(VideoStep):
     key = "check_repair"
     label = "Check and repair (lossless)"
     description = (
-        "Runs the quick health check (Operations > Check Files) and stamps the result inside the file. "
+        "Runs the quick health check (Media > Check Files) and stamps the result inside the file. "
         "With 'repair' on, a file a lossless remux fully fixes (missing seek index or duration, MP4 index "
         "at the end, default audio track) is rewritten on a scratch copy, verified, and swapped in. A "
         "DAMAGED file is only reported -- repairing it would drop its unreadable end; use Check Files for "
@@ -685,7 +685,7 @@ class LookupStep(VideoStep):
         "Finds the movie or show named by the filename on TMDB (TheTVDB as the fallback for TV) and fills "
         "fields that are EMPTY. A movie whose title AND year match exactly is applied; a title-only match, "
         "or a TV show whose title matches but whose year can't be confirmed, goes to Needs review. Needs "
-        "network access and an API key (Settings > API Keys); without either nothing happens and the report says why."
+        "network access and an API key (Tools > API Keys); without either nothing happens and the report says why."
     )
     options = (
         OptionSpec("movies", "Look up movies (TMDB)", "bool", True),
@@ -890,7 +890,7 @@ class RemuxStep(VideoStep):
     key = "remux_mkv_to_mp4"
     label = "Remux MKV to MP4 (lossless)"
     description = (
-        "Repackages an MKV as MP4 without re-encoding (as Operations > Remux). Changes the container, so "
+        "Repackages an MKV as MP4 without re-encoding (as Media > Remux to MP4). Changes the container, so "
         "it is off by default. The result is verified: if any video/audio/subtitle track or attachment "
         "would be lost, or it is shorter, nothing is changed. The app's tags are written onto the MP4."
     )

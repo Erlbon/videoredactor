@@ -1,4 +1,4 @@
-"""Tests for core/file_check.py (Operations > Check Files...) and its
+"""Tests for core/file_check.py (Media > Check Files...) and its
 dialog -- against real small videos generated with ffmpeg (as
 tests/test_ffmpeg_backend.py does; CI installs ffmpeg): an intact file,
 an MKV written without a seek index, an MP4 with its index at the end,

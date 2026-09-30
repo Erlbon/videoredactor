@@ -1,4 +1,4 @@
-"""Operations > Find Duplicates... (core/video_duplicates.py and its
+"""Media > Find Duplicates... (core/video_duplicates.py and its
 dialog): grouping logic on hand-made hashes, and real ffmpeg-generated
 clips -- the same picture re-encoded at another bitrate/resolution must
 group together, a different picture must not."""

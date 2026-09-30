@@ -1,7 +1,7 @@
 """
 gui/duplicates_dialog.py
 
-Operations > Find Duplicates... (core/video_duplicates.py): hashes one
+Media > Find Duplicates... (core/video_duplicates.py): hashes one
 frame of every loaded file that has a same-length neighbour (on a worker
 thread per file, under a cancellable progress dialog, so the window keeps
 painting), then lists the groups of probable duplicates for review.
@@ -163,7 +163,7 @@ class DuplicatesDialog(QDialog):
 
 
 def find_duplicates_flow(window, files: list[VideoFile]) -> None:
-    """The whole Operations > Find Duplicates... flow. `window` is the main
+    """The whole Media > Find Duplicates... flow. `window` is the main
     window (status bar, file list, row refresh, selection)."""
     threshold, ok = QInputDialog.getInt(
         window, TITLE,

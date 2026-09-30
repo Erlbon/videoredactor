@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, QEventLoop, QItemSelection, QItemSelectionModel, QSize, pyqtSignal
 from PyQt6.QtGui import QColor, QImage, QKeySequence, QIcon
 
-from core.video_file import VideoFile, discover_video_files, has_subfolders
+from core.video_file import SUPPORTED_EXTENSIONS, VideoFile, discover_video_files, has_subfolders
 from core.video_metadata import ContentType, EDITABLE_FIELDS, NUMERIC_FIELDS, TEXT_FIELDS
 from core.filename_pattern import (
     DEFAULT_RENAME_PATTERN, PARSE_NUMERIC_FIELDS, PARSE_STRIP_ZEROS_FIELDS, VALID_FIELD_KEYS,
@@ -51,7 +51,13 @@ from core.table_settings import PROTECTED_COLUMNS, merge_column_order, is_column
 from core.format_helpers import format_duration, format_file_size
 from core.config import get_setting, set_setting
 from redactor_common.gui.action_factory import make_action
-from redactor_common.gui.menu_builder import MenuAction, Separator, Submenu, build_menu_bar
+from redactor_common.core import labels
+from redactor_common.gui.menu_builder import MenuAction, Separator, Submenu
+from redactor_common.gui.standard_menus import (
+    AppMenu, StandardMenuSpec, build_standard_menu_bar, get_action_registry, look_up_submenu,
+    set_apply_count, standard_edit_items, standard_file_items, standard_help_items,
+    standard_tools_items, standard_view_items,
+)
 from redactor_common.gui.async_preview import AsyncPreviewLoader
 from redactor_common.gui.background_call import call_in_background
 from redactor_common.gui.auto_numbering_dialog import AutoNumberingDialog
@@ -64,9 +70,7 @@ from redactor_common.gui.rename_pattern_dialog import RenamePatternDialog
 from redactor_common.gui.search_replace_dialog import FILENAME_FIELD_KEY, SearchReplaceDialog
 from redactor_common.gui.move_runner import run_planned_moves
 from redactor_common.gui.progress import ProgressReporter, run_with_progress
-from redactor_common.gui.redact_dialog import (
-    RecipeEditorDialog, RedactResultsDialog, edit_recipe_menu_action, redact_menu_action,
-)
+from redactor_common.gui.redact_dialog import RecipeEditorDialog, RedactResultsDialog
 from redactor_common.gui.redact_dialog import run_redact as run_redact_dialog
 from redactor_common.gui.colors import (
     DIRTY_COLOR, ERROR_COLOR, HIGHLIGHT_TEXT_COLOR, SAVE_FAILED_COLOR, TABLE_SELECTION_STYLESHEET,
@@ -399,163 +403,149 @@ class MainWindow(QMainWindow):
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
 
-    def _build_menu_bar(self) -> None:
-        """Menu bar built via the shared redactor_common menu framework,
-        so the top-level shape (File / Import / Operations / Settings /
-        Help, in that order, with those exact mnemonics) matches every
-        other Redactor project -- this project already used that same
-        five-menu shape by convention, but each QAction was previously
-        hand-built here rather than going through a shared builder.
+    def _look_up_entries(self, key_prefix: str) -> list[MenuAction]:
+        """The four online sources under Metadata > Look Up, and again in the
+        row right-click menu (key_prefix keeps the keys unique; the context
+        menu's copy carries no shortcuts, the menu bar's own actions hold
+        them)."""
+        def entry(key: str, text: str, slot, shortcut=None) -> MenuAction:
+            return MenuAction(key_prefix + key, text, slot, shortcut=shortcut)
 
-        Actions built this way are still reused (never duplicated) on
-        the toolbar built right after this in __init__ (see
-        _build_toolbar) -- see the actions dict assignment below.
-        """
-        specs = {
-            "File": [
-                # NOTE: kept on Ctrl+O (via StandardKey.Open) rather than
-                # the family's usual Ctrl+Shift+O "load folder" convention
-                # -- this project's only load action IS a folder, unlike
-                # cbz/epub/mp3 which distinguish "load files" (Ctrl+O)
-                # from "load folder" (Ctrl+Shift+O). Reassigning this
-                # would collide with import_subtitles below, already on
-                # Ctrl+Shift+O -- left as a known cross-app inconsistency
-                # rather than resolved unilaterally; see the 2026-09-13
-                # hotkey audit.
-                MenuAction("open_folder", "&Open Folder...", self._on_open_folder,
-                           shortcut=QKeySequence.StandardKey.Open),
-                Separator(),
-                MenuAction("save_selected", "&Save Selected", self._on_save_selected, shortcut="Ctrl+S"),
-                # NOTE: Ctrl+Shift+S is QKeySequence::SaveAs / cbzredactor's
-                # own "Save As..." key -- this project has no distinct
-                # Save-As action, but reusing that key for "Save All" here
-                # (rather than shortcuts.SAVE_ALL / Ctrl+Shift+A, which
-                # cbzredactor's actual Save All uses) is a second known
-                # cross-app inconsistency, also left unresolved rather
-                # than decided unilaterally; see the 2026-09-13 audit.
-                MenuAction("save_all", "Save &All Changed", self._on_save_all, shortcut="Ctrl+Shift+S"),
-                Separator(),
-                # Quick, direct rename of the one selected file -- matches
-                # Explorer's F2 exactly. This project already had the
-                # underlying action (see the context menu's "Rename
-                # File..." below) but never exposed it as a keyboard
-                # shortcut. Distinct from "rename_by_pattern" (Operations
-                # menu, Ctrl+E) below -- that's the batch pattern tool.
-                MenuAction(
-                    "rename_file", "&Rename File...", self.rename_selected_file,
-                    shortcut=shortcuts.RENAME_SINGLE_FILE,
-                ),
-                MenuAction("undo_rename", "&Undo Last Rename...", self.undo_last_rename),
-                Separator(),
-                # F5 only, not the family's usual F5/Ctrl+R pair -- Ctrl+R
-                # is already "Remux Selected to MP4..." in this project's
-                # Operations menu (see MenuAction("remux", ...) below);
-                # adding it here too would make both ambiguous.
-                MenuAction("refresh_list", "Re&fresh List", self._refresh_list, shortcut="F5"),
-                Separator(),
-                # No explicit shortcut -- Alt+F4 already closes this (or
-                # any) plain QMainWindow at the OS level, verified
-                # directly (launch, send Alt+F4, confirm the process
-                # exits), independent of anything bound here.
-                # QKeySequence.StandardKey.Quit (the previous binding)
-                # resolves to ZERO actual key bindings on Windows --
-                # confirmed via QKeySequence.keyBindings() -- so it was
-                # never doing anything anyway.
-                MenuAction("exit", "E&xit", self.close),
+        return [
+            entry("tmdb_movie", "TMDB (&Movie)…", lambda: self._on_import_tmdb("movie"),
+                  "Ctrl+M" if not key_prefix else None),
+            entry("tmdb_tv", "TMDB (&TV Show)…", lambda: self._on_import_tmdb("tv"),
+                  "Ctrl+T" if not key_prefix else None),
+            entry("tvdb", "TheTVDB (T&V Show)…", self._on_import_tvdb,
+                  "Ctrl+Shift+T" if not key_prefix else None),
+            entry("subtitles", "&Subtitles (OpenSubtitles)…", self._on_import_subtitles,
+                  "Ctrl+Shift+O" if not key_prefix else None),
+        ]
+
+    def _build_menu_bar(self) -> None:
+        """Menu bar built through redactor_common's standard menu skeleton:
+        File, Edit, View, Metadata, Media, Tools, Help, with the shared
+        actions under their canonical labels (core/labels.py). The spec is in
+        the family's menu-skeleton proposal (section C4 is this app).
+
+        Every action is reused, never duplicated, on the toolbar built right
+        after this in __init__ (see _build_toolbar) and in the row context
+        menu: they come from the ActionRegistry the builder attaches to the
+        window."""
+        spec = StandardMenuSpec(
+            file=standard_file_items(
+                open_files=self._on_open_files,
+                open_folder=self._on_open_folder,
+                import_and_convert=self._on_import_and_convert,
+                save=self._on_save_selected,
+                save_all=self._on_save_all,
+                rename_file=self.rename_selected_file,
+                undo_last_rename=self.undo_last_rename,
+                rename_export_move=self._on_rename_by_pattern,
+                remove_from_list=self._on_remove_from_list,
+                clear_list=self._on_clear_list,
+                exit_slot=self.close,
+                # No export_settings / import_settings yet: they need a
+                # SettingsAdapter over this app's settings file, so they show
+                # greyed (disable, never hide) until that is written.
+            ),
+            edit=standard_edit_items(
+                undo=self.undo_last_action,
+                redo=self.redo_last_action,
+                apply=lambda: self.tag_panel.apply_pending_changes(),
+                redact=self._on_redact,
+                edit_redact_recipe=self._on_edit_redact_recipe,
+                search_replace=self._on_search_replace,
+                change_case=self._on_case_conversion,
+                auto_number=self._on_auto_numbering,
+            ),
+            view=standard_view_items(
+                show_metadata_panel=self._on_show_panel_toggled,
+                # The zoom controller is built with the toolbar, after the menu.
+                zoom_in=lambda: self.zoom.zoom_in(),
+                zoom_out=lambda: self.zoom.zoom_out(),
+                reset_zoom=lambda: self.zoom.zoom_reset(),
+                refresh_list=self._refresh_list,
+                # F5 only: Ctrl+R is Remux to MP4 in this app.
+                refresh_shortcuts=["F5"],
+            ),
+            app_menus=[
+                AppMenu(labels.MENU_METADATA, [
+                    MenuAction("parse_filename", labels.PARSE_FILENAME,
+                               self._on_import_metadata_from_filename, shortcut=shortcuts.PARSE_FILENAME),
+                    Separator(),
+                    look_up_submenu(self._look_up_entries("lookup_")),
+                    Separator(),
+                    MenuAction("number_episodes", "&Number Episodes…", self._on_number_episodes),
+                ]),
+                # Only the heavy video-specific operations: what acts on the
+                # container/streams rather than on tags.
+                AppMenu(labels.MENU_MEDIA, [
+                    MenuAction("remux", "&Remux to MP4…", self._on_remux_selected, shortcut="Ctrl+R"),
+                    MenuAction("convert_to_mp4", "Con&vert to MP4 (H.264)…", self._on_convert_to_mp4,
+                               shortcut="Ctrl+Shift+C"),
+                    Separator(),
+                    MenuAction("check_files", "&Check Files…", self._on_check_files),
+                    MenuAction("find_duplicates", labels.FIND_DUPLICATES, self._on_find_duplicates),
+                ]),
             ],
-            "Import": [
-                MenuAction("import_tmdb_movie", "Import Metadata from TMDB (&Movie)...",
-                           lambda: self._on_import_tmdb("movie"), shortcut="Ctrl+M"),
-                MenuAction("import_tmdb_tv", "Import Metadata from TMDB (&TV Show)...",
-                           lambda: self._on_import_tmdb("tv"), shortcut="Ctrl+T"),
-                MenuAction("import_tvdb", "Import Metadata from TheTVDB (T&V Show)...",
-                           self._on_import_tvdb, shortcut="Ctrl+Shift+T"),
-                Separator(),
-                MenuAction("import_from_filename", "Import Metadata from &Filename...",
-                           self._on_import_metadata_from_filename,
-                           shortcut=shortcuts.PARSE_FILENAME_TO_METADATA),
-                MenuAction("import_subtitles", "Import &Subtitles from OpenSubtitles...",
-                           self._on_import_subtitles, shortcut="Ctrl+Shift+O"),
-                Separator(),
-                # Brings a different video FORMAT in, converted to join
-                # this app's MP4/M4V/MKV-only library -- same shape as
-                # mp3redactor's "Import & Convert to MP3..." (its
-                # core.mp3_converter), just video instead of audio.
-                # Unlike Remux/Convert to MP4 in Operations (which only
-                # ever act on files already loaded), this is the one
-                # place a non-MP4/M4V/MKV file can enter this app at
-                # all.
-                MenuAction("import_convert", "Import && &Convert to MP4...",
-                           self._on_import_and_convert),
-            ],
-            "Operations": [
-                MenuAction("remux", "&Remux Selected to MP4...", self._on_remux_selected, shortcut="Ctrl+R"),
-                MenuAction("convert_to_mp4", "Con&vert Selected to MP4 (H.264)...",
-                           self._on_convert_to_mp4, shortcut="Ctrl+Shift+C"),
-                MenuAction("rename_by_pattern", "Rena&me/Export by Pattern...",
-                           self._on_rename_by_pattern, shortcut=shortcuts.RENAME_EXPORT_BY_PATTERN),
-                MenuAction("check_files", "Chec&k Files...", self._on_check_files),
-                MenuAction("find_duplicates", "Find &Duplicates...", self._on_find_duplicates),
-                Separator(),
-                # One click: the recipe's check/repair, filename and lookup
-                # fills, optional remux/rename/move on the selected files (or
-                # all loaded), saved in place with each original in the
-                # Recycle Bin. See _on_redact().
-                redact_menu_action(self._on_redact, text="Redac&t"),
-                edit_recipe_menu_action(self._on_edit_redact_recipe, text="Redact Reci&pe..."),
-                Separator(),
-                MenuAction("case_conversion", "Case &Conversion...", self._on_case_conversion),
-                MenuAction(
-                    "search_replace", "Search/&Replace...", self._on_search_replace,
-                    shortcut=shortcuts.SEARCH_REPLACE,
-                ),
-                MenuAction("auto_numbering", "Auto-&Numbering...", self._on_auto_numbering),
-                Separator(),
-                MenuAction("undo", "&Undo", self.undo_last_action, shortcut=shortcuts.UNDO),
-                MenuAction("redo", "&Redo", self.redo_last_action, shortcut=shortcuts.REDO),
-            ],
-            "Settings": [
-                MenuAction("locate_tools", "&Locate External Tools...", self._on_locate_tools),
-                MenuAction("add_api_keys", "API &Keys...", self._on_add_external_apis),
-                Separator(),
-                MenuAction("add_remove_columns", "Add/Remove &Columns...", self._on_open_column_visibility),
-                MenuAction("add_remove_languages", "Add/Remove &Languages...", self._on_open_languages),
-                MenuAction("add_remove_genres", "Add/Remove &Genres...", self._on_open_genres),
-            ],
-            "Help": [
-                MenuAction("about", f"&About {APP_NAME}", self._on_show_about, shortcut=shortcuts.HELP),
-                MenuAction("changelog", "View &Changelog", self._on_show_changelog),
-                MenuAction("credits", "&Credits", self._on_show_credits),
-            ],
-        }
-        actions = build_menu_bar(self, specs)
+            tools=standard_tools_items(
+                api_keys=self._on_add_external_apis,
+                external_tools=self._on_locate_tools,
+                columns=self._on_open_column_visibility,
+                genres=self._on_open_genres,
+                languages=self._on_open_languages,
+            ),
+            help=standard_help_items(
+                APP_NAME, self._on_show_changelog, self._on_show_credits, self._on_show_about,
+            ),
+        )
+        build_standard_menu_bar(self, spec)
+        registry = get_action_registry(self)
+        self.actions_by_key = registry
+
+        # Keys and pre-skeleton labels are NOT the skeleton's yet: this step
+        # only moves the items (mouse paths); the shortcut fixes are a later
+        # step, so Ctrl+O is still Open Folder and Ctrl+Shift+S still Save All.
+        # Open Files gets a temporary key of its own until Ctrl+O is freed.
+        registry["open_files"].setShortcut(QKeySequence("Ctrl+Alt+O"))
+        registry["open_folder"].setShortcut(QKeySequence("Ctrl+O"))
+        registry["save_all"].setShortcut(QKeySequence("Ctrl+Shift+S"))
+
+        # Apply used to be toolbar-only; it is a menu entry now (so the command
+        # palette finds it) and keeps its toolbar button.
+        registry["apply"].setToolTip(
+            "Apply typed changes in the panel to the selected file(s) "
+            "-- does not save to disk (Save already applies pending "
+            "changes automatically, so this is only needed to stage "
+            "changes without saving yet)"
+        )
+        registry["show_metadata_panel"].setChecked(True)
 
         # Back-compat: the rest of this file (toolbar) references these
         # as self.<x>_action attributes directly.
-        self.open_folder_action = actions["open_folder"]
-        self.save_selected_action = actions["save_selected"]
-        self.save_all_action = actions["save_all"]
-        self.rename_file_action = actions["rename_file"]
-        self.undo_action = actions["undo"]
-        self.redact_action = actions["redact"]
-        self.redo_action = actions["redo"]
+        self.open_files_action = registry["open_files"]
+        self.open_folder_action = registry["open_folder"]
+        self.save_selected_action = registry["save"]
+        self.save_all_action = registry["save_all"]
+        self.rename_file_action = registry["rename_file"]
+        self.remove_from_list_action = registry["remove_from_list"]
+        self.apply_action = registry["apply"]
+        set_apply_count(self.apply_action, 0)  # greyed until something is selected
+        self.undo_action = registry["undo"]
+        self.redact_action = registry["redact"]
+        self.redo_action = registry["redo"]
         self.undo_action.setEnabled(False)
         self.redo_action.setEnabled(False)
 
     def _build_toolbar(self) -> None:
-        """Toolbar beneath the menu bar for the most-used actions (Open
-        Folder, Apply, Save Selected, Save All) -- matches the epub
-        tool's own menu-bar-plus-toolbar layout. Open Folder and the
-        two Save actions reuse the exact same QAction instances already
-        created in _build_menu_bar rather than creating parallel ones
-        with their own separate triggered connections -- one source of
-        truth per command, so a future change to what "Open Folder"
-        does only needs updating once. Apply is the one exception:
-        defined here directly rather than in _build_menu_bar, since
-        (per explicit request, moved here from a plain button inside
-        TagPanel) it lives ONLY in the toolbar, not also in a menu --
-        putting it in _build_menu_bar would misleadingly imply a menu
-        entry exists somewhere that doesn't.
+        """Toolbar beneath the menu bar for the most-used actions, in the
+        skeleton's order: Open Files, Open Folder | Apply | Save, Save All |
+        Redact | Undo, Redo | zoom, Panel. Everything reuses the exact same
+        QAction instances _build_menu_bar created (one source of truth per
+        command: enabled state, text and shortcut stay in sync with the menu).
+        Apply stays on the toolbar as the prominent path to it even though it
+        is in the Edit menu now.
 
         setMovable(False) keeps it pinned directly under the menu bar
         rather than user-draggable to a window edge or floating --
@@ -567,33 +557,37 @@ class MainWindow(QMainWindow):
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
 
+        toolbar.addAction(self.open_files_action)
         toolbar.addAction(self.open_folder_action)
         toolbar.addSeparator()
 
-        self.apply_action = make_action(
-            self, "&Apply to Selected", lambda: self.tag_panel.apply_pending_changes(),
-            shortcut="Ctrl+Return",
-            tooltip=(
-                "Apply typed changes in the panel to the selected file(s) "
-                "-- does not save to disk (Save already applies pending "
-                "changes automatically, so this is only needed to stage "
-                "changes without saving yet)"
-            ),
-        )
         toolbar.addAction(self.apply_action)
+        toolbar.addSeparator()
 
         toolbar.addAction(self.save_selected_action)
         toolbar.addAction(self.save_all_action)
-
         toolbar.addSeparator()
+
         toolbar.addAction(self.redact_action)
+        # The one-click action: bold so it stands out from the plain buttons.
+        redact_button = toolbar.widgetForAction(self.redact_action)
+        if redact_button is not None:
+            redact_button.setStyleSheet("font-weight: bold; padding: 2px 10px;")
+        toolbar.addSeparator()
+
+        toolbar.addAction(self.undo_action)
+        toolbar.addAction(self.redo_action)
         toolbar.addSeparator()
 
         # +/- table-font zoom, matching the epub tool's toolbar control
         # (this project never had one before) -- redactor_common's
         # TableZoomController owns the QAction pair + percentage label;
-        # this window just places them.
+        # this window just places them. Ctrl++ / Ctrl+- belong to the View
+        # menu's Zoom In / Zoom Out now: the controller binds the same
+        # StandardKeys, which would make both ambiguous (and dead).
         self.zoom = TableZoomController(self.table, parent=self)
+        self.zoom.zoom_in_action.setShortcut(QKeySequence())
+        self.zoom.zoom_out_action.setShortcut(QKeySequence())
         toolbar.addAction(self.zoom.zoom_out_action)
         toolbar.addWidget(self.zoom.label)
         toolbar.addAction(self.zoom.zoom_in_action)
@@ -603,7 +597,8 @@ class MainWindow(QMainWindow):
         # Minimize/restore the bulk-edit panel, matching the epub tool's
         # toolbar control (this project never had one before -- the
         # panel's own in-corner button and dragging the splitter handle
-        # by hand were the only ways to do this).
+        # by hand were the only ways to do this). View > Show Metadata Panel
+        # is the same toggle, kept in step by _sync_tag_panel_collapsed_indicator.
         toggle_panel_action = make_action(
             self, "Panel", self._toggle_tag_panel, tooltip="Minimize or restore the bulk-edit panel"
         )
@@ -660,7 +655,7 @@ class MainWindow(QMainWindow):
             # needs to handle "open every missing tool's page."
 
     def _on_locate_tools(self) -> None:
-        """Open the tool-location settings dialog (Settings menu, or
+        """Open the tool-location settings dialog (Tools menu, or
         the 'Locate Manually...' button on the startup missing-tools
         warning). After it closes, re-check and give explicit feedback
         -- confirms the fix actually worked rather than leaving the
@@ -677,7 +672,7 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(f"Still missing: {names}")
 
     def _on_add_external_apis(self) -> None:
-        """Add/Edit External APIs (Settings menu) -- lets the user
+        """Add/Edit External APIs (Tools menu) -- lets the user
         enter TMDB/TheTVDB API keys directly rather than needing an
         environment variable or hand-edited settings.ini. Nothing needs
         refreshing after it closes; the key is only read at the moment
@@ -687,7 +682,7 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _on_open_column_visibility(self) -> None:
-        """Add/Remove Columns (Settings menu) -- redactor_common's shared
+        """Add/Remove Columns (Tools menu) -- redactor_common's shared
         ColumnSettingsDialog (the same one cbz/mp3 use), reading and
         writing the same persisted hidden-columns state as the table
         header's right-click menu. Refreshes both the table and the
@@ -705,7 +700,7 @@ class MainWindow(QMainWindow):
             self._on_column_visibility_changed_via_settings()
 
     def _on_open_languages(self) -> None:
-        """Add/Remove Languages (Settings menu) -- refreshes the bulk-
+        """Add/Remove Languages (Tools menu) -- refreshes the bulk-
         edit panel's language picker immediately if anything changed,
         rather than only on the next filter change or file selection.
         """
@@ -717,7 +712,7 @@ class MainWindow(QMainWindow):
             self.tag_panel.refresh_fields()
 
     def _on_open_genres(self) -> None:
-        """Add/Remove Genres (Settings menu) -- same immediate-refresh
+        """Add/Remove Genres (Tools menu) -- same immediate-refresh
         reasoning as _on_open_languages.
         """
         dialog = VocabularyEditorDialog(
@@ -893,6 +888,87 @@ class MainWindow(QMainWindow):
         self.tag_panel.set_content_type_filter(content_type)
 
     # --- Loading files ---------------------------------------------------
+
+    def _on_open_files(self) -> None:
+        """File > Open Files...: picks individual videos and ADDS them to the
+        list (Open Folder replaces it), skipping any already loaded."""
+        start = get_setting("general", "last_files_folder", "") or get_setting("general", "last_folder", "")
+        patterns = " ".join(f"*{ext}" for ext in sorted(SUPPORTED_EXTENSIONS))
+        chosen, _ = QFileDialog.getOpenFileNames(self, "Open Video Files", start, f"Video Files ({patterns})")
+        if not chosen:
+            return
+        set_setting("general", "last_files_folder", str(Path(chosen[0]).parent))
+        self._add_files([Path(p) for p in chosen])
+
+    def _add_files(self, paths: list[Path]) -> None:
+        """Loads `paths` and appends them to the list; a path already in it
+        is skipped (same file twice would be two rows editing one file)."""
+        def key(p) -> str:
+            return os.path.normcase(os.path.abspath(str(p)))
+
+        known = {key(vf.path) for vf in self.video_files}
+        fresh: list[Path] = []
+        for p in paths:
+            if key(p) not in known:
+                known.add(key(p))
+                fresh.append(p)
+        skipped = len(paths) - len(fresh)
+
+        def _step(p: Path, _index: int) -> None:
+            vf = VideoFile(path=p)
+            vf.load()
+            self.video_files.append(vf)
+
+        before = len(self.video_files)
+        cancelled = not run_with_progress(
+            self, fresh, _step, "Loading video files...", threshold=3,
+            label_for=lambda p: f"Loading {p.name}",
+        )
+        self._refresh_table_rows()
+        added = self.video_files[before:]
+        failed = sum(1 for vf in added if vf.load_error)
+        msg = f"Added {len(added) - failed} file(s)"
+        if cancelled:
+            msg = f"Cancelled -- {msg.lower()}"
+        if skipped:
+            msg += f", {skipped} already in the list"
+        if failed:
+            msg += f", {failed} failed to read"
+        self.status_bar.showMessage(msg)
+
+    def _on_remove_from_list(self) -> None:
+        """File > Remove from List (Delete): drops the selected files from
+        the list. Nothing on disk is touched; unsaved edits on them are lost,
+        so that is confirmed first. The Undo stack is cleared (it may point at
+        the removed files), like any other replacement of the list."""
+        selected = self._selected_video_files()
+        if not selected:
+            self.status_bar.showMessage("No files selected")
+            return
+        dirty = sum(1 for vf in selected if vf.dirty)
+        if dirty and not self._confirm_discard(
+            f"remove {len(selected)} file(s) from the list (discarding unsaved changes on {dirty})"
+        ):
+            return
+        gone = {id(vf) for vf in selected}
+        self.video_files = [vf for vf in self.video_files if id(vf) not in gone]
+        self._clear_undo()
+        self._refresh_table_rows()
+        self.status_bar.showMessage(f"Removed {len(selected)} file(s) from the list (files on disk untouched)")
+
+    def _on_clear_list(self) -> None:
+        """File > Clear List: empties the list (nothing on disk is touched),
+        confirming first when any file has unsaved edits."""
+        if not self.video_files:
+            self.status_bar.showMessage("The list is already empty")
+            return
+        if self._count_dirty() and not self._confirm_discard("clear the list (discarding unsaved changes)"):
+            return
+        count = len(self.video_files)
+        self.video_files = []
+        self._clear_undo()
+        self._refresh_table_rows()
+        self.status_bar.showMessage(f"Cleared the list ({count} file(s) removed; files on disk untouched)")
 
     def _on_open_folder(self) -> None:
         # Start the browser at the last folder actually opened, rather
@@ -1182,7 +1258,7 @@ class MainWindow(QMainWindow):
                 # A fresh scan marks the file dirty (its stamp is unsaved);
                 # keep its result visible.
                 return f"UNSAVED · {vf.check.status}" if vf.check is not None else "UNSAVED"
-            # Operations > Check Files...: the stamp (status + when) in
+            # Media > Check Files...: the stamp (status + when) in
             # place of the unscanned text; a stale one says so.
             return vf.stamp_text() or (vf.check.status if vf.check is not None else "OK")
         if field_name == "content_type":
@@ -1223,30 +1299,22 @@ class MainWindow(QMainWindow):
         def extra_items(files: list[VideoFile]) -> list:
             items: list = [Separator()]
             # Only offered for a single file -- renaming several files
-            # to the same name doesn't make sense. Distinct from any
-            # future pattern-based batch rename tool: this is the
-            # quick, direct fix for one typo at a time -- also
-            # reachable by double-clicking the Filename cell (see
-            # _on_cell_double_clicked()).
+            # to the same name doesn't make sense. Also reachable by
+            # double-clicking the Filename cell (see _on_cell_double_clicked()).
             # Reuses the actual File-menu QAction (F2) rather than
             # building a fresh one -- same object, so this shows the
-            # real shortcut hint and can never drift out of sync with
-            # it. Only offered for a single file -- renaming several to
-            # the same name doesn't make sense.
+            # real shortcut hint and can never drift out of sync with it.
             if len(files) == 1 and not files[0].load_error:
-                items.append(self.rename_file_action)
-            # Every lookup from the Import menu, so none needs a trip to
+                items.extend([self.rename_file_action, Separator()])
+            # Every lookup from the Metadata menu, so none needs a trip to
             # the menu bar (no shortcuts here: they already live on the
-            # Import menu's own actions).
-            items.append(Submenu("Look Up", [
-                MenuAction("ctx_tmdb_movie", "TMDB (Movie)...", lambda: self._on_import_tmdb("movie")),
-                MenuAction("ctx_tmdb_tv", "TMDB (TV Show)...", lambda: self._on_import_tmdb("tv")),
-                MenuAction("ctx_tvdb", "TheTVDB (TV Show)...", self._on_import_tvdb),
-                MenuAction("ctx_subtitles", "Subtitles from OpenSubtitles...", self._on_import_subtitles),
+            # menu's own actions).
+            items.append(Submenu("Look Up", self._look_up_entries("ctx_")))
+            items.append(Submenu("Organize", [
+                self.actions_by_key["rename_export_move"],
+                MenuAction("ctx_number_episodes", "Number Episodes…", lambda: self._quick_number_episodes(files)),
             ]))
-            items.append(MenuAction(
-                "number_episodes", "Number Episodes...", lambda: self._quick_number_episodes(files)
-            ))
+            items.extend([Separator(), self.redact_action, Separator(), self.remove_from_list_action])
             return items
 
         show_table_context_menu(
@@ -1319,10 +1387,22 @@ class MainWindow(QMainWindow):
         self._sync_tag_panel_collapsed_indicator()
 
     def _sync_tag_panel_collapsed_indicator(self) -> None:
-        self.tag_panel.set_collapsed_indicator(self._panel_collapser.is_collapsed())
+        collapsed = self._panel_collapser.is_collapsed()
+        self.tag_panel.set_collapsed_indicator(collapsed)
+        # View > Show Metadata Panel mirrors the panel, whoever moved it.
+        shown = self.actions_by_key["show_metadata_panel"]
+        shown.blockSignals(True)
+        shown.setChecked(not collapsed)
+        shown.blockSignals(False)
+
+    def _on_show_panel_toggled(self, checked: bool = True) -> None:
+        """View > Show Metadata Panel: ticked = panel visible."""
+        if checked == self._panel_collapser.is_collapsed():
+            self._toggle_tag_panel()
 
     def _on_selection_changed(self) -> None:
         selected = self._selected_video_files()
+        set_apply_count(self.apply_action, len(selected))  # 'Apply to N Selected', greyed at 0
         if not selected:
             self.tag_panel.set_preview_image(None)
             return
@@ -1859,7 +1939,7 @@ class MainWindow(QMainWindow):
     # --- Remux ---------------------------------------------------------
 
     def _on_check_files(self) -> None:
-        """Operations > Check Files...: the quick health check for the
+        """Media > Check Files...: the quick health check for the
         selected files (all loaded files when none are selected), then
         the results and an optional lossless Repair -- see
         gui/file_check_dialog.py and core/file_check.py."""
@@ -1872,7 +1952,7 @@ class MainWindow(QMainWindow):
         run_check_and_repair(self, files, _error_details)
 
     def _on_find_duplicates(self) -> None:
-        """Operations > Find Duplicates...: groups the loaded files that
+        """Media > Find Duplicates...: groups the loaded files that
         look like the same video, for review only -- see
         gui/duplicates_dialog.py and core/video_duplicates.py."""
         from gui.duplicates_dialog import find_duplicates_flow
@@ -1903,7 +1983,7 @@ class MainWindow(QMainWindow):
         return list(self.video_files) if answer == QMessageBox.StandardButton.Yes else []
 
     def _on_redact(self) -> None:
-        """Operations > Redact (Ctrl+Shift+E, toolbar): runs the saved recipe
+        """Edit > Redact (Ctrl+Shift+E, toolbar): runs the saved recipe
         (core/redact_steps.py) on the targets through redactor_common's
         engine -- progress, Cancel, then the report with Needs review. A
         file with unsaved edits or a load error is skipped and named in the
@@ -1943,7 +2023,7 @@ class MainWindow(QMainWindow):
             ).exec()
 
     def _on_edit_redact_recipe(self) -> None:
-        """Operations > Redact Recipe...: the shared recipe editor over
+        """Edit > Edit Redact Recipe...: the shared recipe editor over
         this app's steps; the result is stored in the settings file."""
         catalogue = build_catalogue(sample=self._redact_sample_values)
         recipe = load_recipe(catalogue)
@@ -2220,7 +2300,7 @@ class MainWindow(QMainWindow):
             "This re-encodes video -- slower than Remux, and a quality/"
             "generation loss versus the source. Originals are never "
             "deleted automatically. Adjust these defaults via "
-            "Settings > Locate External Tools.",
+            "Tools > External Tools.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if confirm != QMessageBox.StandardButton.Yes:
@@ -2269,7 +2349,7 @@ class MainWindow(QMainWindow):
     # --- Import & Convert --------------------------------------------------
 
     def _on_import_and_convert(self) -> None:
-        """Import menu > "Import & Convert to MP4..." -- brings a
+        """File > Import and Convert... -- brings a
         non-MP4/M4V/MKV video file (AVI/MOV/WMV/FLV/WebM/MPG/...) into
         the library by re-encoding it to H.264/AAC MP4 via ffmpeg
         (core.ffmpeg_backend.transcode_to_mp4), same directory, same
@@ -2281,7 +2361,7 @@ class MainWindow(QMainWindow):
         replace-wholesale semantics -- same reasoning as mp3redactor's
         own Import & Convert (see that project's gui/main_window.py).
         Reuses the exact same _TranscodeWorker + Tool Settings
-        (CRF/audio bitrate/threads) as Operations > Convert Selected to
+        (CRF/audio bitrate/threads) as Media > Convert to
         MP4 (H.264) -- transcode_to_mp4() is already format-agnostic on
         its input (whatever `ffmpeg -i` can read), so nothing in
         core/ffmpeg_backend.py needed to change to support this, only
@@ -2335,7 +2415,7 @@ class MainWindow(QMainWindow):
             f"Convert {len(jobs)} file(s) to H.264/AAC MP4 "
             f"(CRF {settings.crf}, audio {settings.audio_bitrate}{thread_note})?\n\n"
             "Originals are never deleted automatically. Adjust these "
-            "defaults via Settings > Locate External Tools.",
+            "defaults via Tools > External Tools.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if confirm != QMessageBox.StandardButton.Yes:
@@ -2451,6 +2531,15 @@ class MainWindow(QMainWindow):
         if not targets:
             QMessageBox.information(self, "No Files", f"Load some files first (or select the ones to {verb}).")
         return targets
+
+    def _on_number_episodes(self) -> None:
+        """Metadata > Number Episodes...: the quick numbering of the selected
+        files (the same thing the row right-click menu offers)."""
+        files = self._selected_video_files()
+        if not files:
+            self.status_bar.showMessage("No files selected")
+            return
+        self._quick_number_episodes(files)
 
     def _after_batch_edit(self, message: str) -> None:
         self._refresh_table_rows()
@@ -2585,7 +2674,7 @@ class MainWindow(QMainWindow):
             f"Imported metadata from filename for {len(changes)} file(s) -- not yet saved to disk"
         )
 
-    # --- Batch text operations (Operations menu) ------------------------
+    # --- Batch text operations (Edit menu) ------------------------
 
     def _text_field_choices(self) -> list[tuple[str, str]]:
         return [(field, FIELD_LABELS.get(field, field)) for field in TEXT_FIELDS]
@@ -2679,7 +2768,7 @@ class MainWindow(QMainWindow):
         plain "start here, count up by one" case on Episode #
         specifically -- a different field, a different step, or a look
         at what's changing before it does -- use
-        Operations -> Auto-Numbering... instead. Undoable (Ctrl+Z).
+        Edit > Auto-Number... instead. Undoable (Ctrl+Z).
         """
         values = prompt_and_generate_series_numbers(self, len(files), field_label="Starting Episode #")
         if values is None:

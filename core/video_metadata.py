@@ -102,7 +102,7 @@ EDITABLE_FIELDS = [
     "artist", "album", "track_title", "composer",
 ]
 
-# Freeform text fields eligible for the Operations menu's Case
+# Freeform text fields eligible for the Edit menu's Case
 # Conversion and Search/Replace tools (core/text_transforms.py), and
 # for Auto-Numbering's "prefix the existing text" mode. Deliberately
 # excludes: content_type (a fixed enum, not free text), genre_tags and
