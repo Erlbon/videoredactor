@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-30#19 — Adopt redactor_common 2026-09-30-15
+
+- **Adopt redactor_common 2026-09-30-15: Redact saves retry briefly when Windows antivirus/indexer briefly locks a file.** Also picks up the engine pass 2 changes from tag -14.
+
 ## 2026-09-30#18 — Export / Import Settings
 
 - **File > Export Settings… and Import Settings… are back**, between Rename / Export / Move and Remove from List. They write and read one file, `videoredactor-settings.json`; importing shows every change as old and new, grouped by section, and applies nothing until you confirm.
