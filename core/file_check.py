@@ -465,7 +465,12 @@ def repair(
                 break
         if problem:
             raise RepairError(problem)
-        note = restore(path, target)
+        try:
+            note = restore(path, target)
+        except RepairError:
+            raise
+        except Exception as exc:  # mutagen/OSError/timeout while copying tags: the original stays
+            raise RepairError(f"couldn't restore the tags: {exc}") from exc
         after = quick_check(target, run)
         if not after.openable or any(f.code == "read_errors" for f in after.findings):
             raise RepairError(f"the repaired copy didn't pass the check ({after.summary()})")

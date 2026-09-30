@@ -262,3 +262,50 @@ def test_unsaved_files_are_not_repaired(videos, tmp_path, qapp):
     vf.dirty = True
     repaired, errors, _notes = flow.repair_files(None, [vf])
     assert not repaired and "unsaved changes" in errors[0]
+
+
+def test_one_files_unexpected_error_does_not_abort_the_rest(tmp_path, qapp, monkeypatch):
+    # M8: only RepairError used to be caught per file; an OSError, a
+    # mutagen error or a timeout escaped and dropped every later file.
+    from PyQt6.QtWidgets import QWidget
+
+    from core.video_file import VideoFile
+    from gui import file_check_dialog as flow
+
+    files = []
+    for name in ("a.mkv", "b.mkv"):
+        vf = VideoFile(path=tmp_path / name)
+        vf.check = fc.CheckResult(findings=[fc.Finding("index_at_end", fc.REPAIRABLE, "x")])
+        files.append(vf)
+
+    def fake_check(path):
+        if path.endswith("a.mkv"):
+            raise subprocess.TimeoutExpired("ffmpeg", 1)
+        return fc.CheckResult()
+
+    monkeypatch.setattr(flow, "quick_check", fake_check)
+    errors = []
+    checked = flow.check_files(QWidget(), files, errors)
+    assert [vf.path.name for vf in checked] == ["b.mkv"] and len(errors) == 1 and errors[0].startswith("a.mkv:")
+
+    def fake_repair(path, check):
+        if path.endswith("a.mkv"):
+            raise PermissionError("denied")
+        raise fc.RepairError("nope")
+
+    monkeypatch.setattr(flow, "repair", fake_repair)
+    repaired, errors, _notes = flow.repair_files(QWidget(), files)
+    assert repaired == [] and [e.split(":")[0] for e in errors] == ["a.mkv", "b.mkv"]
+
+
+def test_a_tag_restore_failure_becomes_a_repair_error_and_leaves_the_original(videos, tmp_path):
+    src = tmp_path / "late_index.mp4"
+    shutil.copyfile(videos / "late_index.mp4", src)
+    before = fc.quick_check(str(src))
+
+    def broken_restore(_original, _repaired):
+        raise OSError("disk hiccup")
+
+    with pytest.raises(fc.RepairError, match="disk hiccup"):
+        fc.repair(str(src), before, restore=broken_restore, trash=lambda _p: None)
+    assert [p.name for p in tmp_path.iterdir()] == ["late_index.mp4"]

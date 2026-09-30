@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-09-30#02 — Remux no longer loses tracks, runs in the background, leaves no partial files
+
+- **Fixed: Remux to MP4 kept only one audio track and dropped subtitles and attachments**, then permanently deleted the original MKV. It now keeps every track (falling back to fewer streams only when MP4 refuses some), compares the result with the original (tracks and length) and only offers to delete the original when nothing is missing -- otherwise the original is kept and you're told why. The original goes to the Recycle Bin instead of being erased.
+- **Remux runs in the background** with a progress dialog and a working Cancel, like Convert; the window no longer freezes on a big file.
+- **Fixed: a failed or cancelled Remux/Convert/Import left a half-written .mp4** that was then skipped as "already exists". Output is written under a temporary name and renamed when finished.
+- **Fixed: two inputs mapping to one output name** (a.avi and a.mov -> a.mp4) overwrote each other; the second is now skipped.
+- **Fixed: one failing file aborted the rest** of a Convert/Remux batch (the others showed as cancelled) and of Check Files / Repair (an I/O error or timeout while checking, or while copying tags onto a repaired file). Each file's problem is now reported and the others carry on.
+- redactor_common 2026-09-30-02 (from 2026-09-30-01): no-clobber rename.
+
 ## 2026-09-30#01 — Lookups in the right-click menu, zero-padding remembered
 
 - Right-clicking a file now has a **Look Up** submenu with TMDB (Movie),

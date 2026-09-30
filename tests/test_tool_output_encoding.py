@@ -56,5 +56,4 @@ def test_hung_tool_times_out_to_a_clean_failure():
     with mock.patch("subprocess.run", side_effect=hang):
         assert ffmpeg_backend.probe_technical_info("movie.mkv") == {}
         assert ffmpeg_backend.extract_thumbnail("movie.mkv", "out.jpg", timestamp_seconds=1.0) is False
-        ok, message = ffmpeg_backend.remux_to_mp4("movie.mkv", "movie.mp4")
-    assert ok is False and "ffmpeg" in message
+

@@ -32,7 +32,7 @@ from PyQt6.QtWidgets import (
 from redactor_common.gui.background_call import call_in_background
 from redactor_common.gui.progress import run_with_progress
 
-from core.file_check import RepairError, quick_check, repair
+from core.file_check import quick_check, repair
 from core.video_file import VideoFile
 
 TITLE = "Check Files"
@@ -93,13 +93,19 @@ class FileCheckResultsDialog(QDialog):
         layout.addWidget(buttons)
 
 
-def check_files(window, files: list[VideoFile]) -> list[VideoFile]:
+def check_files(window, files: list[VideoFile], errors: Optional[list[str]] = None) -> list[VideoFile]:
     """Runs the quick check on `files`; returns the ones checked (fewer
-    if cancelled)."""
+    if cancelled). A file whose check blows up (OSError, a timeout...) is
+    appended to `errors` and the rest still run."""
     checked: list[VideoFile] = []
 
     def step(vf: VideoFile, _index: int) -> None:
-        vf.check = call_in_background(quick_check, str(vf.path))
+        try:
+            vf.check = call_in_background(quick_check, str(vf.path))
+        except Exception as exc:
+            if errors is not None:
+                errors.append(f"{vf.path.name}: {exc}")
+            return
         checked.append(vf)
 
     run_with_progress(window, files, step, "Checking files...", threshold=1,
@@ -124,7 +130,7 @@ def repair_files(window, files: list[VideoFile]) -> tuple[list[VideoFile], list[
     def step(vf: VideoFile, _index: int) -> None:
         try:
             outcome = call_in_background(repair, str(vf.path), vf.check)
-        except RepairError as exc:
+        except Exception as exc:  # RepairError, or anything unexpected: keep going with the rest
             errors.append(f"{vf.path.name}: {exc}")
             return
         vf.load()  # fresh duration and technical details from the repaired file
@@ -142,8 +148,11 @@ def repair_files(window, files: list[VideoFile]) -> tuple[list[VideoFile], list[
 def run_check_and_repair(window, files: list[VideoFile], error_details) -> None:
     """The whole Operations > Check Files... flow. `error_details` formats
     a list of lines for a message box (the main window's helper)."""
-    checked = check_files(window, files)
+    check_errors: list[str] = []
+    checked = check_files(window, files, check_errors)
     window._refresh_table_rows()
+    if check_errors:
+        QMessageBox.warning(window, "Some files couldn't be checked", error_details(check_errors))
     if not checked:
         return
     dialog = FileCheckResultsDialog(checked, window)

@@ -40,7 +40,7 @@ from core.tmdb_client import (
 )
 from core.tvdb_client import get_series_details, get_episode_details, download_image, TVDBError
 from core.release_name_parser import parse_release_name
-from core.ffmpeg_backend import IMPORTABLE_EXTENSIONS, remux_to_mp4, transcode_to_mp4
+from core.ffmpeg_backend import IMPORTABLE_EXTENSIONS, remux_to_mp4, transcode_to_mp4, verify_remux
 from core.transcode_settings import get_transcode_settings
 from core.opensubtitles_client import download_subtitle_text, OpenSubtitlesError
 from core.table_settings import PROTECTED_COLUMNS, merge_column_order, is_column_visible, sanitize_hidden_fields
@@ -72,6 +72,7 @@ from redactor_common.gui.rename_single_file import rename_single_file as prompt_
 from redactor_common.gui.sortable_table import NumericTableWidgetItem, suspend_sorting
 from redactor_common.gui import standard_shortcuts as shortcuts
 from redactor_common.core.error_summary import summarize_errors
+from redactor_common.core.trash import TrashError, move_to_trash
 from redactor_common.core.undo import UndoManager
 from redactor_common.core.folder_refresh import find_new_files_in_loaded_folders
 from redactor_common.core.version import REDACTOR_COMMON_REPO_URL, REDACTOR_COMMON_VERSION
@@ -205,25 +206,31 @@ def _error_details(lines: list[str]) -> str:
 
 
 class _TranscodeWorker(QThread):
-    """Runs a batch of transcode_to_mp4() calls off the GUI thread.
+    """Runs a batch of transcode_to_mp4() (or, with remux=True,
+    remux_to_mp4()) calls off the GUI thread.
 
-    Unlike _on_remux_selected's loop (safe to run straight on the GUI
-    thread since -c copy is near-instant), a real H.264/AAC re-encode
-    can take minutes per file -- doing that inline would freeze the
-    whole window for the entire batch. Emits progress per file rather
-    than returning everything at once, so the caller's QProgressDialog
-    can update between files; `cancel_event` is checked both between
-    files here and (via transcode_to_mp4) mid-file, so Cancel actually
-    stops a long encode instead of only skipping ones not yet started.
+    A real H.264/AAC re-encode can take minutes per file, and even a
+    stream-copy remux of a large file on a slow disk takes long enough
+    to freeze the whole window -- so both run here. Emits progress per
+    file rather than returning everything at once, so the caller's
+    QProgressDialog can update between files; `cancel_event` is checked
+    both between files here and (via the ffmpeg backend) mid-file, so
+    Cancel actually stops a long run instead of only skipping ones not
+    yet started.
+
+    file_finished's message: for a transcode, ffmpeg's stderr; for a
+    remux that succeeded, verify_remux()'s verdict ("" = every track
+    made it, anything else = what's missing) -- on failure, the error.
     """
 
     file_started = pyqtSignal(int, str)       # index, input filename
     file_finished = pyqtSignal(int, bool, str)  # index, success, stderr/message
 
-    def __init__(self, jobs: list[tuple[Path, Path]], settings, parent=None):
+    def __init__(self, jobs: list[tuple[Path, Path]], settings, parent=None, remux: bool = False):
         super().__init__(parent)
         self._jobs = jobs
         self._settings = settings
+        self._remux = remux
         self.cancel_event = threading.Event()
 
     def run(self) -> None:
@@ -231,14 +238,38 @@ class _TranscodeWorker(QThread):
             if self.cancel_event.is_set():
                 break
             self.file_started.emit(i, input_path.name)
-            ok, message = transcode_to_mp4(
-                str(input_path), str(output_path),
-                crf=self._settings.crf,
-                audio_bitrate=self._settings.audio_bitrate,
-                threads=self._settings.threads or None,
-                cancel_event=self.cancel_event,
-            )
+            # A PermissionError, a vanished file... must not kill the
+            # thread: the remaining jobs would then look "cancelled".
+            try:
+                if self._remux:
+                    ok, message = remux_to_mp4(
+                        str(input_path), str(output_path), cancel_event=self.cancel_event,
+                    )
+                    if ok:
+                        message = verify_remux(str(input_path), str(output_path))
+                else:
+                    ok, message = transcode_to_mp4(
+                        str(input_path), str(output_path),
+                        crf=self._settings.crf,
+                        audio_bitrate=self._settings.audio_bitrate,
+                        threads=self._settings.threads or None,
+                        cancel_event=self.cancel_event,
+                    )
+            except Exception as exc:  # noqa: BLE001 -- reported per file
+                ok, message = False, str(exc) or type(exc).__name__
             self.file_finished.emit(i, ok, message)
+
+
+def _claim_output(output: Path, claimed: set[str]) -> bool:
+    """True (and remembers it in `claimed`) when `output` is free: not
+    on disk and not already the destination of an earlier job in this
+    batch -- a.avi and a.mov would both become a.mp4 and overwrite each
+    other."""
+    key = os.path.normcase(os.path.abspath(output))
+    if output.exists() or key in claimed:
+        return False
+    claimed.add(key)
+    return True
 
 
 def _remember_zero_pad(enabled: bool, width: int) -> None:
@@ -1759,10 +1790,13 @@ class MainWindow(QMainWindow):
 
     def _on_remux_selected(self) -> None:
         """Remux selected MKV files to MP4 (batch-capable, -c copy so
-        it's fast/lossless -- no re-encode). For each successful remux,
-        asks whether to delete the original MKV (per-file confirmation,
-        with Yes/No-to-All shortcuts so a large batch doesn't demand
-        20 individual clicks) and auto-adds the new MP4 as a row in the
+        it's lossless -- no re-encode), on a worker thread with a
+        progress dialog and Cancel. For each remux whose result holds
+        every track of the original (verify_remux), asks whether to move
+        the original MKV to the Recycle Bin (per-file confirmation, with
+        Yes/No-to-All shortcuts so a large batch doesn't demand 20
+        individual clicks); a result that lost something is added but
+        the original is kept. Auto-adds the new MP4 as a row in the
         table.
         """
         selected = self._selected_video_files()
@@ -1776,28 +1810,49 @@ class MainWindow(QMainWindow):
             )
             return
 
+        jobs: list[tuple[Path, Path]] = []
+        job_files: list[VideoFile] = []
+        skipped_existing: list[VideoFile] = []
+        claimed: set[str] = set()
+        for vf in mkv_files:
+            output_path = vf.path.with_suffix(".mp4")
+            # Refuse to overwrite an existing file (or one another job of
+            # this batch is about to write) rather than guess whether
+            # it's unrelated or a leftover from a prior remux -- same
+            # "deliberate action, fail clearly" reasoning as
+            # rename_book_file's collision handling in the epub tool.
+            if not _claim_output(output_path, claimed):
+                skipped_existing.append(vf)
+                continue
+            jobs.append((vf.path, output_path))
+            job_files.append(vf)
+
+        results = (
+            self._run_transcode_jobs(jobs, None, "Remuxing to MP4", remux=True) if jobs else {}
+        )
+
         # None = ask per file; True/False = "to all" choice already made
         delete_all_choice: Optional[bool] = None
         succeeded: list[tuple[VideoFile, Path]] = []
         failed: list[tuple[VideoFile, str]] = []
-        skipped_existing: list[VideoFile] = []
+        unverified: list[tuple[VideoFile, str]] = []
+        cancelled_count = 0
         deletion_failures: list[tuple[VideoFile, str]] = []
         new_files: list[VideoFile] = []
         removed_originals: list[VideoFile] = []
 
-        for vf in mkv_files:
-            output_path = vf.path.with_suffix(".mp4")
-            if output_path.exists():
-                # Refuse to overwrite an existing file rather than guess
-                # whether it's unrelated or a leftover from a prior remux
-                # -- same "deliberate action, fail clearly" reasoning as
-                # rename_book_file's collision handling in the epub tool.
-                skipped_existing.append(vf)
+        for i, vf in enumerate(job_files):
+            output_path = jobs[i][1]
+            result = results.get(i)
+            if result is None:
+                cancelled_count += 1  # never started -- batch was cancelled first
                 continue
-
-            ok, stderr = remux_to_mp4(str(vf.path), str(output_path))
+            ok, message = result
             if not ok:
-                failed.append((vf, stderr.strip() or "ffmpeg remux failed"))
+                if message == "Cancelled":
+                    cancelled_count += 1
+                else:
+                    failed.append((vf, message.strip() or "ffmpeg remux failed"))
                 continue
 
             succeeded.append((vf, output_path))
@@ -1805,6 +1860,12 @@ class MainWindow(QMainWindow):
             new_vf = VideoFile(path=output_path)
             new_vf.load()
             new_files.append(new_vf)
+
+            if message:
+                # Something didn't make it into the MP4 (or it couldn't
+                # be compared): keep the original, don't even offer.
+                unverified.append((vf, message))
+                continue
 
             if delete_all_choice is not None:
                 delete_original: object = delete_all_choice
@@ -1816,9 +1877,9 @@ class MainWindow(QMainWindow):
 
             if delete_original:
                 try:
-                    vf.path.unlink()
+                    move_to_trash(str(vf.path))
                     removed_originals.append(vf)
-                except OSError as e:
+                except (TrashError, OSError) as e:
                     deletion_failures.append((vf, str(e)))
 
         self.video_files.extend(new_files)
@@ -1831,8 +1892,12 @@ class MainWindow(QMainWindow):
         parts = [f"Remuxed {len(succeeded)} file(s)"]
         if failed:
             parts.append(f"{len(failed)} failed")
+        if cancelled_count:
+            parts.append(f"{cancelled_count} cancelled")
         if skipped_existing:
             parts.append(f"{len(skipped_existing)} skipped (MP4 already exists)")
+        if unverified:
+            parts.append(f"{len(unverified)} original(s) kept (result incomplete)")
         if non_mkv_count:
             parts.append(f"{non_mkv_count} non-MKV selection(s) ignored")
         if deletion_failures:
@@ -1842,6 +1907,12 @@ class MainWindow(QMainWindow):
         if failed:
             details = _error_details([f"{vf.path.name}: {err}" for vf, err in failed])
             QMessageBox.warning(self, "Some files failed to remux", details)
+        if unverified:
+            details = _error_details([f"{vf.path.name}: {err}" for vf, err in unverified])
+            QMessageBox.warning(
+                self, "Originals kept",
+                "These MP4s don't hold everything the MKV did, so the originals were kept:\n\n" + details,
+            )
         if deletion_failures:
             details = _error_details([f"{vf.path.name}: {err}" for vf, err in deletion_failures])
             QMessageBox.warning(self, "Some originals could not be deleted", details)
@@ -1856,7 +1927,8 @@ class MainWindow(QMainWindow):
         box.setIcon(QMessageBox.Icon.Question)
         box.setWindowTitle("Delete Original MKV?")
         box.setText(
-            f"Remuxed to {output_path.name}.\n\nDelete the original file {vf.path.name}?"
+            f"Remuxed to {output_path.name} (all tracks kept).\n\n"
+            f"Move the original file {vf.path.name} to the Recycle Bin?"
         )
         btn_yes = box.addButton("Yes", QMessageBox.ButtonRole.YesRole)
         btn_no = box.addButton("No", QMessageBox.ButtonRole.NoRole)
@@ -1876,7 +1948,7 @@ class MainWindow(QMainWindow):
         return False  # dialog dismissed without a button (e.g. Esc) -- default to not deleting
 
     def _run_transcode_jobs(
-        self, jobs: list[tuple[Path, Path]], settings, title: str
+        self, jobs: list[tuple[Path, Path]], settings, title: str, remux: bool = False
     ) -> dict[int, tuple[bool, str]]:
         """Runs `jobs` on a _TranscodeWorker thread behind the shared
         progress dialog (fixed width, elided per-file label) and returns
@@ -1887,11 +1959,12 @@ class MainWindow(QMainWindow):
 
         threshold=1: even a single encode takes minutes, so the dialog
         (and its Cancel button) always shows."""
-        worker = _TranscodeWorker(jobs, settings, parent=self)
+        worker = _TranscodeWorker(jobs, settings, parent=self, remux=remux)
         results: dict[int, tuple[bool, str]] = {}
         with ProgressReporter(self, len(jobs), "Starting...", threshold=1, title=title) as reporter:
             def on_started(i: int, name: str) -> None:
-                reporter.set_label(f"Converting {name}... ({i + 1}/{len(jobs)})")
+                verb = "Remuxing" if remux else "Converting"
+                reporter.set_label(f"{verb} {name}... ({i + 1}/{len(jobs)})")
                 reporter.set_value(i, pump=False)
 
             def on_finished(i: int, ok: bool, message: str) -> None:
@@ -1942,6 +2015,7 @@ class MainWindow(QMainWindow):
         settings = get_transcode_settings()
         jobs: list[tuple[Path, Path]] = []
         skipped_existing: list[VideoFile] = []
+        claimed: set[str] = set()
         for vf in selected:
             if vf.path.suffix.lower() == ".mp4":
                 # Converting an MP4 in place would mean reading and
@@ -1952,7 +2026,7 @@ class MainWindow(QMainWindow):
                 output_path = vf.path.with_name(f"{vf.path.stem}_h264.mp4")
             else:
                 output_path = vf.path.with_suffix(".mp4")
-            if output_path.exists():
+            if not _claim_output(output_path, claimed):
                 skipped_existing.append(vf)
                 continue
             jobs.append((vf.path, output_path))
@@ -2052,10 +2126,11 @@ class MainWindow(QMainWindow):
 
         jobs: list[tuple[Path, Path]] = []
         skipped_existing: list[Path] = []
+        claimed: set[str] = set()
         for raw_path in paths:
             src = Path(raw_path)
             dest = src.with_suffix(".mp4")
-            if dest.exists():
+            if not _claim_output(dest, claimed):
                 # Refuse to silently clobber an existing file of that
                 # name -- same safety-first instinct as Convert Selected
                 # to MP4's own existing-output check below.

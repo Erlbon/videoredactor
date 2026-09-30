@@ -10,12 +10,15 @@ file, not just syntax-checked -- see tests/test_ffmpeg_backend.py.
 """
 
 from __future__ import annotations
+import json
+import os
 import subprocess
 import threading
 from pathlib import Path
 from typing import Optional
 
 from core.external_tools import get_executable_path
+from redactor_common.core.os_utils import rename_no_clobber
 from redactor_common.core.subprocess_utils import popen_tool, run_tool
 
 # Extensions offered in the Import menu's "Import & Convert to MP4..."
@@ -114,22 +117,180 @@ def extract_thumbnail(
     return result.returncode == 0 and Path(output_path).exists()
 
 
-def remux_to_mp4(input_path: str, output_path: str) -> tuple[bool, str]:
+def partial_path(output_path: str) -> str:
+    """The temporary name ffmpeg writes to before the finished file takes
+    `output_path`'s name ("a.mp4" -> "a.partial.mp4"; the real extension
+    stays last so ffmpeg still picks the MP4 muxer). A crash, failure or
+    cancel then never leaves a half-written file under the final name,
+    where it would be mistaken for a finished one ("already exists")."""
+    p = Path(output_path)
+    return str(p.with_name(f"{p.stem}.partial{p.suffix}"))
+
+
+def _remove_quietly(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _run_ffmpeg(
+    args: list[str],
+    cancel_event: Optional[threading.Event] = None,
+    timeout: Optional[float] = None,
+) -> tuple[Optional[int], str]:
+    """Runs ffmpeg (args[0] is the logical name) via Popen + polling
+    communicate(), so `cancel_event` can kill it mid-run -- `_run()`'s
+    plain subprocess.run() blocks until ffmpeg exits. Returns
+    (returncode, stderr); returncode None = no result, stderr then says
+    why ("Cancelled", a hit timeout, or ffmpeg missing).
+
+    communicate(timeout=...) -- not a bare proc.wait() poll loop -- is
+    the documented-safe way to poll a Popen with pipes: ffmpeg writes a
+    steady stream of progress info to stderr, and a poll loop that never
+    drains the pipes would deadlock once the OS pipe buffer fills.
+    Repeated calls after a TimeoutExpired keep draining.
+    """
+    resolved_args = [get_executable_path(args[0])] + args[1:]
+    try:
+        proc = popen_tool(
+            resolved_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+    except FileNotFoundError:
+        return None, "ffmpeg not found on PATH -- is it installed?"
+
+    waited = 0.0
+    stderr = ""
+    while True:
+        try:
+            _, stderr = proc.communicate(timeout=0.5)
+            break
+        except subprocess.TimeoutExpired:
+            waited += 0.5
+            if cancel_event is not None and cancel_event.is_set():
+                proc.kill()
+                proc.communicate()
+                return None, "Cancelled"
+            if timeout is not None and waited >= timeout:
+                proc.kill()
+                proc.communicate()
+                return None, "ffmpeg stopped responding and was stopped."
+    return proc.returncode, stderr or ""
+
+
+def _publish(temp: str, output_path: str) -> tuple[bool, str]:
+    """Moves the finished temp file to its final name without replacing
+    anything that appeared there meanwhile; (False, reason) otherwise."""
+    if not os.path.exists(temp):
+        return False, "ffmpeg finished but wrote no output file."
+    try:
+        rename_no_clobber(temp, output_path)
+    except OSError as exc:
+        return False, f"couldn't move the result to {os.path.basename(output_path)}: {exc}"
+    return True, ""
+
+
+# What a remux tries, in order: everything (audio/subtitle tracks,
+# attachments...); then without attachments and data streams, which MP4
+# can't hold; then only the streams MP4 can hold for sure (the last
+# resort -- drops subtitle tracks; verify_remux() reports what was lost,
+# and the caller must then keep the original).
+_REMUX_ATTEMPTS = [
+    ["-map", "0"],
+    ["-map", "0", "-map", "-0:t", "-map", "-0:d"],
+    ["-map", "0:V", "-map", "0:a?"],
+]
+
+
+def remux_to_mp4(
+    input_path: str,
+    output_path: str,
+    cancel_event: Optional[threading.Event] = None,
+) -> tuple[bool, str]:
     """Remux (repackage streams, no re-encode) into an MP4 container.
 
-    Fast/lossless since -c copy avoids touching codec data. Returns
-    (success, stderr_message) rather than raising -- ffmpeg's stderr is
-    the actual useful diagnostic (e.g. "codec not supported in MP4") and
-    the caller needs it verbatim to show the user, not a generic
-    exception message.
+    Fast/lossless since -c copy avoids touching codec data. Every stream
+    is mapped (`-map 0`; a bare -c copy keeps only one video and one
+    audio track), falling back to fewer streams when MP4 refuses some
+    (see _REMUX_ATTEMPTS) -- call verify_remux() afterwards to learn what
+    didn't make it. Writes to a temporary name and renames on success, so
+    a failed or cancelled remux leaves nothing behind.
+
+    Returns (success, stderr_message) rather than raising -- ffmpeg's
+    stderr is the actual useful diagnostic (e.g. "codec not supported in
+    MP4") and the caller needs it verbatim to show the user, not a
+    generic exception message. (False, "Cancelled") if `cancel_event`
+    fired.
     """
-    result = _run(
-        ["ffmpeg", "-y", "-i", input_path, "-c", "copy", output_path],
-        timeout=REMUX_TIMEOUT_SECONDS,
-    )
-    if result is None:
-        return False, "ffmpeg could not be run (not found, or it stopped responding)."
-    return result.returncode == 0, result.stderr
+    temp = partial_path(output_path)
+    message = ""
+    try:
+        for maps in _REMUX_ATTEMPTS:
+            _remove_quietly(temp)
+            code, stderr = _run_ffmpeg(
+                ["ffmpeg", "-y", "-i", input_path, *maps, "-c", "copy", temp],
+                cancel_event=cancel_event, timeout=REMUX_TIMEOUT_SECONDS,
+            )
+            if code is None:
+                return False, stderr
+            if code == 0:
+                return _publish(temp, output_path)
+            message = stderr
+        return False, message
+    finally:
+        _remove_quietly(temp)  # no-op after a successful rename
+
+
+def _stream_summary(path: str) -> Optional[tuple[dict[str, int], Optional[float]]]:
+    """({codec_type: count}, duration seconds or None) via ffprobe; None
+    when the file can't be probed."""
+    result = _run([
+        "ffprobe", "-v", "error", "-show_entries", "stream=codec_type:format=duration",
+        "-of", "json", path,
+    ])
+    if result is None or result.returncode != 0:
+        return None
+    try:
+        data = json.loads(result.stdout)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    counts: dict[str, int] = {}
+    for stream in data.get("streams") or []:
+        kind = stream.get("codec_type") if isinstance(stream, dict) else None
+        if kind:
+            counts[kind] = counts.get(kind, 0) + 1
+    try:
+        duration = float((data.get("format") or {}).get("duration"))
+    except (ValueError, TypeError):
+        duration = None
+    return counts, duration
+
+
+_VERIFIED_KINDS = (("video", "video track"), ("audio", "audio track"),
+                   ("subtitle", "subtitle track"), ("attachment", "attachment"))
+
+
+def verify_remux(source: str, output: str) -> str:
+    """Checks `output` (a remux of `source`) kept every video/audio/
+    subtitle track and attachment and isn't shorter. Returns "" when
+    it did, otherwise what went missing -- the caller must not offer to
+    delete the original then."""
+    before, after = _stream_summary(source), _stream_summary(output)
+    if before is None or after is None:
+        return "couldn't compare the result with the original (ffprobe unavailable or failed)"
+    problems = []
+    for kind, label in _VERIFIED_KINDS:
+        lost = before[0].get(kind, 0) - after[0].get(kind, 0)
+        if lost > 0:
+            problems.append(f"{lost} {label}(s) missing")
+    if before[1]:
+        if after[1] is None:
+            problems.append("no duration")
+        elif after[1] < before[1] - max(2.0, before[1] * 0.01):
+            problems.append(f"shorter ({after[1]:.0f}s vs {before[1]:.0f}s)")
+    return ", ".join(problems)
 
 
 def transcode_to_mp4(
@@ -150,20 +311,19 @@ def transcode_to_mp4(
     otherwise, so ffmpeg picks its own default rather than being told
     "0 threads" or some other placeholder value).
 
-    Unlike remux_to_mp4 (an instant stream copy, safe to call straight
-    off the GUI thread), a real encode takes real time -- this is meant
-    to be driven from a background thread, with `cancel_event` set from
-    a Cancel button so a multi-minute encode can actually be killed
-    instead of just abandoned to keep running invisibly. Uses Popen +
-    polling communicate() rather than this module's usual `_run()`
-    helper for exactly that reason -- `_run()`'s plain subprocess.run()
-    blocks uninterruptibly until ffmpeg exits on its own.
+    A real encode takes real time -- this is meant to be driven from a
+    background thread, with `cancel_event` set from a Cancel button so a
+    multi-minute encode can actually be killed instead of just abandoned
+    to keep running invisibly (see _run_ffmpeg). Like remux_to_mp4 it
+    writes to a temporary name and renames on success, so a failed or
+    cancelled encode leaves no partial file behind.
 
     Returns (True, stderr) on success, (False, stderr) on failure, and
     (False, "Cancelled") if `cancel_event` fired mid-encode -- the
     caller's batch summary can treat a cancellation as neither a normal
     success nor a real per-file failure.
     """
+    temp = partial_path(output_path)
     args = [
         "ffmpeg", "-y", "-i", input_path,
         "-c:v", "libx264", "-crf", str(crf),
@@ -171,33 +331,16 @@ def transcode_to_mp4(
     ]
     if threads:
         args += ["-threads", str(threads)]
-    args.append(output_path)
+    args.append(temp)
 
-    resolved_args = [get_executable_path(args[0])] + args[1:]
     try:
-        proc = popen_tool(
-            resolved_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        )
-    except FileNotFoundError:
-        return False, "ffmpeg not found on PATH -- is it installed?"
-
-    # communicate(timeout=...) -- not a bare proc.wait() poll loop -- is
-    # the documented-safe way to poll a Popen with pipes: ffmpeg writes
-    # a steady stream of progress info to stderr, and a poll loop that
-    # never drains the pipes would deadlock once the OS pipe buffer
-    # fills, well before any real encode finishes. Repeated calls after
-    # a TimeoutExpired keep draining rather than losing output.
-    stderr = ""
-    while True:
-        try:
-            _, stderr = proc.communicate(timeout=0.5)
-            break
-        except subprocess.TimeoutExpired:
-            if cancel_event is not None and cancel_event.is_set():
-                proc.kill()
-                proc.communicate()
-                return False, "Cancelled"
-    return proc.returncode == 0, stderr or ""
+        code, stderr = _run_ffmpeg(args, cancel_event=cancel_event)
+        if code is None or code != 0:
+            return False, stderr
+        ok, problem = _publish(temp, output_path)
+        return ok, stderr if ok else problem
+    finally:
+        _remove_quietly(temp)  # no-op after a successful rename
 
 
 def probe_technical_info(path: str) -> dict:
