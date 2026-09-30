@@ -2,8 +2,8 @@
 TMDB (The Movie Database) API client.
 
 Reads the API key from the TMDB_API_KEY env var first (useful for
-testing/CI without touching disk), falling back to settings.ini via
-core/config.py. No key baked in, none requested from the user in chat.
+testing/CI without touching disk), then the secret store
+(core/api_keys.py). No key baked in, none requested from the user in chat.
 
 NOTE: not yet runnable/testable in this sandbox -- no network access.
 Written against TMDB's documented v3 API
@@ -17,8 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from core.config import get_setting
-import os
+from core import api_keys
 from redactor_common.core.lookup_client import build_request, fetch_bytes, fetch_json, make_default_fetch
 
 BASE_URL = "https://api.themoviedb.org/3"
@@ -90,19 +89,15 @@ class EpisodeInfo:
 
 
 def get_api_key() -> Optional[str]:
-    key = os.environ.get("TMDB_API_KEY")
-    if key:
-        return key
-    key = get_setting("tmdb", "api_key")
-    return key or None
+    return api_keys.get_key("tmdb")
 
 
 def _require_api_key() -> str:
     key = get_api_key()
     if not key:
         raise TMDBError(
-            "No TMDB API key configured. Set the TMDB_API_KEY environment "
-            "variable, or add one under [tmdb] api_key in settings.ini."
+            "No TMDB API key configured. Add one under Settings > "
+            "API Keys... (or set the TMDB_API_KEY environment variable)."
         )
     return key
 

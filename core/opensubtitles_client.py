@@ -24,10 +24,9 @@ needs a real functional pass once a key + network access are available.
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
-import os
 import re
 
-from core.config import get_setting
+from core import api_keys
 from core.opensubtitles_hash import compute_moviehash
 from core.version import APP_VERSION
 from redactor_common.core.lookup_client import build_request, fetch_bytes, fetch_json, make_default_fetch
@@ -67,19 +66,15 @@ def clean_language_code(language: object) -> str:
 
 
 def get_api_key() -> Optional[str]:
-    key = os.environ.get("OPENSUBTITLES_API_KEY")
-    if key:
-        return key
-    key = get_setting("opensubtitles", "api_key")
-    return key or None
+    return api_keys.get_key("opensubtitles")
 
 
 def _require_api_key() -> str:
     key = get_api_key()
     if not key:
         raise OpenSubtitlesError(
-            "No OpenSubtitles API key configured. Set the OPENSUBTITLES_API_KEY "
-            "environment variable, or add one under [opensubtitles] api_key in settings.ini."
+            "No OpenSubtitles API key configured. Add one under Settings > "
+            "API Keys... (or set the OPENSUBTITLES_API_KEY environment variable)."
         )
     return key
 

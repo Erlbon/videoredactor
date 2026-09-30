@@ -517,7 +517,7 @@ class MainWindow(QMainWindow):
             ],
             "Settings": [
                 MenuAction("locate_tools", "&Locate External Tools...", self._on_locate_tools),
-                MenuAction("add_api_keys", "Add External &APIs...", self._on_add_external_apis),
+                MenuAction("add_api_keys", "API &Keys...", self._on_add_external_apis),
                 Separator(),
                 MenuAction("add_remove_columns", "Add/Remove &Columns...", self._on_open_column_visibility),
                 MenuAction("add_remove_languages", "Add/Remove &Languages...", self._on_open_languages),

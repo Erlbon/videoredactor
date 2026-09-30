@@ -7,7 +7,7 @@ Redactor apps.
 
 import sys
 
-from core import crash_log
+from core import api_keys, crash_log
 from core.app_paths import asset_path
 from core.version import APP_NAME
 from redactor_common.gui.app_bootstrap import run_app
@@ -15,6 +15,9 @@ from redactor_common.gui.app_bootstrap import run_app
 
 def main() -> int:
     from gui.main_window import MainWindow
+
+    # API keys: settings.ini -> secret store, once (no-op when already moved).
+    api_keys.migrate_legacy_keys()
 
     return run_app(
         app_name=APP_NAME,

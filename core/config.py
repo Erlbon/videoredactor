@@ -81,3 +81,11 @@ def set_setting(section: str, key: str, value: str) -> None:
         parser.add_section(section)
     parser.set(section, key, value)
     save_config(parser)
+
+
+def remove_setting(section: str, key: str) -> None:
+    parser = load_config()
+    if parser.has_section(section) and parser.remove_option(section, key):
+        if not parser.options(section):
+            parser.remove_section(section)
+        save_config(parser)

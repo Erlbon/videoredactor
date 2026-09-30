@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-30#09 — API keys move to the system credential store
+
+- **TMDB, TheTVDB and OpenSubtitles keys are no longer kept in settings.ini.** They are saved in Windows Credential Manager (macOS Keychain / Linux Secret Service elsewhere) through redactor_common's shared secret store. On first launch, any key already in settings.ini is moved over and removed from the file, but only after it has been read back from the store; if no credential store is usable the old value is left alone and keeps working. The environment variables (`TMDB_API_KEY` etc.) still take priority.
+- **Settings > API Keys...** (was "Add External APIs...") shows each key masked, never the stored value; leave a field empty to keep the key, or use Remove. Each row says where the key comes from. If the computer has no credential store, you are asked whether to save the keys in a plain UNENCRYPTED file instead; only a Yes is remembered.
+- The "no API key configured" messages now point to Settings > API Keys... instead of editing settings.ini.
+- Uses redactor_common 2026-09-30-07; `keyring` added to requirements. Tested against an in-memory fake store only, not the real Credential Manager.
+
 ## 2026-09-30#08 — Find Duplicates
 
 - **Operations > Find Duplicates...** groups loaded files that are probably the same video, for review. Files are first grouped by length (within 2 seconds), then only those with a same-length neighbour get one frame hashed (a 64-bit perceptual hash of the frame at 10% of the video -- the first frame is often black or a logo -- falling back to the first frame); two files match when at most 6 of the 64 bits differ (you're asked for the number, and it's remembered). A re-encode, another bitrate or resolution still matches.

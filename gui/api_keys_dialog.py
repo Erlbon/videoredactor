@@ -1,27 +1,30 @@
 """
-ApiKeysDialog: "Add External APIs..." -- lets the user enter/edit the
-TMDB, TheTVDB, and OpenSubtitles API keys directly in the app, rather
-than needing to set environment variables or hand-edit settings.ini.
+ApiKeysDialog: "API Keys..." -- lets the user enter/edit the TMDB,
+TheTVDB, and OpenSubtitles API keys directly in the app, rather than
+needing to set environment variables.
 
-core.tmdb_client.get_api_key(), core.tvdb_client.get_api_key(), and
-core.opensubtitles_client.get_api_key() all check their respective
-environment variable FIRST, falling back to settings.ini's stored
-value only if no env var is set -- surfaced explicitly in this dialog
-when applicable, so a key entered here that doesn't seem to take
-effect isn't a silent mystery.
+The keys live in the OS credential store (redactor_common's secret
+store, see core/api_keys.py), never in settings.ini. Each row is a
+redactor_common SecretField: a masked edit that never shows the stored
+value (empty = keep it), a Remove button, and a label naming where the
+key comes from -- including "taken from an environment variable", which
+takes priority over anything entered here.
 
-NOTE: not runnable in this sandbox -- no PyQt6. Syntax-checked and
-reviewed only.
+With no usable credential store (no `keyring`, headless Linux) saving
+raises SecretStoreUnavailable; the user is asked whether to use an
+UNENCRYPTED file instead, and only a yes is remembered.
 """
 
 from __future__ import annotations
-import os
 
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QFormLayout, QHBoxLayout, QLineEdit, QLabel, QPushButton,
+    QDialog, QVBoxLayout, QFormLayout, QHBoxLayout, QLabel, QMessageBox, QPushButton,
 )
 
-from core.config import get_setting, set_setting
+from core import api_keys
+from core.config import remove_setting
+from redactor_common.core import secret_store
+from redactor_common.gui.secret_field import SecretField
 
 
 class ApiKeysDialog(QDialog):
@@ -33,34 +36,24 @@ class ApiKeysDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Add External APIs")
-        self.resize(440, 280)
+        self.setWindowTitle("API Keys")
+        self.resize(480, 320)
 
         layout = QVBoxLayout(self)
         intro = QLabel(
             "Enter your own API keys for TMDB, TheTVDB, and OpenSubtitles "
-            "import. All three are free to obtain from their respective websites."
+            "import. All three are free to obtain from their respective websites. "
+            "Keys are kept in your system's credential store, not in a settings file."
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)
 
         form = QFormLayout()
-
-        self.tmdb_edit = QLineEdit(get_setting("tmdb", "api_key", ""))
-        form.addRow("TMDB API Key:", self.tmdb_edit)
-        if os.environ.get("TMDB_API_KEY"):
-            form.addRow("", self._env_var_note("TMDB_API_KEY"))
-
-        self.tvdb_edit = QLineEdit(get_setting("tvdb", "api_key", ""))
-        form.addRow("TheTVDB API Key:", self.tvdb_edit)
-        if os.environ.get("TVDB_API_KEY"):
-            form.addRow("", self._env_var_note("TVDB_API_KEY"))
-
-        self.opensubtitles_edit = QLineEdit(get_setting("opensubtitles", "api_key", ""))
-        form.addRow("OpenSubtitles API Key:", self.opensubtitles_edit)
-        if os.environ.get("OPENSUBTITLES_API_KEY"):
-            form.addRow("", self._env_var_note("OPENSUBTITLES_API_KEY"))
-
+        self.fields: dict[str, SecretField] = {}
+        for key_id, (name, env_var, _, label) in api_keys.KEYS.items():
+            field = SecretField(api_keys.APP, name, env_var=env_var)
+            self.fields[key_id] = field
+            form.addRow(f"{label}:", field)
         layout.addLayout(form)
 
         button_row = QHBoxLayout()
@@ -73,19 +66,32 @@ class ApiKeysDialog(QDialog):
         button_row.addWidget(self.cancel_button)
         layout.addLayout(button_row)
 
-    def _env_var_note(self, var_name: str) -> QLabel:
-        note = QLabel(f"{var_name} environment variable is currently set and takes priority over this value.")
-        note.setWordWrap(True)
-        note.setStyleSheet("color: #b08a2a;")
-        return note
+    def _ask_unencrypted_fallback(self) -> bool:
+        answer = QMessageBox.question(
+            self, "No secure storage available",
+            "This computer has no system credential store the app can use to keep "
+            "your API keys safely (Windows Credential Manager, macOS Keychain, or "
+            "the Linux Secret Service).\n\n"
+            "The keys can instead be saved in a plain, UNENCRYPTED file in your "
+            "user profile folder. Anyone who can read your files could read them.\n\n"
+            "Save the keys in an unencrypted file?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return answer == QMessageBox.StandardButton.Yes
 
     def _on_save(self) -> None:
-        # Saved as typed, even if blank -- an emptied field correctly
-        # represents "no key configured here" to each client's own
-        # get_api_key() (which treats an empty string the same as
-        # absent), so this doubles as the way to clear a previously-
-        # saved key.
-        set_setting("tmdb", "api_key", self.tmdb_edit.text().strip())
-        set_setting("tvdb", "api_key", self.tvdb_edit.text().strip())
-        set_setting("opensubtitles", "api_key", self.opensubtitles_edit.text().strip())
+        for key_id, field in self.fields.items():
+            try:
+                changed = field.apply()
+            except secret_store.SecretStoreUnavailable:
+                if not self._ask_unencrypted_fallback():
+                    # Stay open with what was typed; nothing is lost.
+                    return
+                api_keys.remember_unencrypted_fallback(True)
+                changed = field.apply()
+            if changed:
+                # A not-yet-migrated plaintext copy would otherwise come back
+                # after a removal, or go stale after a replacement.
+                remove_setting(api_keys.KEYS[key_id][2], "api_key")
         self.accept()

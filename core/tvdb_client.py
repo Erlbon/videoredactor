@@ -12,9 +12,9 @@ request comes back 401 (expired/invalid), rather than logging in on
 every single call.
 
 Reads the API key from the TVDB_API_KEY env var first (useful for
-testing/CI without touching disk), falling back to settings.ini via
-core/config.py -- same convention as tmdb_client.py and
-opensubtitles_client.py before it. No key baked in, none requested from
+testing/CI without touching disk), then the secret store
+(core/api_keys.py) -- same convention as tmdb_client.py and
+opensubtitles_client.py. No key baked in, none requested from
 the user in chat.
 
 NOTE: not yet runnable/testable in this sandbox -- no network access.
@@ -29,9 +29,8 @@ mysteriously.
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
-import os
 
-from core.config import get_setting
+from core import api_keys
 import urllib.error
 from redactor_common.core.lookup_client import build_request, fetch_bytes, fetch_json, make_default_fetch
 
@@ -119,19 +118,15 @@ def group_episodes_into_seasons(episodes: list[EpisodeInfo]) -> list[SeasonInfo]
 
 
 def get_api_key() -> Optional[str]:
-    key = os.environ.get("TVDB_API_KEY")
-    if key:
-        return key
-    key = get_setting("tvdb", "api_key")
-    return key or None
+    return api_keys.get_key("tvdb")
 
 
 def _require_api_key() -> str:
     key = get_api_key()
     if not key:
         raise TVDBError(
-            "No TheTVDB API key configured. Set the TVDB_API_KEY "
-            "environment variable, or add one under [tvdb] api_key in settings.ini."
+            "No TheTVDB API key configured. Add one under Settings > "
+            "API Keys... (or set the TVDB_API_KEY environment variable)."
         )
     return key
 
