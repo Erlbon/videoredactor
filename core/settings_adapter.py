@@ -23,6 +23,7 @@ REFRESH_COLUMNS / REFRESH_PANEL (gui/main_window.py reads them).
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -34,6 +35,7 @@ from core import config
 from core.controlled_vocab import DEFAULT_GENRE_OPTIONS, DEFAULT_LANGUAGE_OPTIONS
 from core.external_tools import KNOWN_EXECUTABLES
 from core.filename_pattern import MAX_PATTERN_HISTORY
+from core.imdb_import import BuildOptions
 from core.redact_steps import recipe_to_setting
 from core.table_settings import sanitize_hidden_fields
 from core.transcode_settings import DEFAULT_AUDIO_BITRATE, DEFAULT_CRF, DEFAULT_THREADS
@@ -182,6 +184,41 @@ def _recipe_codec():
     return read, coerce
 
 
+def _existing_file_codec():
+    """A path to a file on THIS computer: an imported path only counts when
+    the file is there; otherwise (or when empty) the current value is kept."""
+    def read(raw: str) -> str:
+        return raw
+
+    def coerce(value: Any) -> str | None:
+        if not isinstance(value, str) or not _text_ok(value):
+            raise ValueError("expected a single-line text value")
+        return value if value and os.path.isfile(value) else None
+
+    return read, coerce
+
+
+def _imdb_options_codec():
+    """The IMDb build options as a real JSON object (unset = defaults)."""
+    def read(raw: str) -> Any:
+        if not raw.strip():
+            return ""
+        try:
+            data = json.loads(raw)
+        except (ValueError, TypeError):
+            return ""
+        return data if isinstance(data, dict) else ""
+
+    def coerce(value: Any) -> str:
+        if value == "":
+            return ""
+        if not isinstance(value, dict):
+            raise ValueError("expected an options object")
+        return BuildOptions.from_json(json.dumps(value)).to_json()  # normalised; bad parts fall back
+
+    return read, coerce
+
+
 def _bitrate_ok(text: str) -> bool:
     return re.fullmatch(r"\d{1,4}[kKmM]?", text) is not None
 
@@ -192,7 +229,7 @@ class Key:
     ini_section: str
     ini_key: str
     read: Callable[[str], Any]
-    coerce: Callable[[Any], str]
+    coerce: Callable[[Any], "str | None"]
 
 
 def _key(name: str, ini_section: str, ini_key: str, codec) -> Key:
@@ -233,7 +270,17 @@ SECTIONS: dict[str, tuple[str, bool, list[Key]]] = {
         _key("threads", "transcode", "threads", _int_codec(DEFAULT_THREADS, 0, 256)),
         _key("duplicate_threshold", "duplicates", "threshold", _int_codec(HAMMING_THRESHOLD, 0, 32)),
     ]),
+    "imdb_options": ("IMDb database build options", True, [
+        _key("options", "imdb", "options", _imdb_options_codec()),
+    ]),
     "tools": ("External tool paths", False, _TOOL_KEYS),
+    "imdb": ("IMDb database and dataset file paths", False, [
+        _key("database", "imdb", "database", _existing_file_codec()),
+        _key("basics_file", "imdb", "basics_file", _existing_file_codec()),
+        _key("ratings_file", "imdb", "ratings_file", _existing_file_codec()),
+        _key("episodes_file", "imdb", "episodes_file", _existing_file_codec()),
+        _key("akas_file", "imdb", "akas_file", _existing_file_codec()),
+    ]),
     "folders": ("Last-used folders and library root", False, [
         _key("last_folder", "general", "last_folder", _str_codec()),
         _key("last_files_folder", "general", "last_files_folder", _str_codec()),
@@ -274,6 +321,8 @@ class VideoSettingsAdapter(sb.SettingsAdapter):
             except ValueError as exc:
                 rejected.append(f"{name} ({exc})")
                 continue
+            if text is None:
+                continue  # not applicable here (e.g. a file that isn't on this computer): keep the current value
             if text == "":
                 if parser.has_section(spec.ini_section):
                     parser.remove_option(spec.ini_section, spec.ini_key)

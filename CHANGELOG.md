@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-10-01#01 — Build an offline IMDb database (Tools > IMDb Database)
+
+- **Tools > IMDb Database… builds a compact local database from IMDb's free datasets**, for offline, instant lookups (the lookup itself comes in the next step). You download the files yourself from datasets.imdbws.com and point the dialog at them: `title.basics.tsv.gz` (required), `title.ratings.tsv.gz`, `title.episode.tsv.gz` and `title.akas.tsv.gz` (optional). The build runs behind a progress dialog with a working Cancel, writes to a temporary file and replaces an existing database only when the new one is complete.
+- **Licence: IMDb's datasets are for personal, non-commercial use only and must not be redistributed.** The dialog says so in a boxed notice at the top (with a link to IMDb's conditions of use) and repeats it before a build; the app never downloads or bundles the datasets, and the database it builds is your own private copy.
+- **Options:** title types (movies, TV movies, series, miniseries, episodes, specials and direct-to-video on; shorts, TV shorts and video games off), skip adult titles (on), **minimum votes for films and series (default 5; 0 keeps everything but makes the file much bigger)**, include episodes, include alternative titles for the regions Norway, Germany, France, Italy, United States, United Kingdom and "worldwide" (more can be ticked) plus original-language titles. Episodes never need votes, but they are kept only for series that are kept.
+- **What is stored:** title, original title, year(s), runtime, genres, rating and votes per film/series; per episode its series, season and episode number, title, year, runtime and rating; alternative titles; and a prebuilt full-text index (punctuation, accents and "&" folded the same way on both sides). IMDb has no plot, poster or cast data; those still come from TMDB. Memory stays flat (the ratings, episode links and title names are kept in a scratch file on disk while building, deleted afterwards).
+- A file that is not the expected dataset (a renamed or missing column in its header) is rejected with a clear message instead of producing an empty database; extra new columns are tolerated.
+- File > Export Settings / Import Settings: the database and dataset file paths are in the unticked "this computer" group (an imported path only counts if the file exists here); the build options are in the ticked portable group.
+- Adopts redactor_common 2026-10-01-03 (header-aware TSV reader with a `\N` null marker).
+
 ## 2026-09-30#19 — Adopt redactor_common 2026-09-30-15
 
 - **Adopt redactor_common 2026-09-30-15: Redact saves retry briefly when Windows antivirus/indexer briefly locks a file.** Also picks up the engine pass 2 changes from tag -14.

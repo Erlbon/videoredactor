@@ -58,7 +58,7 @@ def test_other_menus_hold_what_the_spec_says(window):
         "Remux to MP4…", "Convert to MP4 (H.264)…", "Check Files…", "Find Duplicates…",
     ]
     assert _labels(menus["Tools"]) == [
-        "API Keys…", "External Tools…", "Columns…", "Genres…", "Languages…",
+        "API Keys…", "External Tools…", "IMDb Database…", "Columns…", "Genres…", "Languages…",
     ]
     assert _labels(menus["Help"]) == ["Changelog…", "Credits…", "About " + mw.APP_NAME]
 
@@ -94,7 +94,7 @@ HANDLERS = {
     "change_case": "_on_case_conversion", "auto_number": "_on_auto_numbering", "remux": "_on_remux_selected",
     "convert_to_mp4": "_on_convert_to_mp4", "check_files": "_on_check_files",
     "find_duplicates": "_on_find_duplicates", "api_keys": "_on_add_external_apis",
-    "external_tools": "_on_locate_tools", "columns": "_on_open_column_visibility",
+    "external_tools": "_on_locate_tools", "imdb_settings": "_on_open_imdb_settings", "columns": "_on_open_column_visibility",
     "genres": "_on_open_genres", "languages": "_on_open_languages", "lookup_tvdb": "_on_import_tvdb",
     "lookup_subtitles": "_on_import_subtitles", "import_convert": "_on_import_and_convert",
     "number_episodes": "_on_number_episodes", "refresh_list": "_refresh_list",

@@ -512,6 +512,7 @@ class MainWindow(QMainWindow):
             tools=standard_tools_items(
                 api_keys=self._on_add_external_apis,
                 external_tools=self._on_locate_tools,
+                app_settings=[MenuAction("imdb_settings", "IMDb &Database…", self._on_open_imdb_settings)],
                 columns=self._on_open_column_visibility,
                 genres=self._on_open_genres,
                 languages=self._on_open_languages,
@@ -736,6 +737,13 @@ class MainWindow(QMainWindow):
         """
         dialog = ApiKeysDialog(parent=self)
         dialog.exec()
+
+    def _on_open_imdb_settings(self) -> None:
+        """Tools > IMDb Database...: where the offline IMDb database is, and
+        building it from the user's own IMDb dataset files."""
+        from gui.imdb_settings_dialog import ImdbSettingsDialog
+
+        ImdbSettingsDialog(self).exec()
 
     def _on_open_column_visibility(self) -> None:
         """Add/Remove Columns (Tools menu) -- redactor_common's shared

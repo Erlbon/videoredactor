@@ -23,6 +23,16 @@ into files one at a time.
 - **Subtitle fetching** via OpenSubtitles, hash-matched against the
   exact file first (guaranteed sync) with a title-search fallback that's
   clearly flagged as sync-not-guaranteed.
+- **Offline IMDb database** (Tools > IMDb Database…) — builds a small
+  local database from IMDb's free datasets, which you download
+  yourself (datasets.imdbws.com: `title.basics`, and optionally
+  `title.ratings`, `title.episode`, `title.akas`). It holds titles,
+  years, genres, runtimes, ratings, episode numbers and alternative
+  titles — no plot, poster or cast (those stay with TMDB). **IMDb's
+  datasets are for personal, non-commercial use only and must not be
+  redistributed**; the app never downloads or bundles them, and the
+  database it builds is your private copy. Terms:
+  https://www.imdb.com/conditions
 - **Remux to MP4** for MKV files (fast, lossless container swap, not a
   re-encode), with control over what happens to the original.
 - **Convert to MP4 (H.264)** for a real re-encode when a container swap
