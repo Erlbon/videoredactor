@@ -104,6 +104,8 @@ from gui.tvdb_search_dialog import TVDBSearchDialog
 from gui.tvdb_episode_picker_dialog import TVDBEpisodePickerDialog
 from gui.subtitle_search_dialog import SubtitleSearchDialog
 from gui.tool_settings_dialog import ToolSettingsDialog
+from gui.video_preferences import VideoPreferencesDialog
+from redactor_common.gui.preferences_dialog import preferences_menu_action
 from gui.vocabulary_editor_dialog import VocabularyEditorDialog
 from gui.api_keys_dialog import ApiKeysDialog
 from core import imdb_settings
@@ -311,6 +313,12 @@ def _tidy(items: MenuItems) -> MenuItems:
     return out
 
 
+def _with_preferences(slot, items: MenuItems) -> MenuItems:
+    """Preferences (Ctrl+, with the platform Preferences role) heads the Tools
+    menu, in a group of its own."""
+    return [preferences_menu_action(slot), Separator(), *items]
+
+
 def _remember_zero_pad(enabled: bool, width: int) -> None:
     set_setting("rename", "zero_pad", "1" if enabled else "0")
     set_setting("rename", "zero_pad_width", str(width))
@@ -513,14 +521,14 @@ class MainWindow(QMainWindow):
                     MenuAction("find_duplicates", labels.FIND_DUPLICATES, self._on_find_duplicates),
                 ]),
             ],
-            tools=standard_tools_items(
+            tools=_with_preferences(self._on_open_preferences, standard_tools_items(
                 api_keys=self._on_add_external_apis,
                 external_tools=self._on_locate_tools,
                 app_settings=[MenuAction("imdb_settings", "IMDb &Database…", self._on_open_imdb_settings)],
                 columns=self._on_open_column_visibility,
                 genres=self._on_open_genres,
                 languages=self._on_open_languages,
-            ),
+            )),
             help=standard_help_items(
                 APP_NAME, self._on_show_changelog, self._on_show_credits, self._on_show_about,
             ),
@@ -714,6 +722,15 @@ class MainWindow(QMainWindow):
             self._check_external_tools_on_startup()
         else:
             self.status_bar.showMessage("All required tools are detected.")
+
+    def _on_open_preferences(self) -> None:
+        """Tools > Preferences: filenames, transcode, duplicates and tool
+        paths. Everything is read fresh when the dialog that uses it opens,
+        so nothing needs refreshing afterwards; the tool paths are re-checked
+        because that page saves as you go."""
+        VideoPreferencesDialog(self).exec()
+        if missing_tools():
+            self.status_bar.showMessage("Some required tools are still missing.")
 
     def _on_locate_tools(self) -> None:
         """Open the tool-location settings dialog (Tools menu, or

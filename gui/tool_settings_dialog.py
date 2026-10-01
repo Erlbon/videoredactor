@@ -2,10 +2,9 @@
 ToolSettingsDialog: lets the user point directly at ffmpeg/ffprobe/
 mkvpropedit/mkvmerge executables when PATH auto-detection fails --
 e.g. a portable/no-admin install where PATH can't be modified at all.
-Also holds the persisted defaults for the "Convert Selected to MP4
-(H.264)" transcode feature (core/transcode_settings.py) -- grouped here
-rather than in a dialog of its own since both are "set once, rarely
-revisited" ffmpeg-adjacent settings.
+The rows live in ToolPathsWidget, which the Preferences dialog also uses
+as its Tools / Paths page. (The transcode defaults that used to sit here are
+on the Preferences > Transcode page now.)
 
 Each executable row shows the currently configured override (blank =
 auto-detect via PATH), a live availability indicator, a Browse button,
@@ -20,14 +19,13 @@ from __future__ import annotations
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit,
-    QPushButton, QLabel, QFileDialog, QWidget, QSpinBox, QGroupBox,
+    QPushButton, QLabel, QFileDialog, QWidget,
 )
 
 from core.external_tools import (
     get_tool_override, set_tool_override, is_executable_available,
     KNOWN_EXECUTABLES,
 )
-from core.transcode_settings import get_transcode_settings, set_transcode_settings, TranscodeSettings
 
 # Display order and labels for the four executables this app shells
 # out to. Order matches how they're introduced elsewhere (ffmpeg tools
@@ -51,22 +49,18 @@ assert {exe for exe, _ in EXECUTABLE_ROWS} == KNOWN_EXECUTABLES, (
 )
 
 
-class ToolSettingsDialog(QDialog):
-    """Usage: dialog = ToolSettingsDialog(parent=self); dialog.exec()
-    Changes are saved immediately per-row (Browse/Clear write straight
-    to settings.ini) rather than batched behind an OK button -- matches
-    this app's existing pattern of poster/subtitle sidecar saves being
-    immediate, non-staged actions, and means there's no "did my browse
-    action actually get saved" ambiguity if the dialog is closed via
-    the window X button instead of a Done button.
+class ToolPathsWidget(QWidget):
+    """The executable-location rows (ffmpeg, MKVToolNix) as a plain widget.
+
+    Changes are saved immediately per row (Browse/Clear/editing finished write
+    straight to settings.ini) rather than batched behind an OK button, so it
+    behaves the same inside ToolSettingsDialog and on the Preferences page.
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Locate External Tools")
-        self.resize(550, 420)
-
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(QLabel(
             "If ffmpeg or MKVToolNix aren't on your system PATH, point "
             "directly at their executables here. Leave blank to "
@@ -106,44 +100,6 @@ class ToolSettingsDialog(QDialog):
 
             form_layout.addRow(f"{display_name}:", row_widget)
         layout.addWidget(form_container)
-
-        transcode_group = QGroupBox("Convert to MP4 (H.264) Defaults")
-        transcode_form = QFormLayout(transcode_group)
-
-        current = get_transcode_settings()
-
-        self.crf_spin = QSpinBox()
-        self.crf_spin.setRange(0, 51)  # libx264's full valid CRF range
-        self.crf_spin.setValue(current.crf)
-        self.crf_spin.setToolTip(
-            "Lower = higher quality, larger file. 18-28 is the usual "
-            "sane range; libx264's own default is 23."
-        )
-        self.crf_spin.valueChanged.connect(self._on_transcode_setting_changed)
-        transcode_form.addRow("Video quality (CRF):", self.crf_spin)
-
-        self.audio_bitrate_edit = QLineEdit(current.audio_bitrate)
-        self.audio_bitrate_edit.setPlaceholderText("128k")
-        self.audio_bitrate_edit.setToolTip('ffmpeg -b:a value, e.g. "128k" or "192k".')
-        self.audio_bitrate_edit.editingFinished.connect(self._on_transcode_setting_changed)
-        transcode_form.addRow("Audio bitrate:", self.audio_bitrate_edit)
-
-        self.threads_spin = QSpinBox()
-        self.threads_spin.setRange(0, 128)
-        self.threads_spin.setSpecialValueText("Auto (let ffmpeg decide)")
-        self.threads_spin.setValue(current.threads)
-        self.threads_spin.valueChanged.connect(self._on_transcode_setting_changed)
-        transcode_form.addRow("Threads:", self.threads_spin)
-
-        layout.addWidget(transcode_group)
-
-        button_row = QHBoxLayout()
-        button_row.addStretch()
-        self.done_button = QPushButton("Done")
-        self.done_button.clicked.connect(self.accept)
-        button_row.addWidget(self.done_button)
-        layout.addLayout(button_row)
-
         self._refresh_all_status()
 
     def _on_path_edited(self, exe_name: str) -> None:
@@ -172,7 +128,7 @@ class ToolSettingsDialog(QDialog):
     def _refresh_status(self, exe_name: str) -> None:
         available = is_executable_available(exe_name)
         label = self.status_labels[exe_name]
-        label.setText("\u2713 found" if available else "\u2717 missing")
+        label.setText("✓ found" if available else "✗ missing")
         label.setStyleSheet(
             "color: #2a8f2a;" if available else "color: #b02a2a;"
         )
@@ -181,14 +137,29 @@ class ToolSettingsDialog(QDialog):
         for exe_name, _ in EXECUTABLE_ROWS:
             self._refresh_status(exe_name)
 
-    def _on_transcode_setting_changed(self, *_args) -> None:
-        """Saved immediately per-field, same as the executable overrides
-        above -- no separate Done-triggered save step. Audio bitrate is
-        stored as-typed with no validation (an empty/garbage value falls
-        back to the module default the next time it's read, rather than
-        being rejected here)."""
-        set_transcode_settings(TranscodeSettings(
-            crf=self.crf_spin.value(),
-            audio_bitrate=self.audio_bitrate_edit.text().strip(),
-            threads=self.threads_spin.value(),
-        ))
+
+class ToolSettingsDialog(QDialog):
+    """Usage: dialog = ToolSettingsDialog(parent=self); dialog.exec()
+    Tools > External Tools. Changes are saved immediately per row; Done just
+    closes."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Locate External Tools")
+        self.resize(550, 320)
+
+        layout = QVBoxLayout(self)
+        self.paths = ToolPathsWidget()
+        layout.addWidget(self.paths)
+        # Kept as attributes of the dialog for the callers/tests that read them.
+        self.path_edits = self.paths.path_edits
+        self.status_labels = self.paths.status_labels
+
+        button_row = QHBoxLayout()
+        button_row.addStretch()
+        self.done_button = QPushButton("Done")
+        self.done_button.clicked.connect(self.accept)
+        button_row.addWidget(self.done_button)
+        layout.addLayout(button_row)
+
+

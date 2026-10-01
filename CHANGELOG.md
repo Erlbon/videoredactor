@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-01#10 — Tools > Preferences (Ctrl+,)
+
+- **New: Tools > Preferences…** (Ctrl+,), the same dialog the other Redactor apps have (redactor_common 2026-10-01-06), with OK / Cancel / Apply and "Reset to Defaults" per page. Pages: **Filenames** (ASCII-safe filenames, zero-pad numbers and width, Auto-Numbering padding), **Transcode** (video quality CRF 0-51, audio bitrate, threads 0-256), **Duplicates** (how different two frame fingerprints may be, 0-32) and **Tools / Paths** (where ffmpeg and MKVToolNix are, the IMDb database and its dataset files; these save as you edit, as before).
+- An audio bitrate that is not a number with an optional k or m (for example "128k") is refused with a message, and nothing is saved until it is fixed.
+- Nothing moved in storage: the same settings in the same file, so Export/Import Settings carries them as before. The dialogs that had remembered these choices (Rename by Pattern, Auto-Numbering, Find Duplicates) simply start from what you set here.
+- **Tools > External Tools** now holds only the tool locations; the Convert to MP4 defaults that used to sit at the bottom of it are on the Preferences > Transcode page. API keys stay in Tools > API Keys (they live in the system credential store, not the settings file).
+- There is no default-language setting in this app (a video's language comes from its own tracks), so the Language page the other apps have is not shown.
+
 ## 2026-10-01#09 — Find Duplicates uses the shared review dialog; "Not duplicates" is remembered
 
 - **Media > Find Duplicates now opens the same review dialog as the other Redactor apps** (redactor_common 2026-10-01-05). What you see differs a little: each group row says how sure the match is and why, e.g. "Strong match: matching frame hash, lengths within 2 s (2 files)", "Possible match: similar frame hash (up to 4 of 64 bits apart), lengths within 2 s" or "Identical: same file contents", strongest first, instead of "Group 1 (2 files)". A short note says duplicates are not always mistakes and that nothing is selected or changed until you pick an action.

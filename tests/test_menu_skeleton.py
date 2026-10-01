@@ -59,7 +59,7 @@ def test_other_menus_hold_what_the_spec_says(window):
         "Remux to MP4…", "Convert to MP4 (H.264)…", "Check Files…", "Find Duplicates…",
     ]
     assert _labels(menus["Tools"]) == [
-        "API Keys…", "External Tools…", "IMDb Database…", "Columns…", "Genres…", "Languages…",
+        "Preferences…", "API Keys…", "External Tools…", "IMDb Database…", "Columns…", "Genres…", "Languages…",
     ]
     assert _labels(menus["Help"]) == ["Changelog…", "Credits…", "About " + mw.APP_NAME]
 
