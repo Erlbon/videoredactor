@@ -50,7 +50,8 @@ def test_old_wording_is_gone_everywhere():
         if path.suffix not in {".py", ".md", ".txt", ".spec", ".bat", ".ini"}:
             continue
         # The changelog may quote the old wording when describing the change.
-        if path.name in ("test_tmdb_attribution.py", "CHANGELOG.md"):
+        # release_notes.md is generated from the changelog by the release workflow.
+        if path.name in ("test_tmdb_attribution.py", "CHANGELOG.md", "release_notes.md"):
             continue
         assert not old.search(path.read_text(encoding="utf-8", errors="ignore")), path
 

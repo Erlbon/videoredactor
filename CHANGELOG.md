@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-01#11 — Release fix
+
+- No change to the app. The release workflow's test run scans the generated release notes, which quote the old TMDB sentence from the changelog; that test now skips the generated notes file. (Release 2026-10-01#10 was never published because of this.)
+
 ## 2026-10-01#10 — Tools > Preferences (Ctrl+,)
 
 - **New: Tools > Preferences…** (Ctrl+,), the same dialog the other Redactor apps have (redactor_common 2026-10-01-06), with OK / Cancel / Apply and "Reset to Defaults" per page. Pages: **Filenames** (ASCII-safe filenames, zero-pad numbers and width, Auto-Numbering padding), **Transcode** (video quality CRF 0-51, audio bitrate, threads 0-256), **Duplicates** (how different two frame fingerprints may be, 0-32) and **Tools / Paths** (where ffmpeg and MKVToolNix are, the IMDb database and its dataset files; these save as you edit, as before).
