@@ -47,6 +47,7 @@ from core.imdb_import import (
     CONDITIONS_URL,
     DATASETS_URL,
     DOCS_URL,
+    ATTRIBUTION,
     LICENCE_NOTICE,
     REGION_CHOICES,
     TYPE_CHOICES,
@@ -82,7 +83,8 @@ INSTRUCTIONS = (
 
 
 def licence_html() -> str:
-    return (f"<b>Licence:</b> {LICENCE_NOTICE} See IMDb's <a href=\"{CONDITIONS_URL}\">conditions of use</a>.")
+    return (f"<b>Licence:</b> {LICENCE_NOTICE} See IMDb's <a href=\"{CONDITIONS_URL}\">conditions of use</a> "
+            f"and the <a href=\"{DOCS_URL}\">datasets page</a>.")
 
 
 class ImdbSettingsDialog(LocalDatabaseSettingsDialog):
@@ -110,6 +112,10 @@ class ImdbSettingsDialog(LocalDatabaseSettingsDialog):
         self.licence_label.setTextFormat(Qt.TextFormat.RichText)
         self.licence_label.setOpenExternalLinks(True)
         self.licence_label.setStyleSheet("QLabel { border: 2px solid #c0392b; border-radius: 4px; padding: 8px; }")
+
+        self.attribution_label = QLabel(ATTRIBUTION)
+        self.attribution_label.setWordWrap(True)
+        self.attribution_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
         box = QGroupBox("Build from IMDb datasets")
         layout = QVBoxLayout(box)
@@ -172,8 +178,9 @@ class ImdbSettingsDialog(LocalDatabaseSettingsDialog):
         self.status_label.setWordWrap(True)
         # Licence first, then the status line and the build box, above the Check File / Build row.
         self.layout().insertWidget(0, self.licence_label)
-        self.layout().insertWidget(3, box)
-        self.layout().insertWidget(3, self.status_label)
+        self.layout().insertWidget(1, self.attribution_label)
+        self.layout().insertWidget(4, box)
+        self.layout().insertWidget(4, self.status_label)
         self.path_edit.textChanged.connect(self._refresh_status)
         self._refresh_status()
 
@@ -298,7 +305,7 @@ class ImdbSettingsDialog(LocalDatabaseSettingsDialog):
             self, "Build Database",
             f"Build {os.path.basename(dest)} from the IMDb dataset file(s)?\n\nIt reads the whole files, which can take "
             f"tens of minutes, and needs a few GB of free disk space while it runs.\n\nKeeping: {options.describe()}."
-            f"{extra}{replacing}\n\nReminder: {LICENCE_NOTICE}",
+            f"{extra}{replacing}\n\nReminder: {LICENCE_NOTICE}\n\n{ATTRIBUTION}",
         )
         if answer != QMessageBox.StandardButton.Yes:
             return None

@@ -52,6 +52,7 @@ from redactor_common.core.local_db import (
     year_gap,
 )
 
+from core import imdb_import
 from core.imdb_import import ImdbDatabaseError, imdb_id, tconst_number
 from core.tmdb_client import EpisodeInfo, MovieCandidate, TVCandidate
 
@@ -60,6 +61,8 @@ KIND = "an IMDb lookup database built by this app (Tools > IMDb Database)"
 MOVIE_KINDS = ("movie", "tvMovie", "video", "tvSpecial", "short", "tvShort")
 SERIES_KINDS = ("tvSeries", "tvMiniSeries")
 POOL = 120  # rows pulled from the full-text index before ranking
+
+ATTRIBUTION = imdb_import.ATTRIBUTION  # IMDb's required acknowledgement, shown wherever its data is
 
 NO_PLOT_NOTE = ("IMDb's datasets hold no plot, poster or cast: the local database fills the title, year, genres, "
                 "and episode data only. Everything else stays with TMDB.")

@@ -1905,7 +1905,7 @@ class MainWindow(QMainWindow):
     def _import_imdb(self, files: list, skipped_load_errors: int, path: str) -> None:
         from redactor_common.core.local_db import normalize_words
 
-        from core import imdb_local
+        from core import imdb_import, imdb_local
         from core.imdb_import import ImdbDatabaseError
         from gui.imdb_episode_picker_dialog import ImdbEpisodePickerDialog
 
@@ -1916,7 +1916,7 @@ class MainWindow(QMainWindow):
             tv=lambda query, year=None: imdb_local.search_series(db, query, year),
             errors=(ImdbDatabaseError,),
             note="Searches your offline IMDb database. IMDb's datasets have no plot, poster or cast: only the "
-                 "title, year, genres and (for shows) episode data are filled in.",
+                 "title, year, genres and (for shows) episode data are filled in.\n\n" + imdb_import.ATTRIBUTION,
             switchable=True,
         )
         imported = episodes_set = skipped_no_match = 0

@@ -8,6 +8,12 @@ The Ʌideo Redactor is built on the work of a number of other projects.
   UI/logic package shared with its sibling tools (epub, mp3). See its
   own version line above for which build is vendored here.
 
+## Data
+
+- **IMDb** — the optional offline lookup database is built from IMDb's
+  free non-commercial datasets (personal use only; never bundled or
+  redistributed). Information courtesy of IMDb (https://www.imdb.com). Used with permission.
+
 ## Libraries
 
 - **[PyQt6](https://www.riverbankcomputing.com/software/pyqt/)** — the

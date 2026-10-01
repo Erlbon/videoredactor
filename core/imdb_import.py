@@ -87,10 +87,13 @@ DOCS_URL = "https://developer.imdb.com/non-commercial-datasets/"
 NULL = "\\N"  # backslash + N: how IMDb writes a missing value
 
 LICENCE_NOTICE = (
-    "IMDb datasets are for personal, non-commercial use only; do not redistribute them or a database "
-    "built from them. This app never downloads or bundles them: you download them yourself under "
-    "IMDb's terms."
+    "IMDb datasets may be used for personal, non-commercial purposes only. You may hold a local copy for "
+    "your own use. They must not be altered, republished, resold or repurposed to create a database for "
+    "others, and IMDb may withdraw permission at any time. This app never bundles or downloads the data: "
+    "you download it yourself, from IMDb's datasets only."
 )
+# IMDb requires this exact statement wherever its data is used.
+ATTRIBUTION = "Information courtesy of IMDb (https://www.imdb.com). Used with permission."
 
 BASICS_COLUMNS = ["tconst", "titleType", "primaryTitle", "originalTitle", "isAdult", "startYear", "endYear",
                   "runtimeMinutes", "genres"]

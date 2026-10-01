@@ -248,7 +248,7 @@ def test_options_json_round_trip_and_garbage():
 
 def test_licence_notice_text():
     assert "personal, non-commercial" in imdb_import.LICENCE_NOTICE
-    assert "redistribute" in imdb_import.LICENCE_NOTICE
+    assert "republished, resold or repurposed" in imdb_import.LICENCE_NOTICE
     assert imdb_import.CONDITIONS_URL.startswith("https://www.imdb.com")
 
 

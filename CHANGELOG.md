@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-01#03 — IMDb attribution and licence wording
+
+- **IMDb's required acknowledgement is shown wherever IMDb data is used:** "Information courtesy of IMDb (https://www.imdb.com). Used with permission." It is under the licence box in Tools > IMDb Database…, in the IMDb (Local Database)… lookup dialog, in the build confirmation, in About and in Credits.
+- **The licence box now follows IMDb's own words:** the datasets may be used for personal, non-commercial purposes only; you may hold a local copy for your own use; they must not be altered, republished, resold or repurposed to create a database for others; IMDb may withdraw permission at any time. It links to IMDb's conditions of use and the datasets page, and still says the app never bundles or downloads the data.
+
 ## 2026-10-01#02 — Look up films and episodes in the local IMDb database; Redact asks it first
 
 - **Metadata > Look Up > IMDb (Local Database)… (also in the right-click Look Up menu)** searches the database built under Tools > IMDb Database, offline and instantly, in the same dialogs as the TMDB lookup: pick the match (a Film / TV show switch is in the dialog; it starts from the filename), then for a show pick the season and episode, which is pre-selected from the filename. A film is found by its title, original title or any stored alternative title ("Il nome della rosa" finds The Name of the Rose), exact titles first, then the nearest year (a year off by one still ranks right after the exact year), then the most votes. If no database is set up it offers Tools > IMDb Database.

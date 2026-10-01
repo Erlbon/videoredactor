@@ -27,10 +27,12 @@ def test_licence_notice_is_prominent_and_complete():
     dialog = dlg.ImdbSettingsDialog()
     try:
         text = dialog.licence_label.text()
-        assert "personal, non-commercial use only" in text and "do not redistribute" in text
+        assert "personal, non-commercial purposes only" in text and "local copy for your own use" in text
+        assert "republished, resold or repurposed" in text and "withdraw permission at any time" in text
+        assert "https://developer.imdb.com/non-commercial-datasets/" in text
         assert "https://www.imdb.com/conditions" in text
         assert dialog.layout().indexOf(dialog.licence_label) == 0  # the very first thing in the dialog
-        assert "never downloads or bundles" in text
+        assert "never bundles or downloads" in text
     finally:
         dialog.close()
 
@@ -217,3 +219,36 @@ def test_the_importer_still_has_no_network_code():
     source = open(imdb_import.__file__, encoding="utf-8").read()
     for word in ("urllib", "requests", "http.client", "urlopen", "socket"):
         assert word not in source
+
+
+# --- IMDb's required attribution ----------------------------------------------------
+
+ATTRIBUTION = "Information courtesy of IMDb (https://www.imdb.com). Used with permission."
+
+
+def test_the_attribution_sentence_is_exact_and_shown_wherever_imdb_data_is(imdb_db=None):
+    from gui.tmdb_search_dialog import SearchSource, TMDBSearchDialog
+
+    assert imdb_import.ATTRIBUTION == ATTRIBUTION
+    settings = dlg.ImdbSettingsDialog()
+    try:
+        assert settings.attribution_label.text() == ATTRIBUTION
+        order = [settings.layout().itemAt(i).widget() for i in range(3)]
+        assert order[0] is settings.licence_label and order[1] is settings.attribution_label  # right under the box
+    finally:
+        settings.close()
+    import gui.main_window as mw_module
+    source = SearchSource("IMDb (Local Database)", lambda q, year=None: [], lambda q, year=None: [], (),
+                          note="IMDb has no plot.\n\n" + imdb_import.ATTRIBUTION)
+    lookup = TMDBSearchDialog("movie", "", source=source)
+    try:
+        from PyQt6.QtWidgets import QLabel
+        assert any(ATTRIBUTION in label.text() for label in lookup.findChildren(QLabel))
+    finally:
+        lookup.close()
+    text = open(os.path.join(os.path.dirname(mw_module.__file__), "..", "ABOUT.md"), encoding="utf-8").read()
+    assert ATTRIBUTION in " ".join(text.split())
+    credits = open(os.path.join(os.path.dirname(mw_module.__file__), "..", "CREDITS.md"), encoding="utf-8").read()
+    assert ATTRIBUTION in " ".join(credits.split())
+    source_text = open(mw_module.__file__, encoding="utf-8").read()
+    assert "imdb_import.ATTRIBUTION" in source_text  # the real lookup dialog's note carries it

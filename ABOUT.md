@@ -35,6 +35,8 @@ into files one at a time.
   redistributed**; the app never downloads or bundles them, and the
   database it builds is your private copy. Terms:
   https://www.imdb.com/conditions
+
+  Information courtesy of IMDb (https://www.imdb.com). Used with permission.
 - **Remux to MP4** for MKV files (fast, lossless container swap, not a
   re-encode), with control over what happens to the original.
 - **Convert to MP4 (H.264)** for a real re-encode when a container swap
