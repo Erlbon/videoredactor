@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-01#08 — The thumbnail cache is pruned and can no longer hold a broken thumbnail
+
+- **The preview thumbnail cache (the app's own `videoredactor_thumbnails` folder in the temp folder) is now bounded.** The first time a thumbnail is needed in a session, files older than 14 days are deleted, then the oldest ones until at most 5,000 files / 200 MB remain (with a 2-second time budget, in the background preview thread). Only files with the app's thumbnail names are touched, and never outside that folder.
+- **Thumbnails are written atomically:** ffmpeg writes to a temporary name and the result is moved into place only if it succeeded and is a real JPEG, so a failed or killed run no longer leaves a partial picture that is later shown as a valid preview. A zero-byte or garbled cached thumbnail is detected and regenerated; a failed regeneration keeps the previous good one.
+
 ## 2026-10-01#07 — Folder scans ignore the app's own leftover temp files
 
 - **Open Folder / Refresh no longer list leftovers of an interrupted repair, convert or Redact** (app killed mid-way): `<name>.repairing.<ext>`, `<name>.partial.<ext>`, the `<name>.redact-orig<ext>` / `.redact-orig2` backups and the hidden `.<name>.redact-<8 hex>.<ext>` scratch copies. They are skipped quietly, and the status bar says "Ignored N leftover temp file(s)" when any were.

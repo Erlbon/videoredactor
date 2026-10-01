@@ -26,6 +26,7 @@ from core.external_tools import is_tool_available, MKVTOOLNIX, FFMPEG
 from core.opensubtitles_client import clean_language_code
 from core.video_fingerprint import video_fingerprint
 from core.temp_names import is_app_temp_name
+from core.thumb_cache import CACHE_DIR_NAME, is_valid_thumbnail, prune_once_per_session, write_thumbnail_atomically
 
 SUPPORTED_EXTENSIONS = {".mp4", ".m4v", ".mkv"}
 
@@ -33,8 +34,9 @@ SUPPORTED_EXTENSIONS = {".mp4", ".m4v", ".mkv"}
 # folder load can involve many files -- same reasoning as not holding
 # every EPUB's full cover image in memory at once. Keyed by path+mtime
 # so a file edited/replaced on disk gets a fresh thumbnail rather than
-# serving a stale cached one.
-THUMBNAIL_CACHE_DIR = Path(tempfile.gettempdir()) / "videoredactor_thumbnails"
+# serving a stale cached one. The folder is the app's own (never the shared
+# temp root); core/thumb_cache.py prunes it (age/size/count) once per session.
+THUMBNAIL_CACHE_DIR = Path(tempfile.gettempdir()) / CACHE_DIR_NAME
 
 
 @dataclass
@@ -417,13 +419,20 @@ class VideoFile:
 
         cache_key = hashlib.sha1(f"{self.path}:{mtime}".encode("utf-8")).hexdigest()
         THUMBNAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        prune_once_per_session(THUMBNAIL_CACHE_DIR)
         out_path = THUMBNAIL_CACHE_DIR / f"{cache_key}.jpg"
 
         if out_path.exists() and not force_regenerate:
-            self._thumbnail_path = out_path
-            return out_path
+            if is_valid_thumbnail(out_path):
+                self._thumbnail_path = out_path
+                return out_path
+            # Zero-byte/garbled leftover: regenerate below.
 
-        ok = extract_thumbnail(str(self.path), str(out_path))
+        # Extracted into a temp name and moved into place only when valid,
+        # so a failed ffmpeg run never leaves a partial JPEG in the cache.
+        ok = write_thumbnail_atomically(
+            out_path, lambda tmp: extract_thumbnail(str(self.path), tmp)
+        )
         if not ok:
             return None
         self._thumbnail_path = out_path
