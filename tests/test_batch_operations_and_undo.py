@@ -158,7 +158,7 @@ def test_set_field_from_text_rejects_bad_values():
 def test_loading_a_folder_clears_undo(window, monkeypatch, tmp_path):
     window._push_undo("Bulk Edit", window.video_files)
     assert window.undo_manager.can_undo()
-    monkeypatch.setattr("gui.main_window.discover_video_files", lambda folder, recursive: [])
+    monkeypatch.setattr("gui.main_window.discover_video_files", lambda folder, recursive, ignored=None: [])
     window._load_folder(tmp_path, recursive=False)
     assert not window.undo_manager.can_undo()
     assert not window.undo_action.isEnabled()

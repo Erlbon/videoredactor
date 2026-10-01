@@ -25,6 +25,7 @@ from core.ffmpeg_backend import extract_thumbnail, probe_technical_info
 from core.external_tools import is_tool_available, MKVTOOLNIX, FFMPEG
 from core.opensubtitles_client import clean_language_code
 from core.video_fingerprint import video_fingerprint
+from core.temp_names import is_app_temp_name
 
 SUPPORTED_EXTENSIONS = {".mp4", ".m4v", ".mkv"}
 
@@ -447,12 +448,19 @@ def has_subfolders(folder: Path) -> bool:
     return any(p.is_dir() for p in folder.iterdir())
 
 
-def discover_video_files(folder: Path, recursive: bool = False) -> list[Path]:
+def discover_video_files(
+    folder: Path,
+    recursive: bool = False,
+    ignored: Optional[list[Path]] = None,
+) -> list[Path]:
     """List supported video files under `folder`. Non-recursive by
     default (direct children only, matching the epub tool's original
     default folder-load behavior) -- pass recursive=True to also walk
     subfolders, which the GUI offers as an explicit prompt rather than
     silently changing behavior based on folder contents.
+
+    The app's own leftover temp/backup files (core.temp_names) are not
+    listed; pass a list as `ignored` to collect the ones skipped.
     """
     if not folder.is_dir():
         return []
@@ -460,7 +468,13 @@ def discover_video_files(folder: Path, recursive: bool = False) -> list[Path]:
         candidates = folder.rglob("*")
     else:
         candidates = folder.iterdir()
-    return sorted(
-        p for p in candidates
-        if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
-    )
+    found = []
+    for p in candidates:
+        if not (p.suffix.lower() in SUPPORTED_EXTENSIONS and p.is_file()):
+            continue
+        if is_app_temp_name(p.name):
+            if ignored is not None:
+                ignored.append(p)
+            continue
+        found.append(p)
+    return sorted(found)

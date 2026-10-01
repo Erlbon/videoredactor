@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-01#07 — Folder scans ignore the app's own leftover temp files
+
+- **Open Folder / Refresh no longer list leftovers of an interrupted repair, convert or Redact** (app killed mid-way): `<name>.repairing.<ext>`, `<name>.partial.<ext>`, the `<name>.redact-orig<ext>` / `.redact-orig2` backups and the hidden `.<name>.redact-<8 hex>.<ext>` scratch copies. They are skipped quietly, and the status bar says "Ignored N leftover temp file(s)" when any were.
+- **Narrow on purpose:** only those exact name shapes (marker as the last dot-segment before the extension, case-insensitive) are skipped, so your own files such as `My.Partial.Cut.mkv` or `Movie.redact-original.mp4` are still listed. A file you really named `Film.partial.mkv` would be skipped too.
+
 ## 2026-10-01#06 — TMDB attribution: current notice wording and the TMDB logo
 
 - **The TMDB notice now uses TMDB's current wording:** "This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB." (it said the old "uses the TMDB API but is not endorsed or certified"). In Credits and About, and under the results of the TMDB search and the season/episode picker.

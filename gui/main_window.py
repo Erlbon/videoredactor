@@ -1076,7 +1076,8 @@ class MainWindow(QMainWindow):
         (e.g. " (restored from last session)") without needing the
         caller to duplicate the whole message-assembly logic below.
         """
-        paths = discover_video_files(folder_path, recursive=recursive)
+        ignored: list[Path] = []
+        paths = discover_video_files(folder_path, recursive=recursive, ignored=ignored)
 
         # Replaces self.video_files wholesale -- shared by both Open Folder
         # and the startup restore below, so this one check covers both call
@@ -1112,6 +1113,10 @@ class MainWindow(QMainWindow):
             msg += " (including subfolders)"
         if failed:
             msg += f", {failed} failed to read"
+        if ignored:
+            # Leftovers of an interrupted repair/convert/Redact: skipped
+            # quietly, just noted here (no dialog).
+            msg += f" -- Ignored {len(ignored)} leftover temp file(s)"
         msg += status_suffix
         self.status_bar.showMessage(msg)
 
