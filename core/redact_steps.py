@@ -698,7 +698,7 @@ class LookupStep(VideoStep):
     description = (
         "Finds the movie or show named by the filename and fills fields that are EMPTY. With a local IMDb "
         "database set up (Tools > IMDb Database) that is asked FIRST, offline: title, year, genres and, for TV, "
-        "the episode's title and numbers (an IMDb id like tt0087182 in the filename or Comment is used exactly); "
+        "the episode's title and numbers (an IMDb id like tt1234567 in the filename or Comment is used exactly); "
         "TMDB (TheTVDB as the fallback for TV) is then asked only for what is still empty, such as the plot, and "
         "when it can't be reached the IMDb fields are still filled and the report says so. A movie whose title AND "
         "year match exactly is applied; a title-only match, or a TV show whose title matches but whose year can't "

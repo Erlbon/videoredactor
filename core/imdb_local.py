@@ -17,7 +17,7 @@ MovieCandidate / TVCandidate / EpisodeInfo, as subclasses that carry the
 IMDb extras), so gui/tmdb_search_dialog.py's flow and the Redact lookup
 step can treat both alike. `exact` on a candidate says the searched title
 equals the film's title, original title or a stored alternative title
-(so "Il nome della rosa" finds The Name of the Rose); ranking is exact
+(so a film is found by its Italian or German title); ranking is exact
 first, then closest year (a film often differs by a year between festival
 and release), then most votes.
 
@@ -35,7 +35,7 @@ Field mapping (see movie_fields / show_fields / episode_fields):
     episode_number     <- the episode's numbers
     (runtime, rating and votes are shown in the picker only: the app has
      no field for them; the IMDb id has none either, but an id written in
-     the filename or the Comment field ("tt0087182") is used to find the title)
+     the filename or the Comment field ("tt1234567") is used to find the title)
 """
 
 from __future__ import annotations
@@ -276,8 +276,8 @@ def search_series(db: ImdbLocalDatabase, title: str, year: Optional[str] = None,
 
 
 def find_imdb_id(*texts: Optional[str]) -> str:
-    """The first IMDb title id ("tt0087182") written in any of the texts -- a filename like
-    "Dune (1984) {imdb-tt0087182}" or a Comment with an imdb.com/title/ URL -- else ""."""
+    """The first IMDb title id ("tt1234567") written in any of the texts -- a filename like
+    "Some Film (1984) {imdb-tt1234567}" or a Comment with an imdb.com/title/ URL -- else ""."""
     for text in texts:
         match = _ID_RE.search(text or "")
         if match:
@@ -286,7 +286,7 @@ def find_imdb_id(*texts: Optional[str]) -> str:
 
 
 def title_by_id(db: ImdbLocalDatabase, text: str):
-    """The film, series or episode with this IMDb id ("tt0087182", or just the digits), or None.
+    """The film, series or episode with this IMDb id ("tt1234567", or just the digits), or None.
     A film/series comes back as its candidate (exact=True); an episode as an ImdbEpisodeInfo."""
     found = find_imdb_id(text) or (imdb_id(int(text)) if (text or "").strip().isdigit() else "")
     number = tconst_number(found)

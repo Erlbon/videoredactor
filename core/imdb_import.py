@@ -27,9 +27,16 @@ values are written as backslash-N. Columns:
 The reader fails loudly (DumpImportError) when a column named here is
 missing from a file's header, so a changed or wrong file is never turned
 into a silently empty database; extra new columns are ignored.
-(Not yet checked against a real file: no dataset has been downloaded.)
+Checked 2026-10-01 against the first ~1 MB of each real file (none is stored in this repository): headers
+exactly as documented, every line has the right number of columns, missing = backslash-N. Seen in the
+real data: titleType values short, movie, tvSeries, tvMovie, tvEpisode, tvMiniSeries, tvShort (the full
+set also has tvSpecial, video, videoGame); isAdult 0/1; startYear, runtimeMinutes and genres sometimes
+missing; endYear mostly missing; tconst "tt" + 7 digits (parentTconst sometimes 8); title.episode has
+~16% rows with both numbers missing; title.akas has region missing on original titles (isOriginalTitle=1)
+and on some others, language missing on most rows, types imdbDisplay / original / alternative / working /
+tv / dvd / video / festival / missing, and historic regions such as XWW, XWG, XEU, SUHH, DDDE, CSHH.
 
-SCHEMA (tconst is the numeric part of "tt0133093"; text columns are ""
+SCHEMA (tconst is the numeric part of "tt0004242"; text columns are ""
 and numbers NULL when unknown):
     titles(tconst integer primary key, kind, title, original_title, year,
            end_year, runtime, genres, is_adult, rating, votes, norm)
@@ -49,6 +56,17 @@ and numbers NULL when unknown):
         the tconst; akas_fts's rowid is akas.rowid.
     redactor_import_info(key, value)
 Indexes: akas(tconst), episodes(parent, season, episode).
+
+SIZE AND SPEED (MEASURED on the START of IMDb's files, 2026-10-01: the first ~52k rows of title.basics, ~204k of
+ratings, ~227k of episode, ~96k of akas -- 1890s-1950s shorts and films, NOT representative of the whole):
+about 115 bytes per kept title and 96 per alternative title, FTS indexes included; ~140k input rows per
+second end to end (4 s for the whole 578k-row sample). Episodes could not be measured there (the sample's
+episodes belong to series outside it): about 52 bytes each on synthetic rows, so ~60-75 for real, longer
+titles. ESTIMATE for the full files (title.basics ~12M rows, episode ~9M, akas ~50M+) with the default
+options: ~0.6-0.9M titles (~70-105 MB) + ~5-7M numbered episodes of kept series (~300-525 MB) + ~2-4M
+alternative titles (~190-385 MB) = roughly 0.6-1 GB (about 0.3-0.5 GB without episodes); 10-25 minutes; about
+1 GB of scratch space (episode links and staged titles) while building. Episodes whose season/episode
+numbers IMDb leaves empty (~16% of title.episode's first rows) are not stored: they can't be looked up.
 
 Memory is flat: one line at a time, SqliteBuilder batches, and the
 ratings / episode links / kept-title names live in a TEMPORARY on-disk
@@ -243,14 +261,14 @@ class ImportSummary:
 
 
 def tconst_number(text: Optional[str]) -> Optional[int]:
-    """"tt0133093" -> 133093; None for anything else (also "nm..." ids)."""
+    """"tt0004242" -> 133093; None for anything else (also "nm..." ids)."""
     if text and text[:2] == "tt" and text[2:].isdigit():
         return int(text[2:])
     return None
 
 
 def imdb_id(number: int) -> str:
-    """133093 -> "tt0133093" (at least 7 digits, as IMDb writes them)."""
+    """4242 -> "tt0004242" (at least 7 digits, as IMDb writes them)."""
     return f"tt{int(number):07d}"
 
 
@@ -497,7 +515,10 @@ def build_imdb_database(
                 cursor = temp.execute(
                     "select s.tconst, l.parent, l.season, l.episode, s.title, s.year, s.runtime, r.rating, r.votes "
                     "from stage s join links l on l.tconst = s.tconst join kept k on k.tconst = l.parent "
-                    "left join ratings r on r.tconst = s.tconst"
+                    "left join ratings r on r.tconst = s.tconst "
+                    # IMDb leaves the numbers empty on ~16% of episodes (specials, unsorted): they can't be
+                    # looked up by season and episode, so they are not stored.
+                    "where l.season is not null and l.episode is not null"
                 )
                 while True:
                     rows = cursor.fetchmany(20000)

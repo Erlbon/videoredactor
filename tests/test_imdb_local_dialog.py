@@ -39,37 +39,37 @@ def source_for(path):
 
 
 def test_the_search_dialog_lists_local_results_and_says_what_is_missing(imdb):
-    dialog = TMDBSearchDialog("movie", "Dune", "1984", source=source_for(imdb))
+    dialog = TMDBSearchDialog("movie", "Zarnak", "1984", source=source_for(imdb))
     try:
         assert "IMDb (Local Database)" in dialog.windowTitle() and "Movie" in dialog.windowTitle()
         labels = [dialog.results_list.item(i).text() for i in range(dialog.results_list.count())]
-        assert labels[0] == "Dune (1984)" and "Dune (2021)" in labels
+        assert labels[0] == "Zarnak (1984)" and "Zarnak (2021)" in labels
         assert dialog.findChildren(type(dialog.overview_label))  # the detail box exists
         notes = [w.text() for w in dialog.findChildren(__import__("PyQt6.QtWidgets", fromlist=["QLabel"]).QLabel)]
         assert any("no plot, poster or cast" in n for n in notes)
         dialog.results_list.setCurrentRow(0)
-        assert "tt0087182" in dialog.overview_label.toPlainText() and dialog.select_button.isEnabled()
+        assert "tt90000001" in dialog.overview_label.toPlainText() and dialog.select_button.isEnabled()
         dialog._on_accept()
-        assert dialog.selected_candidate.imdb_id == "tt0087182"
+        assert dialog.selected_candidate.imdb_id == "tt90000001"
     finally:
         dialog.close()
 
 
 def test_the_dialog_can_switch_between_film_and_tv_show(imdb):
-    dialog = TMDBSearchDialog("movie", "Breaking Bad", "", source=source_for(imdb))
+    dialog = TMDBSearchDialog("movie", "Quillfeather", "", source=source_for(imdb))
     try:
         assert dialog.results_list.item(0).text() == "No results found"
         dialog.mode_combo.setCurrentIndex(dialog.mode_combo.findData("tv"))
         assert dialog.mode == "tv" and "TV Show" in dialog.windowTitle()
-        assert dialog.results_list.item(0).text() == "Breaking Bad (2008)"
+        assert dialog.results_list.item(0).text() == "Quillfeather (2008)"
     finally:
         dialog.close()
 
 
 def test_an_alias_is_shown_in_the_result_label(imdb):
-    dialog = TMDBSearchDialog("movie", "Il nome della rosa", "", source=source_for(imdb))
+    dialog = TMDBSearchDialog("movie", "Il codice della brace", "", source=source_for(imdb))
     try:
-        assert dialog.results_list.item(0).text() == "The Name of the Rose (1986) - also known as 'Il nome della rosa'"
+        assert dialog.results_list.item(0).text() == "The Ember Cipher (1986) - also known as 'Il codice della brace'"
     finally:
         dialog.close()
 
@@ -82,7 +82,7 @@ def test_a_failing_search_is_reported_not_raised(imdb, monkeypatch):
         raise ImdbDatabaseError("the file is damaged")
 
     source = SearchSource("IMDb (Local Database)", broken, broken, (ImdbDatabaseError,))
-    dialog = TMDBSearchDialog("movie", "Dune", source=source)
+    dialog = TMDBSearchDialog("movie", "Zarnak", source=source)
     try:
         assert warned == [("IMDb (Local Database) Search Failed", "the file is damaged")]
     finally:
@@ -103,13 +103,13 @@ def test_the_tmdb_dialog_is_unchanged_without_a_source(monkeypatch):
 
 
 def test_the_episode_picker_preselects_from_the_filename(imdb):
-    dialog = ImdbEpisodePickerDialog(imdb, 386676, "The Office", initial_season=2, initial_episode=5)
+    dialog = ImdbEpisodePickerDialog(imdb, 90000021, "Harbor Lights", initial_season=2, initial_episode=5)
     try:
         assert dialog.season_combo.currentData() == 2
-        assert dialog.episode_list.currentItem().text() == "E5: Halloween"
-        assert "tt0430951" in dialog.overview_box.toPlainText()
+        assert dialog.episode_list.currentItem().text() == "E5: Moulting"
+        assert "tt90000022" in dialog.overview_box.toPlainText()
         dialog._on_accept()
-        assert (dialog.selected_season, dialog.selected_episode.name) == (2, "Halloween")
+        assert (dialog.selected_season, dialog.selected_episode.name) == (2, "Moulting")
     finally:
         dialog.close()
 
@@ -117,7 +117,7 @@ def test_the_episode_picker_preselects_from_the_filename(imdb):
 def test_the_episode_picker_with_no_episodes_says_so(imdb, monkeypatch):
     told = []
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: told.append(a[2]))
-    dialog = ImdbEpisodePickerDialog(imdb, 87182, "Dune")
+    dialog = ImdbEpisodePickerDialog(imdb, 90000001, "Zarnak")
     assert told and "no episodes" in told[0] and dialog.result() == QDialog.DialogCode.Rejected
 
 
@@ -180,8 +180,8 @@ def test_the_import_confirms_a_show_once_and_fills_episodes(window, monkeypatch,
     window.video_files[0].metadata.title = ""
     window.video_files[1].metadata.show_title = ""
     window.video_files[1].metadata.title = ""
-    window.video_files[0].path = window.video_files[0].path.with_name("The Office (2005) S02E05.mkv")
-    window.video_files[1].path = window.video_files[1].path.with_name("The Office (2005) S01E01.mkv")
+    window.video_files[0].path = window.video_files[0].path.with_name("Harbor Lights (2005) S02E05.mkv")
+    window.video_files[1].path = window.video_files[1].path.with_name("Harbor Lights (2005) S01E01.mkv")
     window.table.selectAll()
     picks = []
 
@@ -201,8 +201,8 @@ def test_the_import_confirms_a_show_once_and_fills_episodes(window, monkeypatch,
     assert len(FakeSearch.seen) == 1  # the same show: asked once
     first, second = window.video_files
     assert (first.metadata.show_title, first.metadata.title, first.metadata.season_number, first.metadata.episode_number) == (
-        "The Office", "Halloween", 2, 5)
-    assert (second.metadata.title, second.metadata.episode_number) == ("Pilot", 1)
+        "Harbor Lights", "Moulting", 2, 5)
+    assert (second.metadata.title, second.metadata.episode_number) == ("Hatching", 1)
     assert first.metadata.content_type is ContentType.TV and first.dirty and second.dirty
     assert first.metadata.release_date == "2005" and first.metadata.genre_tags == "Comedy, Science Fiction"
     assert "Imported IMDb metadata for 2 file(s)" in window.status_bar.currentMessage()
@@ -213,7 +213,7 @@ def test_the_import_confirms_a_show_once_and_fills_episodes(window, monkeypatch,
 def test_a_film_import_fills_only_imdb_fields_and_keeps_a_fuller_date(window, monkeypatch, imdb, tmp_path):
     configure_db(imdb)
     vf = window.video_files[0]
-    vf.path = vf.path.with_name("Dune.1984.mkv")
+    vf.path = vf.path.with_name("Zarnak.1984.mkv")
     vf.metadata.release_date = "1984-12-14"
     vf.metadata.description = "mine"
     vf.metadata.title = ""
@@ -223,8 +223,8 @@ def test_a_film_import_fills_only_imdb_fields_and_keeps_a_fuller_date(window, mo
     FakeSearch.seen = []
     window._on_import_imdb_local()
     md = vf.metadata
-    assert FakeSearch.seen == [("movie", "Dune", "1984")]
-    assert (md.title, md.release_date, md.description, md.content_type) == ("Dune", "1984-12-14", "mine", ContentType.MOVIE)
+    assert FakeSearch.seen == [("movie", "Zarnak", "1984")]
+    assert (md.title, md.release_date, md.description, md.content_type) == ("Zarnak", "1984-12-14", "mine", ContentType.MOVIE)
     assert md.genre_tags == "Adventure, Drama, Science Fiction"
     assert md.director == "" and md.cast == ""  # nothing IMDb doesn't have
 

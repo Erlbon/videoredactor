@@ -10,15 +10,15 @@ from core.imdb_import import BuildOptions
 from tests.imdb_fixture import AKAS, BASICS, EPISODES, N, RATINGS, build
 
 OFFICE = [
-    ("tt0290978", "tvSeries", "The Office", "The Office", "0", "2001", "2003", "30", "Comedy"),
-    ("tt0386676", "tvSeries", "The Office", "The Office", "0", "2005", "2013", "22", "Comedy,Sci-Fi,Adult"),
-    ("tt0430951", "tvEpisode", "Halloween", "Halloween", "0", "2005", N, "22", "Comedy"),
-    ("tt0664536", "tvEpisode", "Pilot", "Pilot", "0", "2005", N, "23", "Comedy"),
-    ("tt0000010", "movie", "Dune: A Documentary", "Dune: A Documentary", "0", "2020", N, "60", "Documentary"),
+    ("tt90000020", "tvSeries", "Harbor Lights", "Harbor Lights", "0", "2001", "2003", "30", "Comedy"),
+    ("tt90000021", "tvSeries", "Harbor Lights", "Harbor Lights", "0", "2005", "2013", "22", "Comedy,Sci-Fi,Adult"),
+    ("tt90000022", "tvEpisode", "Moulting", "Moulting", "0", "2005", N, "22", "Comedy"),
+    ("tt90000023", "tvEpisode", "Hatching", "Hatching", "0", "2005", N, "23", "Comedy"),
+    ("tt90000024", "movie", "Zarnak: A Documentary", "Zarnak: A Documentary", "0", "2020", N, "60", "Documentary"),
 ]
-OFFICE_RATINGS = [("tt0290978", "8.5", "200000"), ("tt0386676", "9.0", "700000"), ("tt0430951", "8.7", "5000"),
-                  ("tt0664536", "8.4", "6000"), ("tt0000010", "6.0", "30")]
-OFFICE_EPISODES = [("tt0430951", "tt0386676", "2", "5"), ("tt0664536", "tt0386676", "1", "1")]
+OFFICE_RATINGS = [("tt90000020", "8.5", "200000"), ("tt90000021", "9.0", "700000"), ("tt90000022", "8.7", "5000"),
+                  ("tt90000023", "8.4", "6000"), ("tt90000024", "6.0", "30")]
+OFFICE_EPISODES = [("tt90000022", "tt90000021", "2", "5"), ("tt90000023", "tt90000021", "1", "1")]
 
 
 @pytest.fixture
@@ -36,24 +36,24 @@ def db(tmp_path):
 
 
 def test_exact_id_lookup(db):
-    found = imdb_local.title_by_id(db, "tt0087182")
+    found = imdb_local.title_by_id(db, "tt90000001")
     assert isinstance(found, imdb_local.ImdbMovieCandidate)
-    assert (found.title, found.year, found.runtime, found.imdb_id, found.tmdb_id) == ("Dune", "1984", 137, "tt0087182", 0)
-    assert found.exact and found.rating == 6.3 and found.votes == 150000
-    assert imdb_local.title_by_id(db, "87182").imdb_id == "tt0087182"       # digits only
+    assert (found.title, found.year, found.runtime, found.imdb_id, found.tmdb_id) == ("Zarnak", "1984", 137, "tt90000001", 0)
+    assert found.exact and found.rating == 6.1 and found.votes == 151234
+    assert imdb_local.title_by_id(db, "90000001").imdb_id == "tt90000001"       # digits only
     assert imdb_local.title_by_id(db, "tt0000000") is None                  # not in the database
     assert imdb_local.title_by_id(db, "nonsense") is None
-    series = imdb_local.title_by_id(db, "tt0903747")
-    assert isinstance(series, imdb_local.ImdbTVCandidate) and series.name == "Breaking Bad" and series.end_year == 2013
-    episode = imdb_local.title_by_id(db, "tt0959621")
+    series = imdb_local.title_by_id(db, "tt90000004")
+    assert isinstance(series, imdb_local.ImdbTVCandidate) and series.name == "Quillfeather" and series.end_year == 2013
+    episode = imdb_local.title_by_id(db, "tt90000005")
     assert isinstance(episode, imdb_local.ImdbEpisodeInfo)
-    assert (episode.name, episode.season, episode.episode_number, episode.series) == ("Pilot", 1, 1, 903747)
+    assert (episode.name, episode.season, episode.episode_number, episode.series) == ("Hatching", 1, 1, 90000004)
 
 
 def test_find_imdb_id_in_filenames_and_comments():
-    assert imdb_local.find_imdb_id("Dune (1984) {imdb-tt0087182}") == "tt0087182"
-    assert imdb_local.find_imdb_id("x", "https://www.imdb.com/title/tt1160419/") == "tt1160419"
-    assert imdb_local.find_imdb_id("matt0087182x", "tt12345") == ""   # not a whole id / too short
+    assert imdb_local.find_imdb_id("Zarnak (1984) {imdb-tt90000001}") == "tt90000001"
+    assert imdb_local.find_imdb_id("x", "https://www.imdb.com/title/tt90000002/") == "tt90000002"
+    assert imdb_local.find_imdb_id("matt90000001x", "tt12345") == ""   # not a whole id / too short
     assert imdb_local.find_imdb_id(None, "") == ""
     assert imdb_local.find_imdb_id("tt12345678") == "tt12345678"
 
@@ -61,55 +61,55 @@ def test_find_imdb_id_in_filenames_and_comments():
 # --- films ----------------------------------------------------------------------------------
 
 
-def test_title_and_year_disambiguate_dune(db):
-    old = imdb_local.search_movies(db, "Dune", "1984")
-    assert (old[0].title, old[0].year, old[0].exact) == ("Dune", "1984", True)
-    new = imdb_local.search_movies(db, "Dune", "2021")
+def test_title_and_year_disambiguate_zarnak(db):
+    old = imdb_local.search_movies(db, "Zarnak", "1984")
+    assert (old[0].title, old[0].year, old[0].exact) == ("Zarnak", "1984", True)
+    new = imdb_local.search_movies(db, "Zarnak", "2021")
     assert (new[0].year, new[0].exact) == ("2021", True)
     assert {c.year for c in old[:2]} == {"1984", "2021"}  # both are candidates either way
-    assert [c.title for c in old if c.exact] == ["Dune", "Dune"]
+    assert [c.title for c in old if c.exact] == ["Zarnak", "Zarnak"]
 
 
 def test_without_a_year_the_most_voted_exact_title_comes_first(db):
-    got = imdb_local.search_movies(db, "Dune")
+    got = imdb_local.search_movies(db, "Zarnak")
     assert got[0].year == "2021" and got[1].year == "1984"
-    assert all(c.exact for c in got[:2]) and not got[2].exact  # "Dune: A Documentary" is a longer title
+    assert all(c.exact for c in got[:2]) and not got[2].exact  # "Zarnak: A Documentary" is a longer title
 
 
 def test_a_year_one_off_still_ranks_right_after_the_exact_year(db):
-    got = imdb_local.search_movies(db, "Dune", "1985")
+    got = imdb_local.search_movies(db, "Zarnak", "1985")
     assert got[0].year == "1984"  # gap 1
-    got = imdb_local.search_movies(db, "Dune", "2020")
+    got = imdb_local.search_movies(db, "Zarnak", "2020")
     assert got[0].year == "2021"
 
 
 def test_localized_and_original_titles_find_the_film(db):
-    for query in ("Il nome della rosa", "il nome della rosa!", "Le nom de la rose", "Der Name der Rose"):
+    for query in ("Il codice della brace", "il codice della brace!", "Le chiffre de la braise", "Das Ember-Siegel"):
         found = imdb_local.search_movies(db, query)[0]
-        assert found.title == "The Name of the Rose" and found.exact, query
-    assert imdb_local.search_movies(db, "Il nome della rosa")[0].alias == "Il nome della rosa"
-    assert imdb_local.search_movies(db, "The Name of the Rose")[0].alias == ""
-    assert imdb_local.search_movies(db, "Dune - Der Wuestenplanet")[0].year == "1984"
+        assert found.title == "The Ember Cipher" and found.exact, query
+    assert imdb_local.search_movies(db, "Il codice della brace")[0].alias == "Il codice della brace"
+    assert imdb_local.search_movies(db, "The Ember Cipher")[0].alias == ""
+    assert imdb_local.search_movies(db, "Zarnak - Der Sandplanet")[0].year == "1984"
 
 
 def test_punctuation_ampersands_and_accents_are_folded(db):
-    assert imdb_local.search_movies(db, "Law and Order The Movie")[0].exact
-    assert imdb_local.search_movies(db, "law & order: the movie")[0].title == "Law & Order: The Movie"
-    assert imdb_local.search_movies(db, "Amélie")[0].title == "Amelie"
-    assert imdb_local.search_movies(db, "Le fabuleux destin d'Amelie Poulain")[0].title == "Amelie"
+    assert imdb_local.search_movies(db, "Salt and Ember The Film")[0].exact
+    assert imdb_local.search_movies(db, "salt & ember: the film")[0].title == "Salt & Ember: The Film"
+    assert imdb_local.search_movies(db, "Mirabèlle")[0].title == "Mirabelle"
+    assert imdb_local.search_movies(db, "Le jardin secret de Mirabelle")[0].title == "Mirabelle"
 
 
 def test_a_prefix_is_the_fallback_and_never_counts_as_exact(db):
-    got = imdb_local.search_movies(db, "Dun")
+    got = imdb_local.search_movies(db, "Zar")
     assert got and not any(c.exact for c in got)
     assert imdb_local.search_movies(db, "Zzyzx") == []
 
 
 def test_films_and_series_are_kept_apart(db):
-    assert imdb_local.search_movies(db, "Breaking Bad") == []
-    assert imdb_local.search_series(db, "Dune") == []
-    assert imdb_local.search_series(db, "Breaking Bad")[0].name == "Breaking Bad"
-    assert imdb_local.search_movies(db, "Pilot") == []  # episodes are not searchable by title
+    assert imdb_local.search_movies(db, "Quillfeather") == []
+    assert imdb_local.search_series(db, "Zarnak") == []
+    assert imdb_local.search_series(db, "Quillfeather")[0].name == "Quillfeather"
+    assert imdb_local.search_movies(db, "Hatching") == []  # episodes are not searchable by title
 
 
 def test_a_title_is_required(db):
@@ -121,21 +121,21 @@ def test_a_title_is_required(db):
 
 
 def test_series_with_the_same_title_are_told_apart_by_year(db):
-    us = imdb_local.search_series(db, "The Office", "2005")
+    us = imdb_local.search_series(db, "Harbor Lights", "2005")
     assert (us[0].year, us[0].exact) == ("2005", True) and us[1].year == "2001"
-    uk = imdb_local.search_series(db, "The Office", "2001")
+    uk = imdb_local.search_series(db, "Harbor Lights", "2001")
     assert uk[0].year == "2001"
-    assert imdb_local.search_series(db, "The Office")[0].year == "2005"  # most votes
+    assert imdb_local.search_series(db, "Harbor Lights")[0].year == "2005"  # most votes
 
 
 def test_episode_resolution(db):
-    series = imdb_local.search_series(db, "The Office", "2005")[0]
+    series = imdb_local.search_series(db, "Harbor Lights", "2005")[0]
     episode = imdb_local.find_episode(db, series.tconst, 2, 5)
-    assert (episode.name, episode.year, episode.runtime, episode.imdb_id) == ("Halloween", 2005, 22, "tt0430951")
+    assert (episode.name, episode.year, episode.runtime, episode.imdb_id) == ("Moulting", 2005, 22, "tt90000022")
     assert imdb_local.find_episode(db, series.tconst, 9, 99) is None
     assert imdb_local.seasons_of(db, series.tconst) == [(1, 1), (2, 1)]
-    assert [e.name for e in imdb_local.episodes_of(db, series.tconst, 1)] == ["Pilot"]
-    bb = imdb_local.search_series(db, "Breaking Bad")[0]
+    assert [e.name for e in imdb_local.episodes_of(db, series.tconst, 1)] == ["Hatching"]
+    bb = imdb_local.search_series(db, "Quillfeather")[0]
     assert [e.episode_number for e in imdb_local.episodes_of(db, bb.tconst, 1)] == [1, 2]
 
 
@@ -143,14 +143,14 @@ def test_episode_resolution(db):
 
 
 def test_field_mapping(db):
-    dune = imdb_local.search_movies(db, "Dune", "1984")[0]
-    assert imdb_local.movie_fields(dune) == {"title": "Dune", "release_date": "1984",
+    dune = imdb_local.search_movies(db, "Zarnak", "1984")[0]
+    assert imdb_local.movie_fields(dune) == {"title": "Zarnak", "release_date": "1984",
                                              "genre_tags": "Adventure, Drama, Science Fiction"}
-    office = imdb_local.search_series(db, "The Office", "2005")[0]
-    assert imdb_local.show_fields(office) == {"show_title": "The Office", "release_date": "2005",
+    office = imdb_local.search_series(db, "Harbor Lights", "2005")[0]
+    assert imdb_local.show_fields(office) == {"show_title": "Harbor Lights", "release_date": "2005",
                                               "genre_tags": "Comedy, Science Fiction"}  # "Adult" dropped
     episode = imdb_local.find_episode(db, office.tconst, 2, 5)
-    assert imdb_local.episode_fields(episode) == {"title": "Halloween", "release_date": "2005",
+    assert imdb_local.episode_fields(episode) == {"title": "Moulting", "release_date": "2005",
                                                   "season_number": 2, "episode_number": 5}
     assert imdb_local.map_genres("Talk-Show,Reality-TV,Game-Show,Film-Noir,Action") == \
         "Talk, Reality, Game Show, Film-Noir, Action"
@@ -159,11 +159,11 @@ def test_field_mapping(db):
 def test_candidates_have_the_shape_the_tmdb_dialog_uses(db):
     from core.tmdb_client import EpisodeInfo, MovieCandidate, TVCandidate
 
-    movie = imdb_local.search_movies(db, "Dune", "1984")[0]
+    movie = imdb_local.search_movies(db, "Zarnak", "1984")[0]
     assert isinstance(movie, MovieCandidate) and movie.release_date == "1984" and movie.poster_path is None
-    assert "tt0087182" in movie.overview and "137 min" in movie.overview and "6.3" in movie.overview
-    assert isinstance(imdb_local.search_series(db, "Breaking Bad")[0], TVCandidate)
-    assert isinstance(imdb_local.find_episode(db, 903747, 1, 1), EpisodeInfo)
+    assert "tt90000001" in movie.overview and "137 min" in movie.overview and "6.1" in movie.overview
+    assert isinstance(imdb_local.search_series(db, "Quillfeather")[0], TVCandidate)
+    assert isinstance(imdb_local.find_episode(db, 90000004, 1, 1), EpisodeInfo)
 
 
 # --- a database built with fewer parts --------------------------------------------------------
@@ -173,10 +173,10 @@ def test_a_database_without_episodes_or_akas_still_answers(tmp_path):
     path, _s, _f = build(tmp_path, BuildOptions(include_episodes=False, include_akas=False))
     plain = imdb_local.open_database(path)
     try:
-        assert imdb_local.search_movies(plain, "Dune", "1984")[0].year == "1984"
-        assert imdb_local.search_movies(plain, "Il nome della rosa") == []          # no aliases stored
-        assert imdb_local.find_episode(plain, 903747, 1, 1) is None
-        assert imdb_local.seasons_of(plain, 903747) == []
+        assert imdb_local.search_movies(plain, "Zarnak", "1984")[0].year == "1984"
+        assert imdb_local.search_movies(plain, "Il codice della brace") == []          # no aliases stored
+        assert imdb_local.find_episode(plain, 90000004, 1, 1) is None
+        assert imdb_local.seasons_of(plain, 90000004) == []
     finally:
         plain.close()
 
@@ -191,7 +191,7 @@ def test_an_old_build_without_a_fulltext_index_says_so(tmp_path):
     old = imdb_local.open_database(str(path))
     try:
         with pytest.raises(imdb_local.ImdbLocalError, match="full-text"):
-            imdb_local.search_movies(old, "Dune")
+            imdb_local.search_movies(old, "Zarnak")
     finally:
         old.close()
 

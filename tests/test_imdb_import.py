@@ -25,9 +25,9 @@ def numbers(path, table="titles"):
 
 def test_default_build_keeps_the_right_titles(tmp_path):
     dest, summary, _files = build(tmp_path)
-    # kept: both Dunes, the Rose, Breaking Bad, the special, Amelie, Law & Order.
+    # kept: both Zarnaks, the Cipher, Quillfeather, the special, Mirabelle, Salt & Ember.
     # dropped: short and game (type), adult feature, Obscure Film (2 votes), Unknown Show (1 vote).
-    assert numbers(dest) == {87182, 1160419, 91605, 903747, 3333331, 118115, 172495}
+    assert numbers(dest) == {90000001, 90000002, 90000003, 90000004, 90000011, 90000015, 90000016}
     assert summary.titles == 7
     assert summary.skipped_votes == 2 and summary.skipped_adult == 1
     assert summary.titles_seen == len(BASICS)
@@ -36,21 +36,21 @@ def test_default_build_keeps_the_right_titles(tmp_path):
 def test_ratings_are_joined_and_missing_values_are_null(tmp_path):
     dest, _s, _f = build(tmp_path)
     kind, year, end_year, runtime, genres, rating, votes = rows(
-        dest, "select kind, year, end_year, runtime, genres, rating, votes from titles where tconst = 903747")[0]
+        dest, "select kind, year, end_year, runtime, genres, rating, votes from titles where tconst = 90000004")[0]
     assert (kind, year, end_year, runtime, genres, rating, votes) == (
         "tvSeries", 2008, 2013, 49, "Crime,Drama,Thriller", 9.5, 2000000)
-    year, end_year = rows(dest, "select year, end_year from titles where tconst = 87182")[0]
+    year, end_year = rows(dest, "select year, end_year from titles where tconst = 90000001")[0]
     assert year == 1984 and end_year is None  # backslash-N became NULL, not text
-    assert rows(dest, "select original_title from titles where tconst = 87182")[0][0] == ""  # same as title: not repeated
-    assert rows(dest, "select original_title from titles where tconst = 91605")[0][0] == "Der Name der Rose"
+    assert rows(dest, "select original_title from titles where tconst = 90000001")[0][0] == ""  # same as title: not repeated
+    assert rows(dest, "select original_title from titles where tconst = 90000003")[0][0] == "Das Ember-Siegel"
 
 
 def test_episodes_joined_only_for_kept_series(tmp_path):
     dest, summary, _f = build(tmp_path)
     assert rows(dest, "select tconst, parent, season, episode, title, year, runtime, rating, votes "
                       "from episodes order by episode") == [
-        (959621, 903747, 1, 1, "Pilot", 2008, 58, 9.0, 30000),
-        (1054724, 903747, 1, 2, "Cat's in the Bag...", 2008, 48, 8.6, 28000),
+        (90000005, 90000004, 1, 1, "Hatching", 2008, 58, 9.0, 30000),
+        (90000006, 90000004, 1, 2, "Sparrow's Dilemma...", 2008, 48, 8.6, 28000),
     ]  # Lost Episode (series below the vote minimum) and the orphan are gone
     assert summary.episodes == 2
 
@@ -58,7 +58,7 @@ def test_episodes_joined_only_for_kept_series(tmp_path):
 def test_no_episodes_option(tmp_path):
     dest, _s, _f = build(tmp_path, BuildOptions(include_episodes=False))
     assert rows(dest, "select count(*) from episodes")[0][0] == 0
-    assert 903747 in numbers(dest)
+    assert 90000004 in numbers(dest)
 
 
 def test_episodes_need_the_episode_file_but_not_votes(tmp_path):
@@ -71,15 +71,15 @@ def test_episodes_need_the_episode_file_but_not_votes(tmp_path):
 def test_type_choice_and_adult_and_votes_filters(tmp_path):
     options = BuildOptions(types=("movie", "short"), skip_adult=False, min_votes=0)
     dest, _s, _f = build(tmp_path, options)
-    assert numbers(dest) == {87182, 1160419, 91605, 2, 9999990, 8888881, 118115, 172495}
-    assert rows(dest, "select is_adult from titles where tconst = 9999990") == [(1,)]
+    assert numbers(dest) == {90000001, 90000002, 90000003, 90000007, 90000008, 90000009, 90000015, 90000016}
+    assert rows(dest, "select is_adult from titles where tconst = 90000008") == [(1,)]
     assert rows(dest, "select count(*) from episodes")[0][0] == 0  # tvEpisode type not chosen
 
 
 def test_min_votes_threshold_is_a_spin_value(tmp_path):
     dest, _s, _f = build(tmp_path, BuildOptions(min_votes=1000))
-    assert 3333331 not in numbers(dest)  # 50 votes
-    assert 172495 in numbers(dest)       # 1500 votes
+    assert 90000011 not in numbers(dest)  # 50 votes
+    assert 90000016 in numbers(dest)       # 1500 votes
 
 
 def test_min_votes_needs_the_ratings_file(tmp_path):
@@ -89,23 +89,23 @@ def test_min_votes_needs_the_ratings_file(tmp_path):
     # with 0 it works without ratings, and titles then have no rating
     dest = str(tmp_path / "y.db")
     imdb_import.build_imdb_database(files["basics"], dest, options=BuildOptions(min_votes=0, include_akas=False))
-    assert rows(dest, "select rating, votes from titles where tconst = 87182") == [(None, None)]
+    assert rows(dest, "select rating, votes from titles where tconst = 90000001") == [(None, None)]
 
 
 def test_akas_region_filter_and_duplicates(tmp_path):
     dest, summary, _f = build(tmp_path)
     got = {(r[0], r[1], r[2]) for r in rows(dest, "select tconst, title, region from akas")}
     assert got == {
-        (91605, "Il nome della rosa", "IT"), (91605, "Le nom de la rose", "FR"),
-        (87182, "Dune - Der Wuestenplanet", "DE"), (118115, "Die fabelhafte Welt der Amelie", "DE"),
-        (903747, "Breaking Bad - Reine Chemie", "DE"),
+        (90000003, "Il codice della brace", "IT"), (90000003, "Le chiffre de la braise", "FR"),
+        (90000001, "Zarnak - Der Sandplanet", "DE"), (90000015, "Die geheime Welt der Mirabelle", "DE"),
+        (90000004, "Quillfeather - Die Brutzeit", "DE"),
     }  # not: SE/JP regions, titles equal to the primary/original title, titles that weren't kept
     assert summary.akas == 5
 
 
 def test_akas_regions_option_and_off(tmp_path):
     dest, _s, _f = build(tmp_path, BuildOptions(regions=("IT",)))
-    assert {r[0] for r in rows(dest, "select title from akas")} == {"Il nome della rosa"}
+    assert {r[0] for r in rows(dest, "select title from akas")} == {"Il codice della brace"}
     dest2 = str(tmp_path / "noakas.db")
     files = make_dataset(tmp_path / "dump")
     imdb_import.build_imdb_database(files["basics"], dest2, files["ratings"], files["episodes"], files["akas"],
@@ -114,9 +114,9 @@ def test_akas_regions_option_and_off(tmp_path):
 
 
 def test_original_title_entries_are_kept_when_they_differ(tmp_path):
-    akas = [("tt0091605", "1", "Name of the Rose original", N, N, "original", N, "1")]
+    akas = [("tt90000003", "1", "Ember Cipher original", N, N, "original", N, "1")]
     dest, _s, _f = build(tmp_path, akas=akas)
-    assert rows(dest, "select title, region from akas") == [("Name of the Rose original", "")]
+    assert rows(dest, "select title, region from akas") == [("Ember Cipher original", "")]
     dest2 = str(tmp_path / "b" / "x.db")
     files = make_dataset(tmp_path / "b", akas=akas)
     imdb_import.build_imdb_database(files["basics"], dest2, files["ratings"], files["episodes"], files["akas"],
@@ -129,11 +129,11 @@ def test_prebuilt_fts_finds_normalized_text(tmp_path):
     from redactor_common.core.local_db import fts_query
     db = imdb_import.LocalDatabase(dest, ("titles", "titles_fts"))
     try:
-        assert fts_query(db, "titles_fts", "dune", prefix=False) and set(fts_query(db, "titles_fts", "dune")) == {87182, 1160419}
-        assert fts_query(db, "titles_fts", "Law and Order", prefix=False) == [172495]   # "&" folded like the query side
-        assert fts_query(db, "titles_fts", "der name der rose", prefix=False) == [91605]  # original title is indexed
-        assert fts_query(db, "akas_fts", "nome della rosa", prefix=False, key="tconst", from_table="akas") == [91605]
-        assert fts_query(db, "titles_fts", "amélie") == [118115] or fts_query(db, "titles_fts", "amelie") == [118115]
+        assert fts_query(db, "titles_fts", "zarnak", prefix=False) and set(fts_query(db, "titles_fts", "zarnak")) == {90000001, 90000002}
+        assert fts_query(db, "titles_fts", "Salt and Ember", prefix=False) == [90000016]   # "&" folded like the query side
+        assert fts_query(db, "titles_fts", "das ember siegel", prefix=False) == [90000003]  # original title is indexed
+        assert fts_query(db, "akas_fts", "codice della brace", prefix=False, key="tconst", from_table="akas") == [90000003]
+        assert fts_query(db, "titles_fts", "mirabèlle") == [90000015] or fts_query(db, "titles_fts", "mirabelle") == [90000015]
     finally:
         db.close()
 
@@ -183,7 +183,7 @@ def test_extra_new_column_and_crlf_and_bom_are_tolerated(tmp_path):
     write_tsv(files["basics"], BASICS_HEADER + ["newColumn"], [r + ("x",) for r in BASICS], newline="\r\n", bom=True)
     dest = str(tmp_path / "x.db")
     imdb_import.build_imdb_database(files["basics"], dest, files["ratings"], files["episodes"], files["akas"])
-    assert 903747 in numbers(dest)
+    assert 90000004 in numbers(dest)
 
 
 def test_nothing_kept_is_an_error(tmp_path):
@@ -253,6 +253,6 @@ def test_licence_notice_text():
 
 
 def test_tconst_helpers():
-    assert imdb_import.tconst_number("tt0133093") == 133093
+    assert imdb_import.tconst_number("tt0004242") == 4242
     assert imdb_import.tconst_number("nm0000001") is None and imdb_import.tconst_number("tt") is None
-    assert imdb_import.imdb_id(133093) == "tt0133093" and imdb_import.imdb_id(12345678) == "tt12345678"
+    assert imdb_import.imdb_id(4242) == "tt0004242" and imdb_import.imdb_id(12345678) == "tt12345678"

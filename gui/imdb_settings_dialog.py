@@ -58,15 +58,17 @@ from core.imdb_import import (
 )
 
 DATASET_FILTER = "IMDb dataset (*.tsv.gz *.tsv *.gz);;All files (*)"
-# An ESTIMATE, not measured on the real files: a default build holds up to ~1 GB and uses up to
-# ~1 GB of scratch space while it runs.
+# An ESTIMATE: per-row sizes were measured on the first ~50k titles / ~95k alternative titles of IMDb's
+# files (about 115 bytes per title, 96 per alternative title; episodes not measurable there) and scaled to
+# the full files' published row counts: a default build comes to roughly 0.6-1 GB and uses about 1 GB of
+# scratch space while it runs.
 FREE_SPACE_WARNING_BYTES = 3 * (1 << 30)
 
 PICKERS = [
     ("basics", "title.basics:", "Required -- path to title.basics.tsv.gz"),
     ("ratings", "title.ratings:", "Recommended -- ratings and vote counts (needed for the vote minimum)"),
     ("episodes", "title.episode:", "Optional -- season and episode numbers (needed to look up episodes)"),
-    ("akas", "title.akas:", "Optional -- alternative titles (Il nome della rosa, ...); the biggest file"),
+    ("akas", "title.akas:", "Optional -- alternative titles (a film's Italian, German, French title ...); the biggest file"),
 ]
 
 INSTRUCTIONS = (
@@ -238,8 +240,8 @@ class ImdbSettingsDialog(LocalDatabaseSettingsDialog):
             return ""
         text = f"Free space where the database goes: {free / (1 << 30):,.1f} GB."
         if free < FREE_SPACE_WARNING_BYTES:
-            text += (" That may not be enough: with the default options the finished database is up to about 1 GB "
-                     "and the build needs about as much again in scratch space. Choose another location or keep less.")
+            text += (" That may not be enough: with the default options the finished database is estimated at "
+                     "0.6-1 GB and the build needs about 1 GB more in scratch space. Choose another location or keep less.")
         return text
 
     def _refresh_status(self) -> None:

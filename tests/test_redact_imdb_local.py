@@ -63,11 +63,11 @@ def tmdb_unreachable(monkeypatch):
 
 def test_an_exact_imdb_id_in_the_filename_is_97_percent(work, bin_, tmp_path, monkeypatch, imdb):
     tmdb_unreachable(monkeypatch)
-    entry = lookup_entry(stub(work, "Some Film (1984) {imdb-tt0087182}.mp4"), env_with(bin_, tmp_path, imdb))
+    entry = lookup_entry(stub(work, "Some Film (1984) {imdb-tt90000001}.mp4"), env_with(bin_, tmp_path, imdb))
     assert entry.status is FileStatus.CHANGED and entry.review == []
     text = applied_text(entry)
-    assert "auto-applied at 97%" in text and "from IMDb (local database) 'Dune (1984)'" in text
-    assert "title = 'Dune'" in text and "release_date = '1984'" in text
+    assert "auto-applied at 97%" in text and "from IMDb (local database) 'Zarnak (1984)'" in text
+    assert "title = 'Zarnak'" in text and "release_date = '1984'" in text
     assert "genre_tags = 'Adventure, Drama, Science Fiction'" in text and "content_type = 'Movie'" in text
     assert any("TMDB lookup unavailable" in n for n in entry.notes)  # offline: said so, not failed
     assert entry.failures == []
@@ -75,30 +75,30 @@ def test_an_exact_imdb_id_in_the_filename_is_97_percent(work, bin_, tmp_path, mo
 
 def test_an_id_in_the_comment_field_is_used_too(work, bin_, tmp_path, monkeypatch, imdb):
     tmdb_unreachable(monkeypatch)
-    vf = stub(work, "movie.mp4", comment="https://www.imdb.com/title/tt1160419/")
+    vf = stub(work, "movie.mp4", comment="https://www.imdb.com/title/tt90000002/")
     entry = lookup_entry(vf, env_with(bin_, tmp_path, imdb))
     assert entry.status is FileStatus.CHANGED and "release_date = '2021'" in applied_text(entry)
 
 
 def test_an_unknown_id_is_a_note_and_the_normal_lookup_carries_on(work, bin_, tmp_path, monkeypatch, imdb):
     tmdb_unreachable(monkeypatch)
-    entry = lookup_entry(stub(work, "Dune.1984.tt0000999.mp4"), env_with(bin_, tmp_path, imdb))
-    assert any("doesn't have tt0000999" in n for n in entry.notes)
+    entry = lookup_entry(stub(work, "Zarnak.1984.tt90000999.mp4"), env_with(bin_, tmp_path, imdb))
+    assert any("doesn't have tt90000999" in n for n in entry.notes)
     assert entry.status is FileStatus.CHANGED and "release_date = '1984'" in applied_text(entry)
 
 
-def test_title_and_year_pick_the_right_dune(work, bin_, tmp_path, monkeypatch, imdb):
+def test_title_and_year_pick_the_right_zarnak(work, bin_, tmp_path, monkeypatch, imdb):
     tmdb_unreachable(monkeypatch)
-    old = lookup_entry(stub(work, "Dune.1984.1080p.mp4"), env_with(bin_, tmp_path, imdb))
+    old = lookup_entry(stub(work, "Zarnak.1984.1080p.mp4"), env_with(bin_, tmp_path, imdb))
     assert old.status is FileStatus.CHANGED and "auto-applied at 95%" in applied_text(old)
-    assert "release_date = '1984'" in applied_text(old) and "IMDb tt0087182" not in applied_text(old)
-    new = lookup_entry(stub(work, "Dune.2021.mp4"), env_with(bin_, tmp_path, imdb))
+    assert "release_date = '1984'" in applied_text(old) and "IMDb tt90000001" not in applied_text(old)
+    new = lookup_entry(stub(work, "Zarnak.2021.mp4"), env_with(bin_, tmp_path, imdb))
     assert "release_date = '2021'" in applied_text(new) and "Action, Adventure, Drama" in applied_text(new)
 
 
 def test_a_wrong_or_off_by_one_year_needs_review(work, bin_, tmp_path, monkeypatch, imdb):
     tmdb_unreachable(monkeypatch)
-    for name in ("Dune.1999.mp4", "Dune.1985.mp4"):
+    for name in ("Zarnak.1999.mp4", "Zarnak.1985.mp4"):
         entry = lookup_entry(stub(work, name), env_with(bin_, tmp_path, imdb))
         assert entry.status is FileStatus.NEEDS_REVIEW and entry.applied == [], name
         assert entry.review[0].confidence == pytest.approx(0.6) and "not the year" in entry.review[0].reason
@@ -106,7 +106,7 @@ def test_a_wrong_or_off_by_one_year_needs_review(work, bin_, tmp_path, monkeypat
 
 def test_a_different_title_is_the_closest_result_40_percent(work, bin_, tmp_path, monkeypatch, imdb):
     tmdb_unreachable(monkeypatch)
-    entry = lookup_entry(stub(work, "Dune.Drifter.2020.mp4"), env_with(bin_, tmp_path, imdb))
+    entry = lookup_entry(stub(work, "Zarnak.Drifter.2020.mp4"), env_with(bin_, tmp_path, imdb))
     assert entry.status is FileStatus.NEEDS_REVIEW or any("found no film" in n for n in entry.notes)
     if entry.review:
         assert entry.review[0].confidence == pytest.approx(0.4)
@@ -114,10 +114,10 @@ def test_a_different_title_is_the_closest_result_40_percent(work, bin_, tmp_path
 
 def test_a_localized_title_resolves_through_the_alternative_titles(work, bin_, tmp_path, monkeypatch, imdb):
     tmdb_unreachable(monkeypatch)
-    entry = lookup_entry(stub(work, "Il nome della rosa (1986).mp4"), env_with(bin_, tmp_path, imdb))
+    entry = lookup_entry(stub(work, "Il codice della brace (1986).mp4"), env_with(bin_, tmp_path, imdb))
     assert entry.status is FileStatus.CHANGED
     text = applied_text(entry)
-    assert "title = 'The Name of the Rose'" in text and "release_date = '1986'" in text
+    assert "title = 'The Ember Cipher'" in text and "release_date = '1986'" in text
 
 
 def test_nothing_found_locally_is_a_note_and_the_online_lookup_runs(work, bin_, tmp_path, monkeypatch, imdb):
@@ -132,18 +132,18 @@ def test_nothing_found_locally_is_a_note_and_the_online_lookup_runs(work, bin_, 
 
 def test_an_episode_resolves_through_the_series_and_numbers(work, bin_, tmp_path, monkeypatch, imdb):
     tmdb_unreachable(monkeypatch)
-    entry = lookup_entry(stub(work, "Breaking Bad S01E02.mp4"), env_with(bin_, tmp_path, imdb))
+    entry = lookup_entry(stub(work, "Quillfeather S01E02.mp4"), env_with(bin_, tmp_path, imdb))
     # the one show with that title + a real S01E02: 95% (a bare title match would be 80%)
     assert entry.status is FileStatus.CHANGED and "auto-applied at 95%" in applied_text(entry)
     text = applied_text(entry)
-    assert "title = \"Cat's in the Bag...\"" in text or "title = 'Cat\\'s" in text or "Cat's in the Bag" in text
-    assert "show_title = 'Breaking Bad'" in text and "season_number = 1" in text and "episode_number = 2" in text
+    assert "title = \"Sparrow's Dilemma...\"" in text or "title = 'Cat\\'s" in text or "Sparrow's Dilemma" in text
+    assert "show_title = 'Quillfeather'" in text and "season_number = 1" in text and "episode_number = 2" in text
     assert "release_date = '2008'" in text and "content_type = 'TV'" in text
 
 
 def test_a_series_title_only_when_the_episode_is_missing_is_80_percent(work, bin_, tmp_path, monkeypatch, imdb):
     tmdb_unreachable(monkeypatch)
-    entry = lookup_entry(stub(work, "Breaking Bad S09E99.mp4"), env_with(bin_, tmp_path, imdb))
+    entry = lookup_entry(stub(work, "Quillfeather S09E99.mp4"), env_with(bin_, tmp_path, imdb))
     assert entry.status is FileStatus.NEEDS_REVIEW
     assert entry.review[0].confidence == pytest.approx(0.8) and "no year to confirm" in entry.review[0].reason
     assert any("no S09E99" in n for n in entry.notes)
@@ -151,36 +151,36 @@ def test_a_series_title_only_when_the_episode_is_missing_is_80_percent(work, bin
 
 def test_two_series_with_the_title_are_ambiguous_unless_the_year_agrees(work, bin_, tmp_path, monkeypatch, imdb):
     tmdb_unreachable(monkeypatch)
-    entry = lookup_entry(stub(work, "The Office S02E05.mp4"), env_with(bin_, tmp_path, imdb))
+    entry = lookup_entry(stub(work, "Harbor Lights S02E05.mp4"), env_with(bin_, tmp_path, imdb))
     assert entry.status is FileStatus.NEEDS_REVIEW and entry.review[0].confidence == pytest.approx(0.6)
-    entry = lookup_entry(stub(work, "The Office (2005) S02E05.mp4"), env_with(bin_, tmp_path, imdb))
-    assert entry.status is FileStatus.CHANGED and "title = 'Halloween'" in applied_text(entry)
-    entry = lookup_entry(stub(work, "The Office (2001) S02E05.mp4"), env_with(bin_, tmp_path, imdb))
-    assert any("no S02E05 for 'The Office'" in n for n in entry.notes)  # the UK series has no such episode
+    entry = lookup_entry(stub(work, "Harbor Lights (2005) S02E05.mp4"), env_with(bin_, tmp_path, imdb))
+    assert entry.status is FileStatus.CHANGED and "title = 'Moulting'" in applied_text(entry)
+    entry = lookup_entry(stub(work, "Harbor Lights (2001) S02E05.mp4"), env_with(bin_, tmp_path, imdb))
+    assert any("no S02E05 for 'Harbor Lights'" in n for n in entry.notes)  # the UK series has no such episode
 
 
 def test_an_episode_imdb_id_gives_series_and_numbers(work, bin_, tmp_path, monkeypatch, imdb):
     tmdb_unreachable(monkeypatch)
-    entry = lookup_entry(stub(work, "episode tt0430951.mp4"), env_with(bin_, tmp_path, imdb))
+    entry = lookup_entry(stub(work, "episode tt90000022.mp4"), env_with(bin_, tmp_path, imdb))
     text = applied_text(entry)
     assert entry.status is FileStatus.CHANGED and "auto-applied at 97%" in text
-    assert "show_title = 'The Office'" in text and "season_number = 2" in text and "episode_number = 5" in text
+    assert "show_title = 'Harbor Lights'" in text and "season_number = 2" in text and "episode_number = 5" in text
 
 
 # --- local first, online for the rest --------------------------------------------------------------
 
 
 def test_local_fields_win_and_tmdb_fills_only_what_is_left(work, bin_, tmp_path, monkeypatch, imdb):
-    fake_tmdb(monkeypatch, movies=[movie("Dune", 1984)])
+    fake_tmdb(monkeypatch, movies=[movie("Zarnak", 1984)])
     monkeypatch.setattr(tmdb_client, "get_movie_details", lambda i: {
-        "title": "Dune (TMDB spelling)", "description": "Spice.", "genre_tags": "Sci-Fi", "release_date": "1984-12-14",
+        "title": "Zarnak (TMDB spelling)", "description": "Spice.", "genre_tags": "Sci-Fi", "release_date": "1984-12-14",
         "language": "en", "director": "Lynch", "cast": "MacLachlan", "studio": "Dino", "_poster_path": None})
-    vf = stub(work, "Dune.1984.mp4", director="Mine")
+    vf = stub(work, "Zarnak.1984.mp4", director="Mine")
     entry = lookup_entry(vf, env_with(bin_, tmp_path, imdb))
     assert entry.status is FileStatus.CHANGED
     text = applied_text(entry)
-    assert "from IMDb (local database) + TMDB 'Dune (1984)'" in text
-    assert "title = 'Dune'" in text and "TMDB spelling" not in text            # IMDb asked first, wins
+    assert "from IMDb (local database) + TMDB 'Zarnak (1984)'" in text
+    assert "title = 'Zarnak'" in text and "TMDB spelling" not in text            # IMDb asked first, wins
     assert "genre_tags = 'Adventure, Drama, Science Fiction'" in text           # not TMDB's "Sci-Fi"
     assert "release_date = '1984-12-14'" in text                                # the fuller date beats a bare year
     assert "description = 'Spice.'" in text and "cast = 'MacLachlan'" in text and "studio = 'Dino'" in text
@@ -189,15 +189,15 @@ def test_local_fields_win_and_tmdb_fills_only_what_is_left(work, bin_, tmp_path,
 
 def test_tmdb_is_not_asked_when_the_local_fields_cover_everything_left(work, bin_, tmp_path, monkeypatch, imdb):
     no_online(monkeypatch)
-    vf = stub(work, "Dune.1984.mp4", description="d", director="x", cast="c", studio="s", language="en")
+    vf = stub(work, "Zarnak.1984.mp4", description="d", director="x", cast="c", studio="s", language="en")
     entry = lookup_entry(vf, env_with(bin_, tmp_path, imdb))
-    assert entry.status is FileStatus.CHANGED and "title = 'Dune'" in applied_text(entry)
+    assert entry.status is FileStatus.CHANGED and "title = 'Zarnak'" in applied_text(entry)
     assert not any("TMDB" in n for n in entry.notes)
 
 
 def test_a_local_match_never_overwrites_a_filled_field(work, bin_, tmp_path, monkeypatch, imdb):
     tmdb_unreachable(monkeypatch)
-    vf = stub(work, "Dune.1984.mp4", title="My Title", genre_tags="Noir", release_date="1984-06-01")
+    vf = stub(work, "Zarnak.1984.mp4", title="My Title", genre_tags="Noir", release_date="1984-06-01")
     ctx = rs.VideoCtx(vf, env_with(bin_, tmp_path, imdb))
     step = rs.LookupStep()
     result = step.run(ctx)
@@ -209,30 +209,30 @@ def test_a_local_match_never_overwrites_a_filled_field(work, bin_, tmp_path, mon
 
 def test_the_combined_confidence_is_the_lower_of_the_two(work, bin_, tmp_path, monkeypatch, imdb):
     # IMDb is certain (title and year match exactly) but TMDB finds two equally good films: reviewed.
-    fake_tmdb(monkeypatch, movies=[movie("Dune", 1984, 1), movie("Dune", 1984, 2)])
-    entry = lookup_entry(stub(work, "Dune.1984.mp4"), env_with(bin_, tmp_path, imdb))
+    fake_tmdb(monkeypatch, movies=[movie("Zarnak", 1984, 1), movie("Zarnak", 1984, 2)])
+    entry = lookup_entry(stub(work, "Zarnak.1984.mp4"), env_with(bin_, tmp_path, imdb))
     assert entry.status is FileStatus.NEEDS_REVIEW
     assert entry.review[0].confidence == pytest.approx(0.6) and "IMDb (local database) + TMDB" in str(entry.review[0].value)
 
 
 def test_a_tmdb_match_of_another_year_is_not_mixed_in(work, bin_, tmp_path, monkeypatch, imdb):
-    fake_tmdb(monkeypatch, movies=[movie("Dune", 2021)])
-    entry = lookup_entry(stub(work, "Dune.1984.mp4"), env_with(bin_, tmp_path, imdb))
+    fake_tmdb(monkeypatch, movies=[movie("Zarnak", 2021)])
+    entry = lookup_entry(stub(work, "Zarnak.1984.mp4"), env_with(bin_, tmp_path, imdb))
     text = applied_text(entry)
-    assert entry.status is FileStatus.CHANGED and "from IMDb (local database) 'Dune (1984)'" in text
+    assert entry.status is FileStatus.CHANGED and "from IMDb (local database) 'Zarnak (1984)'" in text
     assert "description" not in text and "director" not in text
     assert any("different year" in n for n in entry.notes)
 
 
 def test_tv_local_first_then_tmdb_for_the_rest(work, bin_, tmp_path, monkeypatch, imdb):
-    fake_tmdb(monkeypatch, shows=[show("Breaking Bad", 2008)], episodes={"title": "TMDB ep", "description": "Ep."})
+    fake_tmdb(monkeypatch, shows=[show("Quillfeather", 2008)], episodes={"title": "TMDB ep", "description": "Ep."})
     monkeypatch.setattr(tmdb_client, "get_tv_show_details", lambda i: {
-        "show_title": "Breaking Bad", "description": "Chemistry.", "genre_tags": "Drama", "release_date": "2008-01-20",
+        "show_title": "Quillfeather", "description": "Chemistry.", "genre_tags": "Drama", "release_date": "2008-01-20",
         "network": "AMC", "_poster_path": None})
-    entry = lookup_entry(stub(work, "Breaking Bad (2008) S01E02.mp4"), env_with(bin_, tmp_path, imdb))
+    entry = lookup_entry(stub(work, "Quillfeather (2008) S01E02.mp4"), env_with(bin_, tmp_path, imdb))
     text = applied_text(entry)
     assert entry.status is FileStatus.CHANGED and "IMDb (local database) + TMDB" in text
-    assert "Cat's in the Bag" in text and "TMDB ep" not in text        # the episode title is IMDb's
+    assert "Sparrow's Dilemma" in text and "TMDB ep" not in text        # the episode title is IMDb's
     assert "description = 'Ep.'" in text and "network = 'AMC'" in text   # plot and network from TMDB
 
 
@@ -242,15 +242,15 @@ def test_thetvdb_still_backs_up_a_local_tv_match(work, bin_, tmp_path, monkeypat
 
     monkeypatch.setattr(tmdb_client, "search_tv", no_key)
     monkeypatch.setattr(tvdb_client, "search_series", lambda title: [
-        tvdb_client.SeriesCandidate(9, "Breaking Bad", "2008-01-20", "", None)])
+        tvdb_client.SeriesCandidate(9, "Quillfeather", "2008-01-20", "", None)])
     monkeypatch.setattr(tvdb_client, "get_series_details", lambda i: {
-        "show_title": "Breaking Bad", "description": "Chem.", "genre_tags": "Drama", "release_date": "",
+        "show_title": "Quillfeather", "description": "Chem.", "genre_tags": "Drama", "release_date": "",
         "network": "AMC", "_poster_path": None})
     monkeypatch.setattr(tvdb_client, "get_episode_details", lambda i, s, e: {
         "title": "Cats", "description": "", "release_date": "2008-01-27", "season_number": s, "episode_number": e})
-    entry = lookup_entry(stub(work, "Breaking Bad (2008) S01E02.mp4"), env_with(bin_, tmp_path, imdb))
+    entry = lookup_entry(stub(work, "Quillfeather (2008) S01E02.mp4"), env_with(bin_, tmp_path, imdb))
     text = applied_text(entry)
-    assert "IMDb (local database) + TheTVDB" in text and "network = 'AMC'" in text and "Cat's in the Bag" in text
+    assert "IMDb (local database) + TheTVDB" in text and "network = 'AMC'" in text and "Sparrow's Dilemma" in text
     assert any("No TMDB API key" in n for n in entry.notes)
 
 
@@ -278,7 +278,7 @@ def test_a_foreign_file_as_the_database_is_a_note_too(work, bin_, tmp_path, monk
     other = tmp_path / "other.db"
     other.write_bytes(b"this is not sqlite")
     tmdb_unreachable(monkeypatch)
-    entry = lookup_entry(stub(work, "Dune.1984.mp4"), env_with(bin_, tmp_path, str(other)))
+    entry = lookup_entry(stub(work, "Zarnak.1984.mp4"), env_with(bin_, tmp_path, str(other)))
     assert entry.status is FileStatus.UNCHANGED and entry.failures == []
     assert any("unavailable" in n for n in entry.notes) and any("TMDB lookup unavailable" in n for n in entry.notes)
 
@@ -292,10 +292,10 @@ def test_nothing_online_and_nothing_local_is_just_notes(work, bin_, tmp_path, mo
 
 def test_options_switch_the_local_lookup_off_per_kind(work, bin_, tmp_path, monkeypatch, imdb):
     no_online(monkeypatch)
-    entry = lookup_entry(stub(work, "Dune.1984.mp4"), env_with(bin_, tmp_path, imdb),
+    entry = lookup_entry(stub(work, "Zarnak.1984.mp4"), env_with(bin_, tmp_path, imdb),
                          options={"lookup": {"movies": False}})
     assert entry.status is FileStatus.UNCHANGED
-    entry = lookup_entry(stub(work, "Dune (1984) tt0087182.mp4"), env_with(bin_, tmp_path, imdb),
+    entry = lookup_entry(stub(work, "Zarnak (1984) tt90000001.mp4"), env_with(bin_, tmp_path, imdb),
                          options={"lookup": {"movies": False}})
     assert entry.status is FileStatus.UNCHANGED
 
