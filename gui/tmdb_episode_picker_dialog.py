@@ -29,6 +29,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 
 from gui.lookup import run_lookup
+from gui.tmdb_attribution import TmdbAttributionFooter
 from core.tmdb_client import get_tv_seasons, get_season_episodes, TMDBError, EpisodeInfo
 
 
@@ -68,6 +69,9 @@ class TVEpisodePickerDialog(QDialog):
         self.overview_box.setReadOnly(True)
         self.overview_box.setMaximumHeight(100)
         layout.addWidget(self.overview_box)
+
+        self.attribution = TmdbAttributionFooter(self)
+        layout.addWidget(self.attribution)
 
         button_row = QHBoxLayout()
         button_row.addStretch()

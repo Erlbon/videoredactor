@@ -27,6 +27,7 @@ a = Analysis(
         ("CHANGELOG.md", "."),
         ("CREDITS.md", "."),
         ("assets/icon.ico", "assets"),
+        ("assets/tmdb-logo.svg", "assets"),
     ],
     hiddenimports=[],
     hookspath=[],

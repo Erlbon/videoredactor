@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 
 from gui.lookup import run_lookup
+from gui.tmdb_attribution import TmdbAttributionFooter
 from core.tmdb_client import (
     search_movies, search_tv, MovieCandidate, TVCandidate, TMDBError,
 )
@@ -113,6 +114,12 @@ class TMDBSearchDialog(QDialog):
         self.overview_label.setReadOnly(True)
         self.overview_label.setMaximumHeight(100)
         layout.addWidget(self.overview_label)
+
+        # TMDB's required notice and logo; not for the other sources this
+        # dialog also serves (the local IMDb database has its own).
+        if source is None:
+            self.attribution = TmdbAttributionFooter(self)
+            layout.addWidget(self.attribution)
 
         button_row = QHBoxLayout()
         button_row.addStretch()

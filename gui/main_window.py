@@ -85,7 +85,7 @@ from redactor_common.gui.column_menu import show_column_header_context_menu
 from redactor_common.gui.column_settings_dialog import ColumnSettingsDialog
 from redactor_common.gui.collapsible_splitter import SplitterPaneCollapser
 from redactor_common.gui.zoom_toolbar import TableZoomController
-from redactor_common.gui.about_dialog import AboutDialog, ChangelogDialog, CreditsDialog
+from redactor_common.gui.about_dialog import AboutDialog, ChangelogDialog
 from redactor_common.gui.rename_single_file import rename_single_file as prompt_rename_single_file
 from redactor_common.gui.sortable_table import NumericTableWidgetItem, suspend_sorting
 from redactor_common.gui import standard_shortcuts as shortcuts
@@ -99,6 +99,7 @@ from gui.lookup import run_lookup
 from gui.tag_panel import TagPanel, FIELD_LABELS
 from gui.tmdb_search_dialog import SearchSource, TMDBSearchDialog
 from gui.tmdb_episode_picker_dialog import TVEpisodePickerDialog
+from gui.tmdb_attribution import AppCreditsDialog
 from gui.tvdb_search_dialog import TVDBSearchDialog
 from gui.tvdb_episode_picker_dialog import TVDBEpisodePickerDialog
 from gui.subtitle_search_dialog import SubtitleSearchDialog
@@ -3060,4 +3061,4 @@ class MainWindow(QMainWindow):
         ChangelogDialog(str(CHANGELOG_PATH), parent=self).exec()
 
     def _on_show_credits(self) -> None:
-        CreditsDialog(str(CREDITS_PATH), parent=self).exec()
+        AppCreditsDialog(str(CREDITS_PATH), parent=self).exec()

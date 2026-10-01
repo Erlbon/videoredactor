@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-01#06 — TMDB attribution: current notice wording and the TMDB logo
+
+- **The TMDB notice now uses TMDB's current wording:** "This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB." (it said the old "uses the TMDB API but is not endorsed or certified"). In Credits and About, and under the results of the TMDB search and the season/episode picker.
+- **The official TMDB logo (their "blue short" SVG, unmodified, only scaled) is shown small** under the Credits text and in the footer of the TMDB lookup dialogs, smaller than the app's own icon as TMDB's terms ask. It is bundled with the exe (`assets/tmdb-logo.svg`); its source and download date are in Credits. The IMDb lookup dialog, which reuses the search dialog, does not show it.
+
 ## 2026-10-01#05 — West and East Germany in the IMDb alternative-title regions
 
 - **The IMDb database's alternative-title regions now include "West Germany (historic)" and "East Germany (historic)"** (IMDb's codes XWG and DDDE). IMDb tags many pre-1990 German release titles with them instead of plain Germany: in the real file sample XWG was on about 6% as many rows as Germany and DDDE on about 0.6%.

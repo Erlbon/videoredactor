@@ -16,7 +16,7 @@ into files one at a time.
   Misc) that shows only the fields relevant to what you've got selected.
 - **TMDB lookup** — search and match a file against The Movie Database,
   pulling in cast, crew, synopsis, and poster art. Every match is
-  confirmed by hand; nothing is auto-applied.
+  confirmed by hand; nothing is auto-applied. This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.
 - **Season & episode picker** for TV — after matching a show, pick the
   exact season and episode so per-episode titles and air dates land
   correctly, not just show-level metadata.

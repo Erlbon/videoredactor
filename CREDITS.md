@@ -34,8 +34,11 @@ system:
 ## APIs
 
 - **[The Movie Database (TMDB)](https://www.themoviedb.org/)** — movie
-  metadata lookup. This product uses the TMDB API but is not endorsed
-  or certified by TMDB.
+  metadata lookup. This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.
+  The TMDB logo shown in the lookup dialogs and under this text is
+  TMDB's official "blue short" logo, unmodified (only scaled), from
+  https://www.themoviedb.org/about/logos-attribution (downloaded
+  2026-10-01 as `assets/tmdb-logo.svg`).
 - **[TheTVDB](https://thetvdb.com/)** — TV episode metadata lookup.
   Metadata provided by TheTVDB — please consider contributing missing
   information there, or supporting them directly.
