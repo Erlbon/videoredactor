@@ -2,164 +2,146 @@
 gui/duplicates_dialog.py
 
 Media > Find Duplicates... (core/video_duplicates.py): hashes one
-frame of every loaded file that has a same-length neighbour (on a worker
-thread per file, under a cancellable progress dialog, so the window keeps
-painting), then lists the groups of probable duplicates for review.
+frame of every loaded file that has a same-length neighbour, groups the
+files whose pictures match, and hands the groups to redactor_common's
+shared review dialog (gui/duplicates_dialog.py there). This module is
+only the video side of it: the threshold prompt, the finding (on the
+worker thread, under the shared cancellable progress dialog), the tier
+and reason of each group, and what the app does afterwards (drop
+trashed files from the list, select the picked ones).
 
-Review only: nothing is changed unless the user picks an action --
-Reveal in folder, Open in the default app, Select these in the main list,
-or (behind an explicit confirm) Move selected to the Recycle Bin. Nothing
-is cached on disk; the hashes live only for this run.
+Review only: nothing is changed unless the user picks an action in the
+shared dialog. Per the family policy duplicates are not errors, so the
+dialog selects nothing and the user can mark a group "Not duplicates";
+that is remembered in videoredactor_duplicates_dismissed.json by the
+members' video fingerprints (core/video_fingerprint.py), which survive a
+tag edit, a rename or a move. The frame hashes themselves live only for
+this run.
 """
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (
-    QAbstractItemView,
-    QDialog,
-    QDialogButtonBox,
-    QHeaderView,
-    QInputDialog,
-    QLabel,
-    QMessageBox,
-    QTreeWidget,
-    QTreeWidgetItem,
-    QVBoxLayout,
-)
-from redactor_common.core.os_utils import open_with_default_app, reveal_in_file_manager
-from redactor_common.core.trash import TrashError, move_to_trash
-from redactor_common.gui.background_call import call_in_background
-from redactor_common.gui.progress import run_with_progress
+from typing import Callable
 
+from PyQt6.QtWidgets import QInputDialog, QMessageBox
+from redactor_common.core.duplicates import (
+    TIER_IDENTICAL,
+    TIER_POSSIBLE,
+    TIER_STRONG,
+    DuplicateGroup,
+    DuplicateMember,
+    JsonDismissStore,
+)
+from redactor_common.core.scan_stamp import content_fingerprint
+from redactor_common.gui.duplicates_dialog import run_find_duplicates
+
+from core.app_paths import base_dir
 from core.config import get_setting, set_setting
 from core.format_helpers import format_duration, format_file_size
 from core.video_duplicates import (
+    DURATION_TOLERANCE,
     HAMMING_THRESHOLD,
     Candidate,
     candidates_needing_hash,
     frame_hash,
     group_duplicates,
+    hamming,
 )
 from core.video_file import VideoFile
+from core.video_fingerprint import video_fingerprint
 
 TITLE = "Find Duplicates"
-FILE_ROLE = Qt.ItemDataRole.UserRole
-COLUMNS = ["File", "Folder", "Duration", "Resolution", "Size", "Video codec"]
+DISMISSED_FILE = "videoredactor_duplicates_dismissed.json"
+COLUMNS = [
+    ("name", "File"), ("folder", "Folder"), ("duration", "Duration"),
+    ("resolution", "Resolution"), ("size", "Size"), ("codec", "Video codec"),
+]
+INTRO_TEXT = "Files in a group have nearly the same length and a matching picture."
 
 
-class DuplicatesDialog(QDialog):
-    """The groups of probable duplicates. After exec(): `to_select` holds
-    the files for "Select these in the list" (dialog accepted) and
-    `trashed` the files already moved to the Recycle Bin."""
+def dismiss_store() -> JsonDismissStore:
+    """The "not duplicates" decisions, next to the app's other settings."""
+    return JsonDismissStore(str(base_dir() / DISMISSED_FILE))
 
-    def __init__(self, groups: list[list[VideoFile]], parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(TITLE)
-        self.resize(1000, 480)
-        self.to_select: list[VideoFile] = []
-        self.trashed: list[VideoFile] = []
 
-        layout = QVBoxLayout(self)
-        summary = QLabel(
-            f"{len(groups)} group(s) of probable duplicates. Files in a group have nearly the same "
-            "length and a matching picture; <b>you decide which to keep</b> -- nothing is changed "
-            "until you choose an action below. Select the files you want to act on."
-        )
-        summary.setWordWrap(True)
-        layout.addWidget(summary)
+def _member(vf: VideoFile, fingerprint: str) -> DuplicateMember:
+    meta = vf.metadata
+    return DuplicateMember(
+        vf, str(vf.path),
+        {
+            "name": vf.path.name, "folder": str(vf.path.parent),
+            "duration": format_duration(meta.duration_seconds), "resolution": meta.resolution,
+            "size": format_file_size(vf.size_bytes), "codec": meta.video_codec,
+        },
+        fingerprint,
+    )
 
-        self.tree = QTreeWidget()
-        self.tree.setColumnCount(len(COLUMNS))
-        self.tree.setHeaderLabels(COLUMNS)
-        self.tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.tree.setRootIsDecorated(True)
-        header = self.tree.header()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setStretchLastSection(False)
-        for col, width in enumerate((260, 300, 80, 90, 80, 90)):
-            self.tree.setColumnWidth(col, width)
-        for number, group in enumerate(groups, 1):
-            parent_item = QTreeWidgetItem([f"Group {number} ({len(group)} files)"])
-            self.tree.addTopLevelItem(parent_item)
-            for vf in group:
-                meta = vf.metadata
-                row = QTreeWidgetItem([
-                    vf.path.name, str(vf.path.parent), format_duration(meta.duration_seconds),
-                    meta.resolution, format_file_size(vf.size_bytes), meta.video_codec,
-                ])
-                row.setData(0, FILE_ROLE, vf)
-                row.setToolTip(0, str(vf.path))
-                parent_item.addChild(row)
-            parent_item.setExpanded(True)
-        layout.addWidget(self.tree)
 
-        buttons = QDialogButtonBox()
-        self.reveal_button = buttons.addButton("Reveal in Folder", QDialogButtonBox.ButtonRole.ActionRole)
-        self.open_button = buttons.addButton("Open", QDialogButtonBox.ButtonRole.ActionRole)
-        self.select_button = buttons.addButton("Select These in the List", QDialogButtonBox.ButtonRole.AcceptRole)
-        self.trash_button = buttons.addButton("Move Selected to Recycle Bin...", QDialogButtonBox.ButtonRole.ActionRole)
-        buttons.addButton(QDialogButtonBox.StandardButton.Close)
-        self.reveal_button.clicked.connect(self._reveal)
-        self.open_button.clicked.connect(self._open)
-        self.select_button.clicked.connect(self._select_in_list)
-        self.trash_button.clicked.connect(self._trash)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+def _max_distance(group: list[Candidate]) -> int:
+    """The largest frame-hash distance between any two members (a chained
+    group can have far-apart ends)."""
+    hashes = [c.hash for c in group if c.hash is not None]
+    return max((hamming(a, b) for i, a in enumerate(hashes) for b in hashes[i + 1:]), default=0)
 
-    def selected_files(self) -> list[VideoFile]:
-        files = []
-        for item in self.tree.selectedItems():
-            vf = item.data(0, FILE_ROLE)
-            if vf is not None:
-                files.append(vf)
-        return files
 
-    def _reveal(self) -> None:
-        for vf in self.selected_files():
-            reveal_in_file_manager(str(vf.path))
+def tier_for(group: list[Candidate], identical: bool) -> tuple[str, str]:
+    """(tier, reason) of a frame-hash group. Byte-identical files are
+    Identical; every member on the very same frame hash is a Strong
+    match; any looser match (up to the user's threshold) is Possible."""
+    window = f"lengths within {DURATION_TOLERANCE:g} s"
+    if identical:
+        return TIER_IDENTICAL, "same file contents"
+    distance = _max_distance(group)
+    if distance == 0:
+        return TIER_STRONG, f"matching frame hash, {window}"
+    return TIER_POSSIBLE, f"similar frame hash (up to {distance} of 64 bits apart), {window}"
 
-    def _open(self) -> None:
-        for vf in self.selected_files():
-            open_with_default_app(str(vf.path))
 
-    def _select_in_list(self) -> None:
-        self.to_select = self.selected_files()
-        if self.to_select:
-            self.accept()
+def find_groups(
+    candidates: list[Candidate],
+    threshold: int,
+    progress: Callable[..., None],
+    cancelled: Callable[[], bool],
+    unreadable: list[str],
+) -> list[DuplicateGroup]:
+    """The shared dialog's find_fn body, on the worker thread: hash a
+    frame of every file with a same-length neighbour, group by hash, then
+    fingerprint the members of the groups found (their dismissal identity)
+    and check each group for byte-identical files. Unreadable files are
+    named in `unreadable`; [] when cancelled."""
+    needed = candidates_needing_hash(candidates)
+    total = len(needed)
+    for done, candidate in enumerate(needed):
+        if cancelled():
+            return []
+        vf: VideoFile = candidate.key  # type: ignore[assignment]
+        progress(done, total, f"Reading a frame of {vf.path.name}")
+        try:
+            candidate.hash = frame_hash(str(vf.path), candidate.duration)
+        except Exception:  # an unreadable file just drops out of the comparison
+            candidate.hash = None
+        if candidate.hash is None:
+            unreadable.append(vf.path.name)
 
-    def _trash(self) -> None:
-        files = self.selected_files()
-        if not files:
-            return
-        names = "\n".join(vf.path.name for vf in files[:10]) + ("\n..." if len(files) > 10 else "")
-        answer = QMessageBox.question(
-            self, TITLE,
-            f"Move {len(files)} file(s) to the Recycle Bin?\n\n{names}\n\nThey can be restored from the Recycle Bin.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
-            return
-        failures = []
-        for vf in files:
-            try:
-                move_to_trash(str(vf.path))
-            except (TrashError, OSError) as exc:
-                failures.append(f"{vf.path.name}: {exc}")
-                continue
-            self.trashed.append(vf)
-            self._remove_row(vf)
-        if failures:
-            QMessageBox.warning(self, TITLE, "Couldn't move to the Recycle Bin:\n\n" + "\n".join(failures))
-
-    def _remove_row(self, vf: VideoFile) -> None:
-        for g in range(self.tree.topLevelItemCount() - 1, -1, -1):
-            group = self.tree.topLevelItem(g)
-            for c in range(group.childCount() - 1, -1, -1):
-                if group.child(c).data(0, FILE_ROLE) is vf:
-                    group.takeChild(c)
-            if group.childCount() < 2:  # a lone file is no longer a duplicate
-                self.tree.takeTopLevelItem(g)
+    found = group_duplicates(candidates, threshold)
+    total += sum(len(g) for g in found)
+    done = len(needed)
+    groups: list[DuplicateGroup] = []
+    for group in found:
+        members = []
+        contents = set()
+        for candidate in group:
+            if cancelled():
+                return []
+            vf = candidate.key  # type: ignore[assignment]
+            progress(done, total, f"Fingerprinting {vf.path.name}")
+            done += 1
+            members.append(_member(vf, video_fingerprint(str(vf.path))))
+            contents.add(content_fingerprint(str(vf.path)))
+        identical = len(contents) == 1 and "" not in contents
+        tier, reason = tier_for(group, identical)
+        groups.append(DuplicateGroup(f"frame:{members[0].path}", tier, reason, members))
+    return groups
 
 
 def find_duplicates_flow(window, files: list[VideoFile]) -> None:
@@ -182,37 +164,36 @@ def find_duplicates_flow(window, files: list[VideoFile]) -> None:
         return
 
     unreadable: list[str] = []
+    state = {"cancelled": False, "finished": False}
 
-    def step(candidate: Candidate, _index: int) -> None:
-        vf: VideoFile = candidate.key  # type: ignore[assignment]
-        try:
-            candidate.hash = call_in_background(frame_hash, str(vf.path), candidate.duration)
-        except Exception:  # an unreadable file just drops out of the comparison
-            candidate.hash = None
-        if candidate.hash is None:
-            unreadable.append(vf.path.name)
+    def find_fn(_items, progress, cancelled):
+        groups = find_groups(candidates, threshold, progress, cancelled, unreadable)
+        state["cancelled"] = cancelled()
+        state["finished"] = True
+        return groups
 
-    finished = run_with_progress(
-        window, needed, step, "Comparing videos...", threshold=1, cancellable=True,
-        label_for=lambda c: f"Reading a frame of {c.key.path.name}",
-    )
-    if not finished:
-        window.status_bar.showMessage("Find Duplicates cancelled")
-        return
-
-    groups = [[c.key for c in group] for group in group_duplicates(candidates, threshold)]
-    note = f" ({len(unreadable)} file(s) couldn't be read)" if unreadable else ""
-    if not groups:
-        window.status_bar.showMessage(f"No duplicates found among {len(needed)} file(s) of matching length{note}")
-        QMessageBox.information(window, TITLE, f"No duplicates found.{note}")
-        return
-    window.status_bar.showMessage(f"Found {len(groups)} group(s) of probable duplicates{note}")
-    dialog = DuplicatesDialog(groups, window)
-    result = dialog.exec()
-    if dialog.trashed:
-        gone = {id(vf) for vf in dialog.trashed}
+    def on_trashed(trashed: list) -> None:
+        gone = {id(vf) for vf in trashed}
         window.video_files = [vf for vf in window.video_files if id(vf) not in gone]
         window._refresh_table_rows()
-        window.status_bar.showMessage(f"Moved {len(dialog.trashed)} file(s) to the Recycle Bin")
-    if result == QDialog.DialogCode.Accepted and dialog.to_select:
-        window._reselect_files([id(vf) for vf in dialog.to_select if id(vf) not in {id(t) for t in dialog.trashed}])
+        window.status_bar.showMessage(f"Moved {len(trashed)} file(s) to the Recycle Bin")
+
+    def on_select_in_list(picked: list) -> None:
+        # The dialog already leaves out files it moved to the Recycle Bin.
+        window._reselect_files([id(vf) for vf in picked])
+
+    dialog = run_find_duplicates(
+        window, [c.key for c in needed], find_fn, COLUMNS,
+        title=TITLE, dismiss_store=dismiss_store(), on_select_in_list=on_select_in_list,
+        on_trashed=on_trashed, intro_text=INTRO_TEXT, progress_label="Comparing videos...",
+        none_found_message="No duplicates found.",
+    )
+    note = f" ({len(unreadable)} file(s) couldn't be read)" if unreadable else ""
+    if dialog is None:
+        if state["cancelled"]:
+            window.status_bar.showMessage("Find Duplicates cancelled")
+        elif state["finished"]:
+            window.status_bar.showMessage(f"No duplicates found among {len(needed)} file(s) of matching length{note}")
+        return
+    if not dialog.trashed:
+        window.status_bar.showMessage(f"Reviewed groups of probable duplicates{note}")

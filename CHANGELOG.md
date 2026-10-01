@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-01#09 — Find Duplicates uses the shared review dialog; "Not duplicates" is remembered
+
+- **Media > Find Duplicates now opens the same review dialog as the other Redactor apps** (redactor_common 2026-10-01-05). What you see differs a little: each group row says how sure the match is and why, e.g. "Strong match: matching frame hash, lengths within 2 s (2 files)", "Possible match: similar frame hash (up to 4 of 64 bits apart), lengths within 2 s" or "Identical: same file contents", strongest first, instead of "Group 1 (2 files)". A short note says duplicates are not always mistakes and that nothing is selected or changed until you pick an action.
+- **New: "Not Duplicates (Hide This Group)"** hides a group you have reviewed; "Show N hidden groups" and "Show This Group Again" bring it back. The decision is kept in `videoredactor_duplicates_dismissed.json` next to the settings file, keyed by each video's content fingerprint, so it survives a rename, a move or a tag edit. A group comes back if a third copy joins it. The file is not part of Export/Import Settings.
+- **Moving files to the Recycle Bin** now lists the full paths in the confirmation, refuses to remove every file of a group at once (one must stay), and the main list drops the moved files immediately. Double-click or Enter on a file opens it.
+- The threshold prompt, the "No two loaded files have the same length" message and the cancellable progress window work as before; the progress label now also shows a short fingerprinting step for the files of the groups found.
+- Internal: the app-local dialog is gone; the frame-hash grouping in `core/video_duplicates.py` is unchanged and feeds the shared dialog.
+
 ## 2026-10-01#08 — The thumbnail cache is pruned and can no longer hold a broken thumbnail
 
 - **The preview thumbnail cache (the app's own `videoredactor_thumbnails` folder in the temp folder) is now bounded.** The first time a thumbnail is needed in a session, files older than 14 days are deleted, then the oldest ones until at most 5,000 files / 200 MB remain (with a 2-second time budget, in the background preview thread). Only files with the app's thumbnail names are touched, and never outside that folder.
