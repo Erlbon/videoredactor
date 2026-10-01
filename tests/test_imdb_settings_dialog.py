@@ -44,7 +44,7 @@ def test_defaults_are_the_documented_options():
         assert options == BuildOptions()
         assert set(options.types) == {"movie", "tvMovie", "tvSeries", "tvMiniSeries", "tvEpisode", "tvSpecial", "video"}
         assert options.skip_adult and options.min_votes == 5 and options.include_episodes and options.include_akas
-        assert set(options.regions) == {"NO", "DE", "FR", "IT", "US", "GB", "XWW"}
+        assert set(options.regions) == {"NO", "DE", "XWG", "FR", "IT", "US", "GB", "XWW"}
         assert set(dialog.source_edits) == {"basics", "ratings", "episodes", "akas"}
         assert dialog.status_label.text() == "No database yet."
     finally:
@@ -252,3 +252,14 @@ def test_the_attribution_sentence_is_exact_and_shown_wherever_imdb_data_is(imdb_
     assert ATTRIBUTION in " ".join(credits.split())
     source_text = open(mw_module.__file__, encoding="utf-8").read()
     assert "imdb_import.ATTRIBUTION" in source_text  # the real lookup dialog's note carries it
+
+
+def test_the_historic_regions_have_plain_labels_in_the_dialog():
+    dialog = dlg.ImdbSettingsDialog()
+    try:
+        assert dialog.region_boxes["XWG"].text() == "West Germany (historic)" and dialog.region_boxes["XWG"].isChecked()
+        assert dialog.region_boxes["DDDE"].text() == "East Germany (historic)" and not dialog.region_boxes["DDDE"].isChecked()
+        assert dialog.region_boxes["NO"].text() == "Norway (NO)"
+        assert "DDDE" in dialog.region_boxes["DDDE"].toolTip()
+    finally:
+        dialog.close()

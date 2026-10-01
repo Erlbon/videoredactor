@@ -139,8 +139,11 @@ REGION_CHOICES: list[tuple[str, str]] = [
     ("NO", "Norway"), ("DE", "Germany"), ("FR", "France"), ("IT", "Italy"), ("US", "United States"),
     ("GB", "United Kingdom"), ("XWW", "Worldwide (XWW)"), ("SE", "Sweden"), ("DK", "Denmark"),
     ("ES", "Spain"), ("NL", "Netherlands"), ("CA", "Canada"), ("AU", "Australia"),
+    # IMDb tags many pre-1990 German release titles with these historic codes (seen in the real sample: XWG on
+    # ~6% as many rows as DE, DDDE on ~0.6%). The other historic codes (SUHH, CSHH, XYU, ...) are left out.
+    ("XWG", "West Germany (historic)"), ("DDDE", "East Germany (historic)"),
 ]
-DEFAULT_REGIONS = ("NO", "DE", "FR", "IT", "US", "GB", "XWW")
+DEFAULT_REGIONS = ("NO", "DE", "FR", "IT", "US", "GB", "XWW", "XWG")
 
 DEFAULT_MIN_VOTES = 5
 

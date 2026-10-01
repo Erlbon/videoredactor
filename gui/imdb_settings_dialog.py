@@ -163,7 +163,8 @@ class ImdbSettingsDialog(LocalDatabaseSettingsDialog):
         region_grid = QGridLayout()
         self.region_boxes: dict[str, QCheckBox] = {}
         for index, (code, label) in enumerate(REGION_CHOICES):
-            region_box = QCheckBox(f"{label}" if code in label else f"{label} ({code})")
+            region_box = QCheckBox(label if "(" in label else f"{label} ({code})")
+            region_box.setToolTip(f"IMDb region code {code}")
             region_box.setChecked(code in options.regions)
             self.region_boxes[code] = region_box
             region_grid.addWidget(region_box, index // 4, index % 4)

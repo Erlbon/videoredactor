@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-01#05 — West and East Germany in the IMDb alternative-title regions
+
+- **The IMDb database's alternative-title regions now include "West Germany (historic)" and "East Germany (historic)"** (IMDb's codes XWG and DDDE). IMDb tags many pre-1990 German release titles with them instead of plain Germany: in the real file sample XWG was on about 6% as many rows as Germany and DDDE on about 0.6%.
+- **West Germany is ticked by default** (it costs little and finds German titles of older films); East Germany is selectable but off. The other historic codes (Soviet Union, Czechoslovakia, Yugoslavia) are not offered. A database you built earlier keeps the regions it was built with; rebuild to pick up West Germany.
+
 ## 2026-10-01#04 — IMDb importer checked against real file samples; measured sizes
 
 - **Checked against the first ~1 MB of each real IMDb file** (title.basics, title.ratings, title.episode, title.akas; nothing from them is stored in this repository): the headers are exactly as documented, every line has the right number of columns, missing values are `\N`. A build of ~52k titles, ~204k ratings, ~227k episode rows and ~96k alternative titles ran with 0 unreadable lines in about 4 seconds, with the default options and with everything switched on.

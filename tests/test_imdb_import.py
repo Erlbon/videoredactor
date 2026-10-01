@@ -256,3 +256,28 @@ def test_tconst_helpers():
     assert imdb_import.tconst_number("tt0004242") == 4242
     assert imdb_import.tconst_number("nm0000001") is None and imdb_import.tconst_number("tt") is None
     assert imdb_import.imdb_id(4242) == "tt0004242" and imdb_import.imdb_id(12345678) == "tt12345678"
+
+
+def test_historic_german_regions_are_selectable_and_west_germany_is_a_default(tmp_path):
+    assert {"XWG", "DDDE"} <= {code for code, _label in imdb_import.REGION_CHOICES}
+    labels = dict(imdb_import.REGION_CHOICES)
+    assert labels["XWG"] == "West Germany (historic)" and labels["DDDE"] == "East Germany (historic)"
+    assert "XWG" in imdb_import.DEFAULT_REGIONS and "DDDE" not in imdb_import.DEFAULT_REGIONS
+    akas = [
+        ("tt90000003", "1", "Das alte Siegel", "XWG", N, N, N, "0"),
+        ("tt90000003", "2", "Das Siegel der DDR", "DDDE", N, N, N, "0"),
+        ("tt90000003", "3", "Das Siegel", "DE", N, N, N, "0"),
+    ]
+    dest, _s, _f = build(tmp_path, akas=akas)
+    assert {r[0] for r in rows(dest, "select title from akas")} == {"Das alte Siegel", "Das Siegel"}  # default: XWG yes, DDDE no
+    wider = BuildOptions(regions=imdb_import.DEFAULT_REGIONS + ("DDDE",))
+    files = make_dataset(tmp_path / "w", akas=akas)
+    dest2 = str(tmp_path / "w.db")
+    imdb_import.build_imdb_database(files["basics"], dest2, files["ratings"], files["episodes"], files["akas"], wider)
+    assert {r[0] for r in rows(dest2, "select title from akas")} == {"Das alte Siegel", "Das Siegel der DDR", "Das Siegel"}
+    from redactor_common.core.local_db import fts_query
+    db = imdb_import.LocalDatabase(dest2, ("titles", "akas_fts"))
+    try:
+        assert fts_query(db, "akas_fts", "Das Siegel der DDR", prefix=False, key="tconst", from_table="akas") == [90000003]
+    finally:
+        db.close()
