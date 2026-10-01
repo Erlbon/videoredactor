@@ -40,6 +40,7 @@ from core.tmdb_client import (
 )
 from core.tvdb_client import get_series_details, get_episode_details, download_image, TVDBError
 from core.release_name_parser import parse_release_name
+from core.redact_steps import _tv_guess
 from core.sidecars import with_sidecars
 from core.redact_steps import (
     RedactEnv, VideoCtx, build_catalogue, finalize_file, load_recipe, pin_patterns, recipe_is_saved, save_recipe,
@@ -96,7 +97,7 @@ from redactor_common.core.folder_refresh import find_new_files_in_loaded_folders
 from redactor_common.core.version import REDACTOR_COMMON_REPO_URL, REDACTOR_COMMON_VERSION
 from gui.lookup import run_lookup
 from gui.tag_panel import TagPanel, FIELD_LABELS
-from gui.tmdb_search_dialog import TMDBSearchDialog
+from gui.tmdb_search_dialog import SearchSource, TMDBSearchDialog
 from gui.tmdb_episode_picker_dialog import TVEpisodePickerDialog
 from gui.tvdb_search_dialog import TVDBSearchDialog
 from gui.tvdb_episode_picker_dialog import TVDBEpisodePickerDialog
@@ -104,6 +105,7 @@ from gui.subtitle_search_dialog import SubtitleSearchDialog
 from gui.tool_settings_dialog import ToolSettingsDialog
 from gui.vocabulary_editor_dialog import VocabularyEditorDialog
 from gui.api_keys_dialog import ApiKeysDialog
+from core import imdb_settings
 from core.controlled_vocab import (
     get_genre_options, add_genre_option, remove_genre_option,
     get_language_options, add_language_option, remove_language_option,
@@ -424,17 +426,18 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status_bar)
 
     def _look_up_entries(self, key_prefix: str, with_shortcuts: bool = True) -> list[MenuAction]:
-        """The four online sources under Metadata > Look Up, and again in the
+        """The sources under Metadata > Look Up (the offline IMDb database and the online ones), and again in the
         row right-click menu (key_prefix keeps the keys unique; the context
         menu's copy carries no shortcuts, the menu bar's own actions hold
         them)."""
-        def entry(key: str, text: str, slot, shortcut: str) -> MenuAction:
+        def entry(key: str, text: str, slot, shortcut: str | None) -> MenuAction:
             return MenuAction(key_prefix + key, text, slot, shortcut=shortcut if with_shortcuts else None)
 
         return [
             entry("tmdb_movie", "TMDB (&Movie)…", lambda: self._on_import_tmdb("movie"), "Ctrl+M"),
             entry("tmdb_tv", "TMDB (&TV Show)…", lambda: self._on_import_tmdb("tv"), "Ctrl+T"),
             entry("tvdb", "TheTVDB (T&V Show)…", self._on_import_tvdb, "Ctrl+Shift+T"),
+            entry("imdb_local", "IMDb (&Local Database)…", self._on_import_imdb_local, None),
             # Was Ctrl+Shift+O, which is Open Folder in the rest of the family.
             entry("subtitles", "&Subtitles (OpenSubtitles)…", self._on_import_subtitles, "Ctrl+Shift+L"),
         ]
@@ -1852,6 +1855,127 @@ class MainWindow(QMainWindow):
             details_text = _error_details([f"{vf.path.name}: {err}" for vf, err in episode_failures])
             QMessageBox.warning(self, "Some episode lookups failed", details_text)
 
+    # --- IMDb (local database) import ---------------------------------------
+
+    def _imdb_database_path(self) -> str:
+        """The local IMDb database to use; with none set up it offers
+        Tools > IMDb Database... first. "" when there is nothing to use."""
+        from core import imdb_local, imdb_settings
+        from core.imdb_import import ImdbDatabaseError
+
+        name = "IMDb (Local Database)"
+        path = imdb_settings.load_database()
+        if not path or not os.path.isfile(path):
+            reply = QMessageBox.question(
+                self, name,
+                "No local IMDb database is set up yet. It is built from IMDb's free datasets, which you download "
+                "yourself (personal, non-commercial use only).\n\nOpen Tools > IMDb Database... to set it up?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.Yes,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._on_open_imdb_settings()
+            path = imdb_settings.load_database()
+            if not path or not os.path.isfile(path):
+                return ""
+        try:
+            imdb_local.open_database(path)  # fail here, with the file's own message, not once per file
+        except ImdbDatabaseError as exc:
+            QMessageBox.warning(self, name, f"{exc}\n\nCheck Tools > IMDb Database...")
+            return ""
+        return path
+
+    def _on_import_imdb_local(self) -> None:
+        """Metadata > Look Up > IMDb (Local Database): like the TMDB import, but against the
+        offline database. Every file is confirmed by hand: a search dialog (Film or TV show,
+        started from the filename) and, for a show, the season and episode picker. The
+        datasets have no plot, poster or cast; only title, year, genres and episode data are set."""
+        selected = self._selected_video_files()
+        if not selected:
+            QMessageBox.information(self, "No Files Selected", "Select at least one file first.")
+            return
+        loadable = [vf for vf in selected if not vf.load_error]
+        skipped_load_errors = len(selected) - len(loadable)
+        if not loadable:
+            QMessageBox.warning(self, "Cannot Import", "All selected files failed to load -- fix that first.")
+            return
+        path = self._imdb_database_path()
+        if path:
+            self._import_imdb(loadable, skipped_load_errors, path)
+
+    def _import_imdb(self, files: list, skipped_load_errors: int, path: str) -> None:
+        from redactor_common.core.local_db import normalize_words
+
+        from core import imdb_local
+        from core.imdb_import import ImdbDatabaseError
+        from gui.imdb_episode_picker_dialog import ImdbEpisodePickerDialog
+
+        db = imdb_local.open_database(path)
+        source = SearchSource(
+            name="IMDb (Local Database)",
+            movies=lambda query, year=None: imdb_local.search_movies(db, query, year),
+            tv=lambda query, year=None: imdb_local.search_series(db, query, year),
+            errors=(ImdbDatabaseError,),
+            note="Searches your offline IMDb database. IMDb's datasets have no plot, poster or cast: only the "
+                 "title, year, genres and (for shows) episode data are filled in.",
+            switchable=True,
+        )
+        imported = episodes_set = skipped_no_match = 0
+        shows: dict[str, object] = {}  # a show confirmed once is reused for the rest of the batch
+        self._push_undo("IMDb Import", files)
+        for vf in files:
+            guess, tv_title, tv_year = _tv_guess(vf.path.stem)  # a show's "(2005)" is split off its title
+            is_tv = guess.kind == "tv" or vf.metadata.content_type is ContentType.TV
+            title, year = (tv_title, tv_year) if guess.kind == "tv" else (guess.title, guess.year or "")
+            candidate = shows.get(normalize_words(title)) if is_tv else None
+            if candidate is None:
+                dialog = TMDBSearchDialog(
+                    mode="tv" if is_tv else "movie", initial_query=title, initial_year=year,
+                    parent=self, source=source,
+                )
+                if not dialog.exec() or dialog.selected_candidate is None:
+                    skipped_no_match += 1
+                    continue
+                candidate = dialog.selected_candidate
+            if isinstance(candidate, imdb_local.ImdbTVCandidate):
+                shows[normalize_words(title)] = shows[normalize_words(candidate.name)] = candidate
+                vf.metadata.content_type = ContentType.TV
+                self._apply_imdb_fields(vf, imdb_local.show_fields(candidate))
+                episode_dialog = ImdbEpisodePickerDialog(
+                    path, candidate.tconst, candidate.name, initial_season=vf.metadata.season_number or guess.season,
+                    initial_episode=vf.metadata.episode_number or guess.episode, parent=self,
+                )
+                if episode_dialog.exec() and episode_dialog.selected_episode is not None:
+                    self._apply_imdb_fields(vf, imdb_local.episode_fields(episode_dialog.selected_episode), replace_date=True)
+                    episodes_set += 1
+            else:
+                vf.metadata.content_type = ContentType.MOVIE
+                self._apply_imdb_fields(vf, imdb_local.movie_fields(candidate), replace_date=True)
+            vf.dirty = True
+            imported += 1
+
+        self._refresh_table_rows()
+        if self._selected_video_files():
+            self._on_selection_changed()
+        parts = [f"Imported IMDb metadata for {imported} file(s)"]
+        if episodes_set:
+            parts.append(f"{episodes_set} episode(s) matched")
+        if skipped_no_match:
+            parts.append(f"{skipped_no_match} skipped (no match confirmed)")
+        if skipped_load_errors:
+            parts.append(f"{skipped_load_errors} skipped (load errors)")
+        self.status_bar.showMessage(", ".join(parts))
+
+    @staticmethod
+    def _apply_imdb_fields(vf, fields: dict, replace_date: bool = False) -> None:
+        """Writes the confirmed IMDb match into the file's metadata. IMDb's dates are a bare year, so
+        an existing release date that is in the same year (usually a fuller date) is kept."""
+        for name, value in fields.items():
+            if name == "release_date":
+                current = vf.metadata.release_date or ""
+                if current and (current[:4] == str(value)[:4] or not replace_date):
+                    continue
+            setattr(vf.metadata, name, value)
+
     def _apply_tvdb_episode_details(self, tvdb_id: int, details: dict, filename_stem: str = "") -> None:
         """Follow-up step after a TVDB show match: prompt for season +
         episode, then merge episode-level fields into `details` in
@@ -2054,7 +2178,8 @@ class MainWindow(QMainWindow):
         ) != QMessageBox.StandardButton.Yes:
             return
 
-        env = RedactEnv(rename_log=_rename_log(), background=call_in_background)
+        env = RedactEnv(rename_log=_rename_log(), background=call_in_background,
+                        imdb_local=imdb_settings.load_database())
         catalogue = build_catalogue(sample=self._redact_sample_values)
         report = run_redact_dialog(
             self, targets, load_recipe(catalogue), catalogue,

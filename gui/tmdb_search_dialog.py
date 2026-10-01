@@ -12,10 +12,11 @@ and reviewed only.
 """
 
 from __future__ import annotations
-from typing import Optional, Union
+from dataclasses import dataclass
+from typing import Callable, Optional, Union
 
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
+    QComboBox, QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QLineEdit, QPushButton, QLabel, QTextEdit, QMessageBox,
 )
 from PyQt6.QtCore import Qt
@@ -26,6 +27,22 @@ from core.tmdb_client import (
 )
 
 Candidate = Union[MovieCandidate, TVCandidate]
+
+
+@dataclass
+class SearchSource:
+    """Another place to search with this same dialog (the local IMDb database):
+    `movies(query, year=None)` and `tv(query, year=None)` return MovieCandidate /
+    TVCandidate (or subclasses); `errors` are the exception types that mean "the
+    search failed"; `note` is shown above the results; `switchable` adds a
+    Film / TV show chooser (the dialog's `mode` then follows it)."""
+
+    name: str
+    movies: Callable
+    tv: Callable
+    errors: tuple = ()
+    note: str = ""
+    switchable: bool = False
 
 
 class TMDBSearchDialog(QDialog):
@@ -39,16 +56,32 @@ class TMDBSearchDialog(QDialog):
     than hoping the year survives as plain text inside the query.
     """
 
-    def __init__(self, mode: str, initial_query: str = "", initial_year: str = "", parent=None):
+    def __init__(self, mode: str, initial_query: str = "", initial_year: str = "", parent=None,
+                 source: Optional[SearchSource] = None):
         super().__init__(parent)
         self.mode = mode  # 'movie' or 'tv'
+        self.source = source  # None: TMDB
         self.selected_candidate: Optional[Candidate] = None
         self._candidates: list[Candidate] = []
 
-        self.setWindowTitle(f"Search TMDB ({'Movie' if mode == 'movie' else 'TV Show'})")
+        self._set_title()
         self.resize(500, 500)
 
         layout = QVBoxLayout(self)
+
+        if source is not None and source.note:
+            note = QLabel(source.note)
+            note.setWordWrap(True)
+            layout.addWidget(note)
+
+        self.mode_combo: Optional[QComboBox] = None
+        if source is not None and source.switchable:
+            self.mode_combo = QComboBox()
+            self.mode_combo.addItem("Film", "movie")
+            self.mode_combo.addItem("TV show", "tv")
+            self.mode_combo.setCurrentIndex(self.mode_combo.findData(mode))
+            self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+            layout.addWidget(self.mode_combo)
 
         search_row = QHBoxLayout()
         self.query_edit = QLineEdit(initial_query)
@@ -59,7 +92,7 @@ class TMDBSearchDialog(QDialog):
         # dedicated `year` param) -- TV search has no equivalent field
         # here, so this box only shows up in movie mode.
         self.year_edit: Optional[QLineEdit] = None
-        if mode == "movie":
+        if mode == "movie" or source is not None:
             self.year_edit = QLineEdit(initial_year)
             self.year_edit.setPlaceholderText("Year")
             self.year_edit.setMaximumWidth(70)
@@ -95,6 +128,15 @@ class TMDBSearchDialog(QDialog):
         if initial_query:
             self._on_search()
 
+    def _set_title(self) -> None:
+        kind = "Movie" if self.mode == "movie" else "TV Show"
+        self.setWindowTitle(f"Search {self.source.name} ({kind})" if self.source else f"Search TMDB ({kind})")
+
+    def _on_mode_changed(self) -> None:
+        self.mode = self.mode_combo.currentData()
+        self._set_title()
+        self._on_search()
+
     def _on_search(self) -> None:
         query = self.query_edit.text().strip()
         if not query:
@@ -104,14 +146,18 @@ class TMDBSearchDialog(QDialog):
         self.overview_label.clear()
         self.select_button.setEnabled(False)
 
+        errors = (TMDBError,) + (self.source.errors if self.source else ())
         try:
-            if self.mode == "movie":
-                year = self.year_edit.text().strip() if self.year_edit else ""
+            year = self.year_edit.text().strip() if self.year_edit else ""
+            if self.source is not None:
+                search = self.source.movies if self.mode == "movie" else self.source.tv
+                self._candidates = run_lookup(self, search, query, year=year or None)
+            elif self.mode == "movie":
                 self._candidates = run_lookup(self, search_movies, query, year=year or None)
             else:
                 self._candidates = run_lookup(self, search_tv, query)
-        except TMDBError as e:
-            QMessageBox.warning(self, "TMDB Search Failed", str(e))
+        except errors as e:
+            QMessageBox.warning(self, f"{self.source.name if self.source else 'TMDB'} Search Failed", str(e))
             self._candidates = []
             return
 
@@ -126,11 +172,12 @@ class TMDBSearchDialog(QDialog):
             self.results_list.addItem(item)
 
     def _candidate_label(self, candidate: Candidate) -> str:
-        if isinstance(candidate, MovieCandidate):
-            year_part = f" ({candidate.year})" if candidate.year else ""
-            return f"{candidate.title}{year_part}"
         year_part = f" ({candidate.year})" if candidate.year else ""
-        return f"{candidate.name}{year_part}"
+        alias = getattr(candidate, "alias", "")
+        alias_part = f" - also known as '{alias}'" if alias else ""
+        if isinstance(candidate, MovieCandidate):
+            return f"{candidate.title}{year_part}{alias_part}"
+        return f"{candidate.name}{year_part}{alias_part}"
 
     def _on_selection_changed(self) -> None:
         items = self.results_list.selectedItems()

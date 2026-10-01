@@ -28,7 +28,9 @@ into files one at a time.
   yourself (datasets.imdbws.com: `title.basics`, and optionally
   `title.ratings`, `title.episode`, `title.akas`). It holds titles,
   years, genres, runtimes, ratings, episode numbers and alternative
-  titles — no plot, poster or cast (those stay with TMDB). **IMDb's
+  titles — no plot, poster or cast (those stay with TMDB). Look up
+  against it under Metadata > Look Up > IMDb (Local Database); Redact
+  asks it first and TMDB only for the rest. **IMDb's
   datasets are for personal, non-commercial use only and must not be
   redistributed**; the app never downloads or bundles them, and the
   database it builds is your private copy. Terms:

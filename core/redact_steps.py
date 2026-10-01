@@ -58,13 +58,15 @@ from redactor_common.core.pipeline import (
     Recipe,
     Step,
     StepResult,
+    StepStatus,
     commit_in_place,
     effective_option_source,
 )
+from redactor_common.core.local_db import year_gap
 from redactor_common.core.rename_pattern import render_filename, unique_path, zero_pad_numeric_value
 from redactor_common.core.trash import move_to_trash
 
-from core import opensubtitles_client, tmdb_client, tvdb_client
+from core import imdb_import, imdb_local, opensubtitles_client, tmdb_client, tvdb_client
 from core.config import get_setting, set_setting
 from core.ffmpeg_backend import _run, remux_to_mp4, verify_remux
 from core.file_check import RepairError, build_repaired_copy, quick_check
@@ -92,6 +94,7 @@ RECIPE_KEY = "recipe"
 PATTERN_CONFIDENCE = 0.95
 RELEASE_NAME_CONFIDENCE = 0.6
 # Lookup matches: exact title and year / exact title only / nothing exact.
+LOOKUP_ID = 0.97  # an exact IMDb id found in the filename or Comment
 LOOKUP_EXACT = 0.95
 LOOKUP_TITLE_ONLY = 0.8
 LOOKUP_AMBIGUOUS = 0.6
@@ -144,6 +147,7 @@ class RedactEnv:
     background: Callable[..., Any] = _direct
     pattern_history: Callable[[], list[str]] = load_pattern_history
     setting: Callable[[str, str, str], str] = get_setting
+    imdb_local: str = ""  # path of the offline IMDb database ("" = none set up: the lookup is online only)
 
 
 # --- per-file context --------------------------------------------------------
@@ -652,19 +656,29 @@ def _is_under(path: str, root: str) -> bool:
         return False
 
 
-# --- step 3: TMDB / TheTVDB lookup ---------------------------------------------------
+# --- step 3: local IMDb database, then TMDB / TheTVDB lookup ---------------------------
 
 
 @dataclass
 class LookupFill:
-    source: str  # "TMDB" / "TheTVDB"
+    source: str  # "TMDB" / "TheTVDB" / "IMDb (local database)" / "IMDb (local database) + TMDB"
     label: str  # the matched title
     fields: dict[str, Any]
     content_type: ContentType
+    year: str = ""  # the matched title's (first) year, to cross-check a local match against an online one
 
     def __str__(self) -> str:
         shown = ", ".join(f"{key}={str(value)[:40]!r}" for key, value in self.fields.items())
         return f"{self.source} '{self.label}': {shown}"
+
+
+@dataclass
+class LocalFound:
+    """What the local IMDb database found: the fields it can fill, how sure that is, and why."""
+
+    fill: LookupFill
+    confidence: float
+    reason: str
 
 
 def _tv_guess(stem: str):
@@ -680,43 +694,241 @@ def _tv_guess(stem: str):
 
 class LookupStep(VideoStep):
     key = "lookup"
-    label = "Look up metadata (TMDB / TheTVDB)"
+    label = "Look up metadata (IMDb, TMDB, TheTVDB)"
     description = (
-        "Finds the movie or show named by the filename on TMDB (TheTVDB as the fallback for TV) and fills "
-        "fields that are EMPTY. A movie whose title AND year match exactly is applied; a title-only match, "
-        "or a TV show whose title matches but whose year can't be confirmed, goes to Needs review. Needs "
-        "network access and an API key (Tools > API Keys); without either nothing happens and the report says why."
+        "Finds the movie or show named by the filename and fills fields that are EMPTY. With a local IMDb "
+        "database set up (Tools > IMDb Database) that is asked FIRST, offline: title, year, genres and, for TV, "
+        "the episode's title and numbers (an IMDb id like tt0087182 in the filename or Comment is used exactly); "
+        "TMDB (TheTVDB as the fallback for TV) is then asked only for what is still empty, such as the plot, and "
+        "when it can't be reached the IMDb fields are still filled and the report says so. A movie whose title AND "
+        "year match exactly is applied; a title-only match, or a TV show whose title matches but whose year can't "
+        "be confirmed, goes to Needs review. The online part needs network access and an API key (Tools > API Keys); "
+        "without either only the local database is used, or nothing happens, and the report says why."
     )
     options = (
-        OptionSpec("movies", "Look up movies (TMDB)", "bool", True),
-        OptionSpec("tv", "Look up TV shows (TMDB, then TheTVDB)", "bool", True),
+        OptionSpec("movies", "Look up movies (IMDb local, TMDB)", "bool", True),
+        OptionSpec("tv", "Look up TV shows (IMDb local, TMDB, then TheTVDB)", "bool", True),
     )
 
     def execute(self, ctx: VideoCtx) -> StepResult:
         opts = self.options_for(ctx)
         stem = ctx.video.path.stem
         guess = parse_release_name(stem)
-        if guess.kind == "movie" and opts["movies"]:
-            if not any(_is_empty(ctx, f) for f in _MOVIE_FIELDS):
-                return StepResult.nothing()
-            return self._movie(ctx, guess)
-        if guess.kind == "tv" and opts["tv"]:
-            if not any(_is_empty(ctx, f) for f in _TV_FIELDS):
-                return StepResult.nothing()
-            return self._tv(ctx, stem)
-        return StepResult.nothing()
+        notes: list[str] = []
+        db = self._open_local(ctx, notes)
+        outcome = self._by_imdb_id(ctx, db, stem, opts, notes) if db is not None else None
+        if outcome is None:
+            if guess.kind == "movie" and opts["movies"]:
+                if not any(_is_empty(ctx, f) for f in _MOVIE_FIELDS):
+                    outcome = StepResult.nothing()
+                else:
+                    year = guess.year or ctx.work.metadata.release_date[:4]
+                    outcome = self._movie(ctx, guess.title, year, db, notes)
+            elif guess.kind == "tv" and opts["tv"]:
+                if not any(_is_empty(ctx, f) for f in _TV_FIELDS):
+                    outcome = StepResult.nothing()
+                else:
+                    outcome = self._tv(ctx, stem, db, notes)
+            else:
+                outcome = StepResult.nothing()
+        if notes:
+            outcome.note = "; ".join(n for n in (outcome.note, *notes) if n)
+        return outcome
+
+    # -- the local IMDb database -----------------------------------------------------
+
+    @staticmethod
+    def _open_local(ctx: VideoCtx, notes: list[str]):
+        """The opened local database, or None when none is set up (silently) or it
+        can't be opened (a note: the online lookup carries on)."""
+        path = ctx.env.imdb_local
+        if not path:
+            return None
+        try:
+            return imdb_local.open_database(path)
+        except imdb_import.ImdbDatabaseError as exc:
+            notes.append(f"the local IMDb database is unavailable ({exc})")
+            return None
+
+    def _by_imdb_id(self, ctx: VideoCtx, db, stem: str, opts: dict, notes: list[str]) -> StepResult | None:
+        """A title id written in the filename or the Comment field identifies the
+        title exactly (97%). None when there is no id, it isn't in the database, or
+        the kind of title is switched off in the step's options."""
+        wanted = imdb_local.find_imdb_id(stem, ctx.work.metadata.comment)
+        if not wanted:
+            return None
+        try:
+            found = imdb_local.title_by_id(db, wanted)
+        except imdb_import.ImdbDatabaseError as exc:
+            notes.append(f"IMDb (local database) lookup failed ({exc})")
+            return None
+        if found is None:
+            notes.append(f"IMDb (local database) doesn't have {wanted}")
+            return None
+        reason = f"exact IMDb id {wanted}"
+        if isinstance(found, imdb_local.ImdbMovieCandidate):
+            if not opts["movies"]:
+                return None
+            fill = LookupFill(imdb_local.SERVICE_NAME, f"{found.title} ({found.year})",
+                              self._only_empty(ctx, imdb_local.movie_fields(found)), ContentType.MOVIE, found.year)
+            local = LocalFound(fill, LOOKUP_ID, reason)
+            return self._movie_with_local(ctx, local, found.title, found.year, notes)
+        if not opts["tv"]:
+            return None
+        if isinstance(found, imdb_local.ImdbTVCandidate):
+            series, episode = found, None
+            guess, _t, _y = _tv_guess(stem)
+            season = ctx.work.metadata.season_number or guess.season
+            number = ctx.work.metadata.episode_number or guess.episode
+            if season and number:
+                episode = imdb_local.find_episode(db, found.tconst, season, number)
+        else:  # an episode id: its series and numbers come with it
+            series, episode = imdb_local.series_by_id(db, found.series), found
+            if series is None:
+                notes.append(f"IMDb (local database) has {wanted} but not its series")
+                return None
+        fields = self._tv_fields(series, episode)
+        fill = LookupFill(imdb_local.SERVICE_NAME, f"{series.name} ({series.year})",
+                          self._only_empty(ctx, fields), ContentType.TV, series.year)
+        local = LocalFound(fill, LOOKUP_ID, reason)
+        return self._tv_with_local(
+            ctx, local, series.name, series.year, episode.season if episode else None,
+            episode.episode_number if episode else None, notes,
+        )
+
+    @staticmethod
+    def _only_empty(ctx: VideoCtx, fields: dict) -> dict:
+        return {k: v for k, v in fields.items() if _is_empty(ctx, k)}
+
+    @staticmethod
+    def _tv_fields(series, episode) -> dict:
+        # Episode fields first: more specific than the show's.
+        fields = imdb_local.episode_fields(episode) if episode is not None else {}
+        for key, value in imdb_local.show_fields(series).items():
+            fields.setdefault(key, value)
+        return fields
+
+    def _movie_local(self, ctx: VideoCtx, db, title: str, year: str, notes: list[str]) -> LocalFound | None:
+        try:
+            candidates = imdb_local.search_movies(db, title, year or None)
+        except imdb_import.ImdbDatabaseError as exc:
+            notes.append(f"IMDb (local database) lookup failed ({exc})")
+            return None
+        if not candidates:
+            notes.append(f"IMDb (local database) found no film for '{title}'")
+            return None
+        exact = [c for c in candidates if c.exact]
+        with_year = [c for c in exact if year and c.year == year]
+        if len(with_year) == 1:
+            pick, confidence, reason = with_year[0], LOOKUP_EXACT, "title and year match exactly"
+        elif len(with_year) > 1:
+            pick, confidence = with_year[0], LOOKUP_AMBIGUOUS
+            reason = f"{len(with_year)} films match the title and year"
+        elif exact and year:
+            pick, confidence, reason = exact[0], LOOKUP_AMBIGUOUS, f"the title matches but not the year {year}"
+        elif len(exact) == 1:
+            pick, confidence, reason = exact[0], LOOKUP_TITLE_ONLY, "the title matches, but the filename has no year"
+        elif exact:
+            pick, confidence = exact[0], LOOKUP_AMBIGUOUS
+            reason = f"{len(exact)} films match the title and there is no year to tell them apart"
+        else:
+            pick, confidence, reason = candidates[0], LOOKUP_CLOSEST, "closest search result; the title differs"
+        if pick.alias and pick.exact:
+            reason += f" (as '{pick.alias}')"
+        fill = LookupFill(imdb_local.SERVICE_NAME, f"{pick.title} ({pick.year})",
+                          self._only_empty(ctx, imdb_local.movie_fields(pick)), ContentType.MOVIE, pick.year)
+        return LocalFound(fill, confidence, f"{reason} (IMDb {pick.imdb_id})")
+
+    def _tv_local(self, ctx: VideoCtx, db, title: str, year: str, season, episode, notes: list[str]) -> LocalFound | None:
+        try:
+            candidates = imdb_local.search_series(db, title, year or None)
+        except imdb_import.ImdbDatabaseError as exc:
+            notes.append(f"IMDb (local database) lookup failed ({exc})")
+            return None
+        if not candidates:
+            notes.append(f"IMDb (local database) found no show for '{title}'")
+            return None
+        exact = [c for c in candidates if c.exact]
+        with_year = [c for c in exact if year and c.year == year]
+        if len(with_year) == 1:
+            pick, confidence, reason = with_year[0], LOOKUP_EXACT, "title and first-air year match exactly"
+        elif len(exact) == 1 and year:
+            pick, confidence = exact[0], LOOKUP_AMBIGUOUS
+            reason = f"the title matches but its first-air year is {exact[0].year or 'unknown'}, not {year}"
+        elif len(exact) == 1:
+            pick, confidence, reason = exact[0], LOOKUP_TITLE_ONLY, "the title matches, but the filename has no year to confirm it"
+        elif exact:
+            pick, confidence = (with_year or exact)[0], LOOKUP_AMBIGUOUS
+            reason = f"{len(with_year or exact)} shows match the title"
+        else:
+            pick, confidence, reason = candidates[0], LOOKUP_CLOSEST, "closest search result; the title differs"
+        found_episode = None
+        if season and episode:
+            try:
+                found_episode = imdb_local.find_episode(db, pick.tconst, season, episode)
+            except imdb_import.ImdbDatabaseError:
+                found_episode = None
+            if found_episode is None:
+                notes.append(f"IMDb (local database): no S{season:02d}E{episode:02d} for '{pick.name}'")
+            elif confidence == LOOKUP_TITLE_ONLY and len(exact) == 1:
+                # The one show of that title, and it has exactly this season and episode.
+                confidence, reason = LOOKUP_EXACT, f"{reason}; S{season:02d}E{episode:02d} exists in it"
+        fill = LookupFill(imdb_local.SERVICE_NAME, f"{pick.name} ({pick.year})",
+                          self._only_empty(ctx, self._tv_fields(pick, found_episode)), ContentType.TV, pick.year)
+        return LocalFound(fill, confidence, f"{reason} (IMDb {pick.imdb_id})")
+
+    def _combine(self, ctx: VideoCtx, local: LocalFound, online: StepResult | None, notes: list[str]) -> StepResult:
+        """The local fields, plus whatever the online lookup found for fields the local
+        database left empty. The online match must agree on the year; the combined
+        confidence is the lower of the two (never above either source's own rule)."""
+        fill, confidence, reason = local.fill, local.confidence, local.reason
+        if online is not None:
+            if online.status is StepStatus.SUGGESTION:
+                other: LookupFill = online.value
+                if fill.year and other.year and year_gap(fill.year, other.year) > 1:
+                    notes.append(
+                        f"{other.source} matched '{other.label}', which is a different year than the IMDb match "
+                        f"'{fill.label}', so only the IMDb fields were used"
+                    )
+                else:
+                    fields = dict(fill.fields)
+                    for key, value in other.fields.items():
+                        if key == "release_date" and key in fields and str(value).startswith(str(fields[key])[:4]):
+                            fields[key] = value  # TMDB's full date beats IMDb's bare year
+                        else:
+                            fields.setdefault(key, value)
+                    fill = LookupFill(f"{fill.source} + {other.source}", fill.label, fields, fill.content_type, fill.year)
+                    confidence = min(confidence, online.confidence)
+                    reason = f"{reason}; {other.source}: {online.reason}"
+            elif online.note:
+                notes.append(online.note)
+        if not fill.fields and ctx.work.metadata.content_type is not ContentType.UNSET:
+            return StepResult.nothing()
+        return StepResult.suggestion(fill, confidence, reason)
 
     # -- movies ------------------------------------------------------------------
 
-    def _movie(self, ctx: VideoCtx, guess) -> StepResult:
-        year = guess.year or ctx.work.metadata.release_date[:4]
+    def _movie(self, ctx: VideoCtx, title: str, year: str, db, notes: list[str]) -> StepResult:
+        local = self._movie_local(ctx, db, title, year, notes) if db is not None else None
+        return self._movie_with_local(ctx, local, title, year, notes)
+
+    def _movie_with_local(self, ctx: VideoCtx, local: LocalFound | None, title: str, year: str,
+                          notes: list[str]) -> StepResult:
+        if local is None:
+            return self._movie_online(ctx, title, year)
+        have = set(local.fill.fields)
+        remaining = [f for f in _MOVIE_FIELDS if _is_empty(ctx, f) and f not in have]
+        online = self._movie_online(ctx, title, year, skip=have - {"release_date"}) if remaining else None
+        return self._combine(ctx, local, online, notes)
+
+    def _movie_online(self, ctx: VideoCtx, title: str, year: str, skip: set[str] | frozenset = frozenset()) -> StepResult:
         try:
-            candidates = ctx.bg(tmdb_client.search_movies, guess.title, year or None)
+            candidates = ctx.bg(tmdb_client.search_movies, title, year or None)
         except tmdb_client.TMDBError as exc:
             return StepResult.nothing(note=f"TMDB lookup unavailable: {exc}")
         if not candidates:
-            return StepResult.nothing(note=f"TMDB found no movie for '{guess.title}'")
-        exact = [c for c in candidates if _norm(c.title) == _norm(guess.title)]
+            return StepResult.nothing(note=f"TMDB found no movie for '{title}'")
+        exact = [c for c in candidates if _norm(c.title) == _norm(title)]
         with_year = [c for c in exact if year and c.year == year]
         if len(with_year) == 1:
             pick, confidence, reason = with_year[0], LOOKUP_EXACT, "title and year match exactly"
@@ -734,26 +946,46 @@ class LookupStep(VideoStep):
             details = ctx.bg(tmdb_client.get_movie_details, pick.tmdb_id)
         except tmdb_client.TMDBError as exc:
             return StepResult.nothing(note=f"TMDB details unavailable: {exc}")
-        fields = self._empty_fields(ctx, details)
+        fields = {k: v for k, v in self._empty_fields(ctx, details).items() if k not in skip}
         if not fields and ctx.work.metadata.content_type is not ContentType.UNSET:
             return StepResult.nothing()
-        fill = LookupFill("TMDB", f"{pick.title} ({pick.year})", fields, ContentType.MOVIE)
+        fill = LookupFill("TMDB", f"{pick.title} ({pick.year})", fields, ContentType.MOVIE, pick.year)
         return StepResult.suggestion(fill, confidence, f"{reason} (TMDB id {pick.tmdb_id})")
 
     # -- TV -----------------------------------------------------------------------
 
-    def _tv(self, ctx: VideoCtx, stem: str) -> StepResult:
+    def _tv(self, ctx: VideoCtx, stem: str, db=None, notes: list[str] | None = None) -> StepResult:
+        notes = notes if notes is not None else []
         guess, title, year = _tv_guess(stem)
         season = ctx.work.metadata.season_number or guess.season
         episode = ctx.work.metadata.episode_number or guess.episode
-        notes: list[str] = []
-        for source in ("TMDB", "TheTVDB"):
-            outcome = self._tv_from(ctx, source, title, year, season, episode, notes)
-            if outcome is not None:
-                return _with_note(outcome, "; ".join(notes))
-        return StepResult.nothing(note="; ".join(notes))
+        local = self._tv_local(ctx, db, title, year, season, episode, notes) if db is not None else None
+        return self._tv_with_local(ctx, local, title, year, season, episode, notes)
 
-    def _tv_from(self, ctx, source, title, year, season, episode, notes) -> StepResult | None:
+    def _tv_with_local(self, ctx: VideoCtx, local: LocalFound | None, title: str, year: str, season, episode,
+                       notes: list[str]) -> StepResult:
+        online_notes: list[str] = []
+        if local is None:
+            outcome = self._tv_online(ctx, title, year, season, episode, online_notes)
+            if outcome is None:
+                return StepResult.nothing(note="; ".join(online_notes))
+            return _with_note(outcome, "; ".join(online_notes))
+        have = set(local.fill.fields)
+        remaining = [f for f in _TV_FIELDS if _is_empty(ctx, f) and f not in have]
+        online = None
+        if remaining:
+            online = self._tv_online(ctx, title, year, season, episode, online_notes, skip=have - {"release_date"})
+        notes.extend(online_notes)
+        return self._combine(ctx, local, online, notes)
+
+    def _tv_online(self, ctx, title, year, season, episode, notes, skip=frozenset()) -> StepResult | None:
+        for source in ("TMDB", "TheTVDB"):
+            outcome = self._tv_from(ctx, source, title, year, season, episode, notes, skip)
+            if outcome is not None:
+                return outcome
+        return None
+
+    def _tv_from(self, ctx, source, title, year, season, episode, notes, skip=frozenset()) -> StepResult | None:
         tmdb = source == "TMDB"
         client, error = (tmdb_client, tmdb_client.TMDBError) if tmdb else (tvdb_client, tvdb_client.TVDBError)
         try:
@@ -798,9 +1030,10 @@ class LookupStep(VideoStep):
         fields = self._empty_fields(ctx, episode_details)
         for key, value in self._empty_fields(ctx, show).items():
             fields.setdefault(key, value)
+        fields = {k: v for k, v in fields.items() if k not in skip}
         if not fields and ctx.work.metadata.content_type is not ContentType.UNSET:
             return StepResult.nothing()
-        fill = LookupFill(source, f"{pick.name} ({pick.year})", fields, ContentType.TV)
+        fill = LookupFill(source, f"{pick.name} ({pick.year})", fields, ContentType.TV, pick.year)
         return StepResult.suggestion(fill, confidence, f"{reason} ({source} id {ident})")
 
     @staticmethod

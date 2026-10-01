@@ -52,7 +52,8 @@ def test_other_menus_hold_what_the_spec_says(window):
     assert _labels(menus["Metadata"]) == ["Parse Filename…", "Look Up", "Number Episodes…"]
     look_up = next(a for a in menus["Metadata"].actions() if a.menu()).menu()
     assert _labels(look_up) == [
-        "TMDB (Movie)…", "TMDB (TV Show)…", "TheTVDB (TV Show)…", "Subtitles (OpenSubtitles)…",
+        "TMDB (Movie)…", "TMDB (TV Show)…", "TheTVDB (TV Show)…", "IMDb (Local Database)…",
+        "Subtitles (OpenSubtitles)…",
     ]
     assert _labels(menus["Media"]) == [
         "Remux to MP4…", "Convert to MP4 (H.264)…", "Check Files…", "Find Duplicates…",
@@ -96,7 +97,8 @@ HANDLERS = {
     "find_duplicates": "_on_find_duplicates", "api_keys": "_on_add_external_apis",
     "external_tools": "_on_locate_tools", "imdb_settings": "_on_open_imdb_settings", "columns": "_on_open_column_visibility",
     "genres": "_on_open_genres", "languages": "_on_open_languages", "lookup_tvdb": "_on_import_tvdb",
-    "lookup_subtitles": "_on_import_subtitles", "import_convert": "_on_import_and_convert",
+    "lookup_subtitles": "_on_import_subtitles", "lookup_imdb_local": "_on_import_imdb_local",
+    "import_convert": "_on_import_and_convert",
     "number_episodes": "_on_number_episodes", "refresh_list": "_refresh_list",
     "parse_filename": "_on_import_metadata_from_filename", "rename_file": "rename_selected_file",
     "undo_last_rename": "undo_last_rename", "export_settings": "_on_export_settings",
