@@ -1165,7 +1165,10 @@ class MainWindow(QMainWindow):
             existing_paths,
             lambda folder: [str(p) for p in discover_video_files(Path(folder), recursive=False)],
         )
-        all_paths = [Path(p) for p in existing_paths + new_paths]
+        # Files that are gone from disk are dropped; only present ones are shown.
+        present_paths = [p for p in existing_paths if os.path.exists(p)]
+        removed_count = len(existing_paths) - len(present_paths)
+        all_paths = [Path(p) for p in present_paths + new_paths]
 
         self.video_files = []
         self._clear_undo()
@@ -1192,6 +1195,8 @@ class MainWindow(QMainWindow):
             msg = f"No new files found, reloaded {loaded} file(s)"
         if failed:
             msg += f", {failed} failed to read"
+        if removed_count:
+            msg += f", removed {removed_count} no longer on disk"
         self.status_bar.showMessage(msg)
 
     def _restore_last_folder_on_startup(self) -> None:

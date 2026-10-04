@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-04#01 — Refresh drops files that are gone
+
+- Refresh List (F5) now shows only the files that are still on disk: a file that was deleted or moved since it was loaded is removed from the list instead of staying as an error row. New files in the loaded folders are still picked up.
+
 ## 2026-10-01#11 — Release fix
 
 - No change to the app. The release workflow's test run scans the generated release notes, which quote the old TMDB sentence from the changelog; that test now skips the generated notes file. (Release 2026-10-01#10 was never published because of this.)
