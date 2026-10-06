@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-06#01 — Shared library update
+
+- No change to how the app works. Updates the shared redactor_common library to 2026-10-05-01 so all four Redactor apps ship the same version.
+
 ## 2026-10-04#01 — Refresh drops files that are gone
 
 - Refresh List (F5) now shows only the files that are still on disk: a file that was deleted or moved since it was loaded is removed from the list instead of staying as an error row. New files in the loaded folders are still picked up.
