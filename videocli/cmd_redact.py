@@ -23,7 +23,7 @@ from core.redact_steps import (
 )
 from redactor_common.cli import CliError, Output, add_common_options
 from redactor_common.cli.commands import (
-    add_redact_options, build_recipe, list_steps, read_recipe_file, redact_items, trash_to,
+    add_redact_options, build_recipe, list_steps, read_recipe_file, redact_items, trash_to, trash_with_retries,
 )
 
 from videocli.files import collect, load_videos
@@ -44,7 +44,7 @@ def add_redact_parser(sub) -> None:
 
 def run_redact(args: argparse.Namespace, out: Output) -> int:
     env = RedactEnv(
-        rename_log=None, trash=trash_to(args.trash_dir) if args.trash_dir else None,
+        rename_log=None, trash=trash_to(args.trash_dir) if args.trash_dir else trash_with_retries(),
         imdb_local=imdb_settings.load_database(),
     )
     catalogue = build_catalogue(env=env)
@@ -55,7 +55,7 @@ def run_redact(args: argparse.Namespace, out: Output) -> int:
     if not args.paths:
         raise CliError("give the video files to redact (or --list-steps)")
 
-    videos = load_videos(collect(args.paths, out, recurse=not args.no_recurse))
+    videos = load_videos(collect(args.paths, out, recurse=not args.no_recurse), out)
     return redact_items(
         videos, recipe, catalogue, make_context=lambda v: VideoCtx(v, env), describe=lambda v: v.path.name,
         finalize=finalize_file, finalize_label="Save", path_of=lambda v: str(v.path), out=out,

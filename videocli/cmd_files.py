@@ -26,6 +26,22 @@ from redactor_common.core.rename_pattern import zero_pad_numeric_value
 from videocli.files import add_path_arguments, collect, load_videos, skip_reason
 
 
+def _zero_pad(args: argparse.Namespace) -> int:
+    """--zero-pad N, else the choice saved in the app's Rename dialog (on: its width), else none."""
+    if args.zero_pad is not None:
+        return args.zero_pad
+    if get_setting("rename", "zero_pad", "0") != "1":
+        return 0
+    try:
+        return int(get_setting("rename", "zero_pad_width", "2") or 2)
+    except ValueError:
+        return 2
+
+
+def _ascii(args: argparse.Namespace) -> bool:
+    return bool(args.ascii) or get_setting("rename", "ascii_only", "0") == "1"
+
+
 def _values_for(video: VideoFile, zero_pad: int) -> dict[str, str]:
     values = dict(placeholder_values(video.metadata))
     if zero_pad > 0 and values.get("episode_number"):
@@ -64,10 +80,11 @@ def add_rename_parser(sub) -> None:
 
 def run_rename(args: argparse.Namespace, out: Output) -> int:
     pattern = args.pattern or DEFAULT_RENAME_PATTERN
-    videos = load_videos(collect(args.paths, out, recurse=not args.no_recurse))
+    zero_pad = _zero_pad(args)
+    videos = load_videos(collect(args.paths, out, recurse=not args.no_recurse), out)
     failed = commands.rename_items(
-        videos, pattern=pattern, values_for=lambda v: _values_for(v, args.zero_pad), path_of=lambda v: str(v.path),
-        skip_reason=_skip_for(pattern, args.zero_pad), out=out, dry_run=args.dry_run, ascii_only=args.ascii, companions=sidecar_pairs,
+        videos, pattern=pattern, values_for=lambda v: _values_for(v, zero_pad), path_of=lambda v: str(v.path),
+        skip_reason=_skip_for(pattern, zero_pad), out=out, dry_run=args.dry_run, ascii_only=_ascii(args), companions=sidecar_pairs,
     )
     return commands.finish_run(out, failed, files=len(videos), dry_run=args.dry_run, pattern=pattern)
 
@@ -92,10 +109,11 @@ def add_move_parser(sub) -> None:
 
 def run_move(args: argparse.Namespace, out: Output) -> int:
     root = args.root or get_setting("rename", "library_root", "").strip()
-    videos = load_videos(collect(args.paths, out, recurse=not args.no_recurse))
+    zero_pad = _zero_pad(args)
+    videos = load_videos(collect(args.paths, out, recurse=not args.no_recurse), out)
     failed = commands.move_items(
-        videos, root=root, pattern=args.pattern, values_for=lambda v: _values_for(v, args.zero_pad),
-        path_of=lambda v: str(v.path), skip_reason=_skip_for(args.pattern, args.zero_pad), out=out,
-        dry_run=args.dry_run, copy=args.copy, ascii_only=args.ascii, companions=sidecar_moves,
+        videos, root=root, pattern=args.pattern, values_for=lambda v: _values_for(v, zero_pad),
+        path_of=lambda v: str(v.path), skip_reason=_skip_for(args.pattern, zero_pad), out=out,
+        dry_run=args.dry_run, copy=args.copy, ascii_only=_ascii(args), companions=sidecar_moves,
     )
     return commands.finish_run(out, failed, files=len(videos), dry_run=args.dry_run, root=root)

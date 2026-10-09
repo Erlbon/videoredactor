@@ -857,7 +857,9 @@ def test_end_to_end_run_redact_with_a_fake_bin(clips, work, bin_, tmp_path):
     assert report.count(FileStatus.CHANGED) == 2 and report.count(FileStatus.SKIPPED) == 1, report.to_text()
     by_name = {e.file: e for e in report.entries}
     assert "unsaved edits" in by_name["unsaved.mp4"].skips[0]
-    md = read_mp4_metadata(str(good))
+    renamed = work / "The Office S2E5 Halloween.mp4"  # the Rename step runs after the save, on the saved file
+    assert renamed.exists() and not good.exists() and files[0].path == renamed
+    md = read_mp4_metadata(str(renamed))
     assert (md.show_title, md.title) == ("The Office", "Halloween")
     assert parse_stamp(md.scan_stamp).status == "CHECKED OK"
     assert not mp4_index_at_end(str(late))
@@ -865,3 +867,28 @@ def test_end_to_end_run_redact_with_a_fake_bin(clips, work, bin_, tmp_path):
     assert files[2].dirty  # the skipped file keeps its unsaved edits, untouched
     text = report.to_text()
     assert "CHANGES" in text and "Save: saved in place" in text and "SKIPPED" in text
+
+
+@needs_ffmpeg
+def test_rename_and_move_after_a_real_save_keep_the_save(clips, work, bin_, tmp_path):
+    """Rename/Move used to run BEFORE the save: the file was renamed, then the save failed with a false
+    "NOT SAVED, the original is untouched"."""
+    library = tmp_path / "library"
+    library.mkdir()
+    path = work / "The Office S02E05 Halloween.mp4"
+    shutil.copy2(clips / "good.mp4", path)
+    vf = VideoFile(path=path)
+    vf.load()
+    env = make_env(bin_, tmp_path, history=[PATTERN], settings={("rename", "library_root"): str(library)})
+    catalogue = rs.build_catalogue(env.pattern_history)
+    recipe = Recipe.default_for(catalogue)
+    recipe.enabled["lookup"] = False
+    recipe.enabled["rename"] = True
+    recipe.options["rename"] = {"pattern": "%show_title% - %title%"}
+    entry = run_one(vf, env, recipe, catalogue)
+    assert not entry.failures, entry.failures
+    assert vf.path == work / "The Office - Halloween.mp4" and vf.path.exists() and not path.exists()
+    md = read_mp4_metadata(str(vf.path))
+    assert (md.show_title, md.title) == ("The Office", "Halloween")  # the save happened, on the renamed file
+    assert any(a.startswith("Save:") for a in entry.applied) and any(a.startswith("Rename") for a in entry.applied)
+    assert leftovers(work) == []

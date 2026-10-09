@@ -26,7 +26,7 @@ pattern) without the dialogs. How one file flows:
      streams and duration against the original, and commit_in_place()
      swaps it in, the original going to the Recycle Bin. Then the live
      row is reloaded from disk.
-  4. Rename and Move into folders (position "last") run after the save,
+  4. Rename and Move into folders (position "after_save") run after the save,
      on the finished file; sidecar files (-poster.jpg, .lang.srt) travel
      with the video.
 
@@ -1189,14 +1189,13 @@ class RenameStep(PatternStep):
         "Last Rename. Sidecar files (poster, subtitles) are renamed with it. Always runs last, after the "
         "file is saved. A file whose pattern would leave a required field empty is left as it is."
     )
-    position = "last"
+    position = "after_save"
+    run_when_unchanged = True  # a file with nothing to save is still renamed/moved
     options = (
         OptionSpec("pattern", "Pattern (empty: the most recently used)", "str", "", max_length=300),
     )
 
     def execute(self, ctx: VideoCtx) -> StepResult:
-        if ctx.save_failed:
-            return StepResult.nothing()
         pattern = self.effective_pattern(ctx)
         if not pattern:
             return StepResult.nothing(note="not renamed: no rename pattern saved yet (use Rename/Export by Pattern once)")
@@ -1240,7 +1239,8 @@ class MoveIntoFoldersStep(PatternStep):
         "%season_number%/%title%, the default when none was used before). Missing folders are created, nothing is overwritten, and the move is "
         "logged for Undo Last Rename. Sidecar files move with the video. Off by default; needs a library root."
     )
-    position = "last"
+    position = "after_save"
+    run_when_unchanged = True  # a file with nothing to save is still renamed/moved
     default_enabled = False
     options = (
         OptionSpec(
@@ -1250,8 +1250,6 @@ class MoveIntoFoldersStep(PatternStep):
     )
 
     def execute(self, ctx: VideoCtx) -> StepResult:
-        if ctx.save_failed:
-            return StepResult.nothing()
         root = ctx.env.setting("rename", "library_root", "").strip()
         if not root:
             return StepResult.nothing(note="not moved: no library root (choose one in Rename/Export by Pattern > Move into folders)")

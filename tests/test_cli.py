@@ -99,7 +99,7 @@ def test_info_reports_an_unreadable_video_and_exits_1(tmp_path, capsys):
     bad = tmp_path / "bad.mp4"
     bad.write_bytes(b"this is not a video")
     code, document = run_json(capsys, "info", str(bad))
-    assert code in (0, 1) and document["files"] == 1  # never a crash
+    assert code == 1 and document["results"][0]["status"] != "ok"
 
 
 # --- set --------------------------------------------------------------------------------------------
@@ -146,7 +146,7 @@ def test_set_on_an_unreadable_video_fails_with_exit_1(tmp_path, capsys):
     bad = tmp_path / "bad.mp4"
     bad.write_bytes(b"not a video")
     code, document = run_json(capsys, "set", str(bad), "-s", "title=X")
-    assert code in (0, 1) and document["files"] == 1
+    assert code == 1 and document["results"][0]["status"] == "failed"
 
 
 # --- rename / move -----------------------------------------------------------------------------------------
@@ -241,10 +241,11 @@ def test_check_never_repairs_a_damaged_file(media, tmp_path, capsys):
     path = tmp_path / "damaged.mp4"
     shutil.copyfile(media / "truncated.mp4", path)
     before = path.read_bytes()
-    code, document = run_json(capsys, "check", str(path), "--repair")
+    bin_dir = tmp_path / "trash"
+    code, document = run_json(capsys, "check", str(path), "--repair", "--trash-dir", str(bin_dir))
     row = document["results"][0]
-    assert row["repaired"] is False and path.read_bytes() == before
-    assert code == 1 and (row["status"] == "DAMAGED" or "not repaired" in row["message"] or row["status"] == "REPAIRABLE")
+    assert row["repaired"] is False and path.read_bytes() == before and not bin_dir.exists()
+    assert code == 1 and row["problem"] is True
 
 
 def test_check_stamp_records_the_result_in_the_file(video, capsys):
@@ -383,3 +384,58 @@ def test_the_readme_lists_the_exit_codes_and_the_scripting_ways():
         assert code in section
     for way in ("start /wait", "Start-Process", "Out-Null", "--output"):
         assert way in section
+
+
+# --- second review ---------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("argv,message", [
+    (["-s", "title=bad\x01char"], "control character"),
+    (["-s", "season=\u00b2"], "whole number"),
+    (["-s", "year=2026-02-30"], "real date"),
+    (["-s", "episode=100000"], "too large"),
+])
+def test_set_refuses_values_no_file_can_store(video, argv, message):
+    before = open(video, "rb").read()
+    with pytest.raises(CliError, match=message):
+        main(["set", video, *argv])
+    assert open(video, "rb").read() == before
+
+
+def test_set_treats_a_padded_number_as_the_number(video, capsys):
+    run_json(capsys, "set", video, "-s", "season=7")
+    _code, document = run_json(capsys, "set", video, "-s", "season=007")
+    assert document["results"][0]["status"] == "unchanged"
+
+
+def test_an_explicitly_named_temp_style_file_is_kept(media, tmp_path, capsys):
+    name = ".show.redact-abcd1234.mp4"
+    path = tmp_path / name
+    shutil.copyfile(media / "good.mp4", path)
+    code, document = run_json(capsys, "info", str(path))
+    assert code == 0 and document["files"] == 1
+    with pytest.raises(CliError, match="no video files"):
+        main(["info", str(tmp_path)])  # found through a folder, it is the app's own leftover and is left out
+
+
+def test_rename_defaults_come_from_the_saved_settings(video, tmp_path, capsys):
+    config.set_setting("rename", "zero_pad", "1")
+    config.set_setting("rename", "zero_pad_width", "3")
+    run_json(capsys, "set", video, "-s", "show=Show", "-s", "season=1", "-s", "episode=4", "-s", "title=Pilot")
+    _code, document = run_json(capsys, "rename", video, "-p", "%show_title% %episode_number%", "-n")
+    assert document["results"][0]["new_path"].endswith("Show 004.mp4")
+    _code, document = run_json(capsys, "rename", video, "-p", "%show_title% %episode_number%", "--zero-pad", "2", "-n")
+    assert document["results"][0]["new_path"].endswith("Show 04.mp4")
+
+
+def test_check_repair_with_an_unusable_trash_dir_is_a_clean_failure_and_no_stamp(media, tmp_path, capsys):
+    path = tmp_path / "late.mp4"
+    shutil.copyfile(media / "late_index.mp4", path)
+    blocker = tmp_path / "bin"
+    blocker.write_bytes(b"a file, not a folder")
+    before = path.read_bytes()
+    code, document = run_json(capsys, "check", str(path), "--repair", "--stamp", "--trash-dir", str(blocker))
+    row = document["results"][0]
+    assert code == 1 and row["repaired"] is False and row["stamped"] is False
+    assert "repair failed" in row["message"] and path.exists()
+    assert path.read_bytes() == before  # nothing stamped onto the failed file

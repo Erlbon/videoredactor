@@ -42,7 +42,7 @@ def run_info(args: argparse.Namespace, out: Output) -> int:
         [resolve_field(name) for name in args.fields.split(",") if name.strip()] if args.fields else DEFAULT_INFO_FIELDS
     )
     failed = 0
-    for index, video in enumerate(load_videos(files), start=1):
+    for index, video in enumerate(load_videos(files, out), start=1):
         path = str(video.path)
         out.progress(index, len(files), path)
         md = video.metadata
@@ -56,7 +56,12 @@ def run_info(args: argparse.Namespace, out: Output) -> int:
             "duration_seconds": md.duration_seconds,
         }
         out.record({"path": path, "status": status, "check": video.scan_status(), "technical": technical, "fields": fields})
-        details = ", ".join(p for p in (md.container, md.resolution, md.video_codec, _duration_text(md.duration_seconds), status) if p)
+        audio = f"{md.audio_codec} audio" if md.audio_codec else ""
+        fps = f"{md.frame_rate} fps" if md.frame_rate else ""
+        details = ", ".join(p for p in (
+            md.container, md.resolution, md.video_codec, audio, fps, _duration_text(md.duration_seconds),
+            f"check: {video.scan_status()}" if video.scan_status() else "", status,
+        ) if p)
         out.line(f"{path}  [{details}]")
         for name, value in fields.items():
             out.line(f"  {name}: {value}")
@@ -94,7 +99,7 @@ def run_set(args: argparse.Namespace, out: Output) -> int:
 
     files = collect(args.paths, out, recurse=not args.no_recurse)
     failed = 0
-    for index, video in enumerate(load_videos(files), start=1):
+    for index, video in enumerate(load_videos(files, out), start=1):
         path = str(video.path)
         out.progress(index, len(files), path)
         row = {"path": path, "status": "", "changes": {}, "message": ""}
@@ -123,8 +128,10 @@ def run_set(args: argparse.Namespace, out: Output) -> int:
 
 
 def _save(video: VideoFile, changes: dict[str, str], row: dict) -> str:
-    for field, value in changes.items():
-        set_field_text(video.metadata, field, value)
+    refused = [field for field, value in changes.items() if not set_field_text(video.metadata, field, value)]
+    if refused:
+        row["message"] = "the value was not accepted for " + ", ".join(refused)
+        return "failed"
     video.dirty = True
     video.save()
     if video.save_error:

@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-10-10#01 -- Redact: Rename / Move now run after the save; command line fixes
+
+- **Fixed (also in the window):** Redact's Rename and Move into folders ran BEFORE the save, so a file that had tags to save was renamed or moved and then reported "NOT SAVED, the original is untouched" although the save had not been tried on the right file. They now run after the save, on the finished file, and also on a file that had nothing to save.
+- Command line: `rename` / `move` take their zero-pad and ASCII defaults from the app's saved Rename choices (`--zero-pad 0` turns padding off); an unknown `%token%` in a pattern is refused instead of rendering as nothing; a pattern that reads nothing for a file (for example `%series%` expanded by cmd in a batch file) skips the file instead of calling it "untitled".
+- `set` refuses values with control characters, non-ASCII digits (a superscript two), impossible dates (`2026-02-30`) and huge numbers, stores `007` as `7` (so it is "unchanged"), and reports a value the file did not take as `failed`.
+- `check --repair`: an unusable `--trash-dir` is a clean failure, not a traceback; the repair's note is no longer overwritten by the stamp's message, and a file whose repair failed is not stamped. `--repair` and `redact` retry a Recycle Bin move that a virus scanner briefly blocks, and `--trash-dir` is only created when a file arrives.
+- A file named in full is read even if its name looks like one of the app's temp files; `info` shows the audio codec, frame rate and check result in text mode; a big batch shows "reading N/M" while it loads; a `--recipe` file that is not a recipe is refused instead of running the default one.
+- Requires redactor_common 2026-10-10-01.
+
 ## 2026-10-09#03 -- Command line: review fixes
 
 - There is no undo for the command line: renames, moves and Redact run from it are no longer recorded in the app's rename log (File > Undo Last Rename does not see them). Preview with `--dry-run`; nothing is overwritten and nothing is deleted for good.

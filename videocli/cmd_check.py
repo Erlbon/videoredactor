@@ -20,7 +20,7 @@ from core.video_file import VideoFile
 from core.video_fingerprint import video_fingerprint
 from redactor_common.cli import EXIT_OK, EXIT_PARTIAL, Output, add_common_options
 from redactor_common.cli.commands import trash_to
-from redactor_common.core.trash import move_to_trash
+from redactor_common.core.trash import TrashError, move_to_trash
 
 from videocli.files import add_path_arguments, collect, load_videos
 
@@ -52,7 +52,7 @@ def run_check(args: argparse.Namespace, out: Output) -> int:
     files = collect(args.paths, out, recurse=not args.no_recurse)
     trash = trash_to(args.trash_dir) if args.trash_dir else move_to_trash
     problems = 0
-    for index, video in enumerate(load_videos(files), start=1):
+    for index, video in enumerate(load_videos(files, out), start=1):
         path = str(video.path)
         out.progress(index, len(files), path)
         row = {
@@ -66,8 +66,9 @@ def run_check(args: argparse.Namespace, out: Output) -> int:
             if any(f.code == "no_tool" for f in result.findings):
                 row["status"], row["message"], row["problem"] = "NOT CHECKED", result.summary(), True
             else:
-                result = _maybe_repair(path, result, args, trash, row)
-                _maybe_stamp(video, result, args, row)
+                result, repair_failed = _maybe_repair(path, result, args, trash, row)
+                if not repair_failed:
+                    _maybe_stamp(video, result, args, row)
                 row["status"] = result.status
                 row["findings"] = _findings(result)
                 row["declared_seconds"], row["readable_seconds"] = result.declared_seconds, result.readable_seconds
@@ -87,24 +88,30 @@ def run_check(args: argparse.Namespace, out: Output) -> int:
     return EXIT_PARTIAL if problems else EXIT_OK
 
 
-def _maybe_repair(path: str, result: CheckResult, args, trash, row: dict) -> CheckResult:
-    """The result after --repair (a REPAIRABLE file remuxed losslessly); anything else is left alone."""
+def _say(row: dict, text: str) -> None:
+    """Adds `text` to the row's message (the repair's note and the stamp's problem must both survive)."""
+    row["message"] = f"{row['message']}; {text}" if row["message"] else text
+
+
+def _maybe_repair(path: str, result: CheckResult, args, trash, row: dict) -> tuple[CheckResult, bool]:
+    """(the result after --repair, whether a repair was tried and failed). Only a REPAIRABLE file is remuxed
+    losslessly; anything else is left alone."""
     if not args.repair or result.status != "REPAIRABLE" or not result.can_repair:
         if args.repair and any(f.severity == DAMAGED for f in result.findings):
-            row["message"] = "damaged: not repaired automatically (a repair would drop the unreadable end); use Media > Check Files"
-        return result
+            _say(row, "damaged: not repaired automatically (a repair would drop the unreadable end); use Media > Check Files")
+        return result, False
     if args.dry_run:
-        row["message"] = "would be repaired with a lossless remux"
-        return result
+        _say(row, "would be repaired with a lossless remux")
+        return result, False
     try:
         outcome = repair(path, result, trash=trash)
-    except RepairError as exc:
-        row["message"] = f"repair failed, the original is untouched: {exc}"
-        return result
+    except (RepairError, TrashError, OSError) as exc:
+        _say(row, f"repair failed, the original is untouched: {exc}")
+        return result, True
     row["repaired"] = True
     if outcome.note:
-        row["message"] = outcome.note
-    return outcome.check
+        _say(row, outcome.note)
+    return outcome.check, False
 
 
 def _maybe_stamp(video: VideoFile, result: CheckResult, args, row: dict) -> None:
@@ -113,6 +120,6 @@ def _maybe_stamp(video: VideoFile, result: CheckResult, args, row: dict) -> None
     if video.record_check(result, video_fingerprint(str(video.path))):
         video.save()
         if video.save_error:
-            row["message"] = f"the result could not be recorded: {video.save_error}"
+            _say(row, f"the result could not be recorded: {video.save_error}")
         else:
             row["stamped"] = True

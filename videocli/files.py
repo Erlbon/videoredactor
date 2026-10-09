@@ -27,7 +27,13 @@ def collect(paths: list[str], out: Output, recurse: bool = True) -> list[str]:
     """The video files the arguments name (the app's own leftover temp files are not listed). An argument that
     matches nothing is an error; if that leaves no files at all the command ends with a usage error."""
     files, missing = expand_paths(paths, EXTENSIONS, recursive=recurse)
-    files = [f for f in files if not is_app_temp_name(os.path.basename(f))]
+    # The app's own leftover temp files are left out of what a folder or wildcard finds; a file named in full is
+    # taken as the user meant it.
+    named = {os.path.normcase(os.path.abspath(p)) for p in paths if os.path.isfile(p)}
+    files = [
+        f for f in files
+        if os.path.normcase(os.path.abspath(f)) in named or not is_app_temp_name(os.path.basename(f))
+    ]
     for argument in missing:
         out.error(f"nothing found for {argument}")
     if not files:
@@ -35,9 +41,12 @@ def collect(paths: list[str], out: Output, recurse: bool = True) -> list[str]:
     return files
 
 
-def load_videos(files: list[str]) -> list[VideoFile]:
+def load_videos(files: list[str], out: Output | None = None) -> list[VideoFile]:
+    """Loads each file; `out` shows "reading N of M" on stderr while a big batch is read."""
     videos = []
-    for path in files:
+    for index, path in enumerate(files, start=1):
+        if out is not None:
+            out.progress(index, len(files), f"reading {path}")
         video = VideoFile(path=Path(path))
         video.load()
         videos.append(video)

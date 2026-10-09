@@ -166,7 +166,9 @@ def test_redact_saves_a_real_file_in_place_and_refreshes_the_row(window, monkeyp
     recipe.enabled["lookup"] = False  # no network in tests
     rs.save_recipe(recipe)
     window._on_redact()
-    md = read_mp4_metadata(str(src))
+    renamed = tmp_path / "The Office S2E5 Halloween.mp4"  # the Rename step runs after the save
+    assert renamed.exists() and not src.exists() and vf.path == renamed
+    md = read_mp4_metadata(str(renamed))
     assert (md.show_title, md.season_number, md.title) == ("The Office", 2, "Halloween")
     assert vf.metadata.show_title == "The Office" and not vf.dirty
     assert len(os.listdir(bin_dir)) == 1

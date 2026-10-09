@@ -99,7 +99,10 @@ Shows each video's container, resolution, codecs, bitrate, frame rate and length
 | `--fields LIST` | Comma-separated tag fields to show, e.g. `--fields title,show_title,season`. Default: `content_type, title, show_title, season_number, episode_number, release_date`. |
 | `--all` | Show every tag field that has a value. |
 
-Only fields with a value are listed. Exit code 1 if a file could not be read.
+Only fields with a value are listed. In text mode each line also shows the container, resolution, codecs,
+frame rate, length and the check result; `--json` has the same in `technical` and `check`. A file named in full
+is always read, even if its name looks like one of the app's own temp files (those are left out only when a
+folder or wildcard finds them). Exit code 1 if a file could not be read.
 
 ### set
 
@@ -122,8 +125,11 @@ network, artist, album, track_title, composer. Field names are case-insensitive 
 `genre`, `year`, `season`, `episode`, `show`, `type`, `rating`.
 
 Checks: `content_type` is one of Movie, TV, Music Video, Clip, Misc (any capitalisation); `season_number`,
-`episode_number` and `personal_rating` are whole numbers (the rating 1 to 5); `release_date` is `YYYY`,
-`YYYY-MM` or `YYYY-MM-DD`; `language` is a language code (`en`, `eng`, `nb`, `en-GB`).
+`episode_number` and `personal_rating` are whole numbers written with the digits 0-9 (the rating 1 to 5, the
+others up to 99999; `007` is stored as `7`); `release_date` is a real date, `YYYY`, `YYYY-MM` or `YYYY-MM-DD`
+(`2026-02-30` is refused); `language` is a language code (`en`, `eng`, `nb`, `en-GB`). A value with a control
+character in it (or, outside the description-type fields, a line break or tab) is refused, since no tag format
+can store it. If a field is given both `-s` and `--clear`, `--clear` wins whatever the order.
 
 Each file's result is `changed`, `unchanged` (nothing differed), `planned` (dry run) or `failed`.
 
@@ -138,11 +144,14 @@ overwrites: a name that is taken gets `(2)`, `(3)`, ... A change of letter case 
 | Option | Meaning |
 | --- | --- |
 | `-p PATTERN`, `--pattern PATTERN` | The new name (without the extension), with `%field%` tokens, default `"%show_title% - S%season_number%E%episode_number% - %title%"`. Quote it so the shell leaves the `%` signs alone. |
-| `--zero-pad N` | Pad the episode number to N digits (`--zero-pad 2` gives `03`). |
-| `--ascii` | ASCII-safe names (é becomes e, æ becomes ae, other symbols are dropped). |
+| `--zero-pad N` | Pad the episode number to N digits (`--zero-pad 2` gives `03`). Default: the choice saved in the app's Rename window (on, with its width, or off); `--zero-pad 0` turns it off. |
+| `--ascii` | ASCII-safe names (é becomes e, æ becomes ae, other symbols are dropped). Also on when the app's Rename window has it saved. |
 | `-n`, `--dry-run` | Show the new names, rename nothing. |
 
-Tokens are the tag field names above. A video whose pattern would leave a required field empty (a token outside
+Tokens are the tag field names above; a token that is not a field name (a typo such as `%tittle%`) is refused
+with exit code 2 instead of silently rendering as nothing. A rename pattern cannot contain `/` or `\` (the
+`move` command makes folders). In a batch file write `%%` for each `%`, for example `-p "%%show_title%% - %%title%%"`
+(cmd expands a single `%name%` itself, and a pattern that then reads nothing makes the file `skipped`). A video whose pattern would leave a required field empty (a token outside
 the pattern's optional `(...)`, `[...]` or `{...}` groups) is `skipped` with the reason, so it never becomes
 "Show - S E - ". A video that already has the name is `unchanged`. There is no undo for the command line: preview with `--dry-run`.
 
@@ -200,14 +209,16 @@ Guesses below the confidence threshold are listed under "needs review" and not a
 | `--recipe FILE` | Use this recipe (a JSON file in the format the app stores) instead of the one saved in the app. |
 | `--enable STEP` | Turn a step on for this run (repeatable). |
 | `--disable STEP` | Turn a step off for this run (repeatable). |
-| `--threshold N` | Confidence needed to apply a guess, `0`-`1` or a percentage (`0.9`, `90` or `90%`); a plain number from 1 to 5 such as `1.5` is refused as ambiguous. |
+| `--threshold N` | Confidence needed to apply a guess: a fraction `0`-`1` (`0.9`, also `1`), or a percentage with at least two digits (`90`, `90%`, `100`); a number above 1 and below 5 such as `1.5` is refused as ambiguous. |
 | `--trash-dir FOLDER` | Move originals into this folder (created if needed) instead of the Recycle Bin, for a machine or a task that has none. |
 | `--list-steps` | Show the steps and whether the recipe has each on, then stop (no `PATH` needed). |
 
 Steps: `check_repair`, `filename_tags`, `path_tags`, `lookup`, `subtitles`, `remux_mkv_to_mp4`, `rename`,
 `move_into_folders`. Without `--recipe` the recipe saved in the app is used (the defaults if none was saved). A
 repair is only automatic when a lossless remux fully fixes the file; a damaged file is reported and left alone.
-Exit code 1 if any file failed; files that need review are not failures.
+Exit code 1 if any file failed; files that need review are not failures. Rename and Move run last, after the
+file is saved, and also on a file that had nothing to save. A `--recipe` file that is not valid JSON or not a
+recipe is refused (exit code 2) rather than replaced by the default recipe.
 
 ### JSON output
 
