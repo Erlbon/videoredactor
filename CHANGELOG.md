@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-09#02 — Command line
+
+- The one exe is now also a command line: `videoredactor info`, `set`, `rename`, `move`, `check` and `redact` run the command and never open the window; with no command, or a file to open, the window starts as before. The same code as the window, the same settings and saved Redact recipe; `--dry-run` previews the commands that change files, `--json` prints one JSON document, `--output FILE` writes the result to a file for scripts, and the exit code says whether files failed (see the Command line section of ABOUT.md, which documents every option).
+- `check` is Media > Check Files: it reports DAMAGED / REPAIRABLE / NOTE / CHECKED OK, `--repair` repairs the repairable ones losslessly (a damaged file is never touched) and `--stamp` records the result in the file. `rename` and `move` carry a video's poster and subtitle files with it.
+- Nothing is overwritten and nothing is deleted for good: names that are taken get numbers, originals go to the Recycle Bin (or `--trash-dir`), renames and moves are recorded for File > Undo Last Rename, and a video whose pattern would leave a required field empty is skipped.
+- Requires redactor_common 2026-10-09-07.
+
 ## 2026-10-09#01 -- Shared library update
 
 - Updates the shared redactor_common library to 2026-10-08-02: the Recycle Bin move now accepts extended-length and mixed-slash paths (it failed with "[Errno 3] path not found" although the file existed), and error messages can be wrapped to fit a dialog.

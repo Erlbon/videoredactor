@@ -10,10 +10,18 @@ import sys
 from core import api_keys, crash_log
 from core.app_paths import asset_path
 from core.version import APP_NAME
+from videocli import cli_requested
 from redactor_common.gui.app_bootstrap import run_app
 
 
 def main() -> int:
+    if cli_requested(sys.argv):
+        # One exe: `videoredactor info ...` is the command line (no window). See videocli/main.py.
+        from redactor_common.cli import run
+        from videocli.main import main as cli_main
+
+        return run(cli_main, sys.argv[1:])
+
     from gui.main_window import MainWindow
 
     # API keys: settings.ini -> secret store, once (no-op when already moved).
