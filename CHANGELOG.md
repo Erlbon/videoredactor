@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-09#01 -- Shared library update
+
+- Updates the shared redactor_common library to 2026-10-08-02: the Recycle Bin move now accepts extended-length and mixed-slash paths (it failed with "[Errno 3] path not found" although the file existed), and error messages can be wrapped to fit a dialog.
+
 ## 2026-10-06#01 — Shared library update
 
 - No change to how the app works. Updates the shared redactor_common library to 2026-10-05-01 so all four Redactor apps ship the same version.
