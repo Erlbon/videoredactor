@@ -26,7 +26,7 @@ from redactor_common.cli.commands import (
     add_redact_options, build_recipe, list_steps, read_recipe_file, redact_items, trash_to,
 )
 
-from videocli.files import collect, load_videos, rename_log
+from videocli.files import collect, load_videos
 
 
 def add_redact_parser(sub) -> None:
@@ -44,7 +44,7 @@ def add_redact_parser(sub) -> None:
 
 def run_redact(args: argparse.Namespace, out: Output) -> int:
     env = RedactEnv(
-        rename_log=rename_log(), trash=trash_to(args.trash_dir) if args.trash_dir else None,
+        rename_log=None, trash=trash_to(args.trash_dir) if args.trash_dir else None,
         imdb_local=imdb_settings.load_database(),
     )
     catalogue = build_catalogue(env=env)

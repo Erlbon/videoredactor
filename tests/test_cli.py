@@ -1,5 +1,5 @@
 """The command line (videocli/): every command on real small videos made with ffmpeg, text and --json output,
-exit codes, --dry-run, sidecar files, and the log File > Undo Last Rename reads. Settings are test-isolated."""
+exit codes, --dry-run and sidecar files. Settings are test-isolated."""
 
 import json
 import os
@@ -13,7 +13,6 @@ from core import config
 from core.filename_pattern import field_text
 from core.video_file import VideoFile
 from redactor_common.cli import CliError
-from redactor_common.core.rename_log import RenameLog
 from videocli import cmd_files, cmd_redact
 from videocli import files as cli_files
 from videocli.main import main
@@ -44,12 +43,8 @@ def media(tmp_path_factory):
 
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
-    """A private settings file and undo log."""
+    """A private settings file."""
     monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "videoredactor_settings.ini")
-    log = RenameLog(str(tmp_path / "_cli_rename_log.json"))
-    for module in (cmd_files, cmd_redact):
-        monkeypatch.setattr(module, "rename_log", lambda log=log: log)
-    return log
 
 
 @pytest.fixture
@@ -161,7 +156,7 @@ def _tagged(video, capsys):
     run(capsys, "set", video, "-s", "show_title=Dune", "-s", "season=1", "-s", "episode=3", "-s", "title=Arrival")
 
 
-def test_rename_with_padding_carries_the_sidecars_and_the_undo_log(video, tmp_path, capsys, isolated):
+def test_rename_with_padding_carries_the_sidecars(video, tmp_path, capsys):
     _tagged(video, capsys)
     poster = tmp_path / "show-poster.jpg"
     subtitle = tmp_path / "show.en.srt"
@@ -172,8 +167,7 @@ def test_rename_with_padding_carries_the_sidecars_and_the_undo_log(video, tmp_pa
     assert code == 0 and document["results"][0]["status"] == "renamed" and new_video.exists()
     assert (tmp_path / "Dune - S1E03 - Arrival-poster.jpg").exists() and (tmp_path / "Dune - S1E03 - Arrival.en.srt").exists()
     assert not poster.exists() and not subtitle.exists()
-    assert len(isolated.last_batch().renames) == 3 and "+2 companion" in document["results"][0]["message"]
-    assert isolated.undo_last() is not None and os.path.exists(video) and poster.exists()
+    assert "+2 companion" in document["results"][0]["message"]
 
 
 def test_rename_dry_run_collisions_and_a_pattern_with_an_empty_required_field(media, tmp_path, capsys):
