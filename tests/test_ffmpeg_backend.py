@@ -16,8 +16,8 @@ import unittest.mock as mock
 from pathlib import Path
 
 from core.ffmpeg_backend import (
-    get_duration_seconds, extract_thumbnail, remux_to_mp4, transcode_to_mp4,
-    IMPORTABLE_EXTENSIONS,
+    get_duration_seconds, extract_thumbnail, remux_to_mkv, remux_to_mp4, transcode_to_mp4,
+    verify_remux, IMPORTABLE_EXTENSIONS, REMUX_TO_MKV_EXTENSIONS,
 )
 
 
@@ -85,6 +85,21 @@ class TestFfmpegBackend(unittest.TestCase):
         self.assertIsNotNone(remuxed_duration)
         self.assertAlmostEqual(remuxed_duration, 3.0, delta=0.2)
 
+    def test_remux_to_mkv_keeps_every_track(self):
+        out_path = os.path.join(self.tmpdir, "remuxed.mkv")
+        ok, stderr = remux_to_mkv(self.video_path, out_path)
+        self.assertTrue(ok, msg=stderr)
+        self.assertAlmostEqual(get_duration_seconds(out_path), 3.0, delta=0.2)
+        self.assertEqual(verify_remux(self.video_path, out_path), "")
+        self.assertFalse(Path(out_path).with_name("remuxed.partial.mkv").exists())
+
+    def test_remux_to_mkv_missing_file_fails_with_stderr(self):
+        out_path = os.path.join(self.tmpdir, "remux_fail.mkv")
+        ok, stderr = remux_to_mkv(os.path.join(self.tmpdir, "missing.ogm"), out_path)
+        self.assertFalse(ok)
+        self.assertTrue(stderr.strip())
+        self.assertFalse(Path(out_path).exists())
+
     def test_remux_missing_file_fails_with_stderr(self):
         out_path = os.path.join(self.tmpdir, "remux_fail.mp4")
         ok, stderr = remux_to_mp4("/nonexistent/path.mp4", out_path)
@@ -137,8 +152,13 @@ class TestImportableExtensions(unittest.TestCase):
     the constant's own contents."""
 
     def test_contains_common_foreign_formats(self):
-        for ext in (".avi", ".mov", ".wmv", ".webm", ".mpg"):
+        for ext in (".avi", ".mov", ".wmv", ".webm", ".mpg", ".3gp", ".asf", ".divx", ".rm"):
             self.assertIn(ext, IMPORTABLE_EXTENSIONS)
+
+    def test_ogm_is_importable_and_remuxes_to_mkv(self):
+        self.assertIn(".ogm", IMPORTABLE_EXTENSIONS)
+        self.assertIn(".ogm", REMUX_TO_MKV_EXTENSIONS)
+        self.assertLessEqual(REMUX_TO_MKV_EXTENSIONS, IMPORTABLE_EXTENSIONS)
 
     def test_does_not_contain_natively_supported_formats(self):
         # These already load directly (core.video_file.SUPPORTED_EXTENSIONS)

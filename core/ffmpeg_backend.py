@@ -28,12 +28,22 @@ from redactor_common.core.subprocess_utils import popen_tool, run_tool
 # *to* MP4 would realistically have lying around: old camcorder/phone
 # footage (AVI, 3GP, MTS/M2TS), QuickTime/iPhone exports (MOV), old
 # Windows tools (WMV), web downloads (FLV, WebM, OGV), and DVD rips
-# (MPG/MPEG, VOB). Mirrors mp3redactor's IMPORTABLE_EXTENSIONS
-# (core/mp3_converter.py) -- same idea, same shape, different domain.
+# (MPG/MPEG, VOB), old OGM rips (OGM), ASF (the WMV container), DivX
+# (an AVI by another name) and RealMedia (RM). Mirrors mp3redactor's
+# IMPORTABLE_EXTENSIONS (core/mp3_converter.py) -- same idea, same shape,
+# different domain.
 IMPORTABLE_EXTENSIONS: frozenset[str] = frozenset({
     ".avi", ".mov", ".wmv", ".flv", ".webm", ".mpg", ".mpeg",
-    ".m2ts", ".mts", ".ts", ".3gp", ".ogv", ".vob",
+    ".m2ts", ".mts", ".ts", ".3gp", ".ogv", ".vob", ".ogm",
+    ".asf", ".divx", ".rm",
 })
+
+# Importable formats that become an MKV by stream copy (remux_to_mkv)
+# instead of an H.264/AAC MP4 re-encode: OGM holds DivX/Xvid video, Vorbis
+# audio and text subtitles, which MKV takes as they are (an MP4 would force
+# an audio re-encode and lose the subtitles). Whoever wants MP4 afterwards
+# converts the MKV in a second pass (Media > Convert to MP4).
+REMUX_TO_MKV_EXTENSIONS: frozenset[str] = frozenset({".ogm"})
 
 
 # Timeouts: a probe or a single-frame grab that hasn't finished in a
@@ -237,6 +247,34 @@ def remux_to_mp4(
                 return _publish(temp, output_path)
             message = stderr
         return False, message
+    finally:
+        _remove_quietly(temp)  # no-op after a successful rename
+
+
+def remux_to_mkv(
+    input_path: str,
+    output_path: str,
+    cancel_event: Optional[threading.Event] = None,
+) -> tuple[bool, str]:
+    """Remux (stream copy, every track) into an MKV container -- for
+    sources MKV can hold as they are (see REMUX_TO_MKV_EXTENSIONS).
+
+    `-fflags +genpts` because OGM packets (video and subtitles) carry no
+    usable timestamps; without it ffmpeg stops after a few frames with
+    "Can't write packet with unknown timestamp". Same temporary-name /
+    (success, stderr) contract as remux_to_mp4; call verify_remux()
+    afterwards.
+    """
+    temp = partial_path(output_path)
+    try:
+        code, stderr = _run_ffmpeg(
+            ["ffmpeg", "-y", "-fflags", "+genpts", "-i", input_path,
+             "-map", "0", "-c", "copy", temp],
+            cancel_event=cancel_event, timeout=REMUX_TIMEOUT_SECONDS,
+        )
+        if code is None or code != 0:
+            return False, stderr
+        return _publish(temp, output_path)
     finally:
         _remove_quietly(temp)  # no-op after a successful rename
 

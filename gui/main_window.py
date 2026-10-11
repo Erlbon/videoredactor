@@ -45,7 +45,10 @@ from core.sidecars import with_sidecars
 from core.redact_steps import (
     RedactEnv, VideoCtx, build_catalogue, finalize_file, load_recipe, pin_patterns, recipe_is_saved, save_recipe,
 )
-from core.ffmpeg_backend import IMPORTABLE_EXTENSIONS, remux_to_mp4, transcode_to_mp4, verify_remux
+from core.ffmpeg_backend import (
+    IMPORTABLE_EXTENSIONS, REMUX_TO_MKV_EXTENSIONS, remux_to_mkv, remux_to_mp4,
+    transcode_to_mp4, verify_remux,
+)
 from core.settings_adapter import REFRESH_COLUMNS, REFRESH_PANEL, VideoSettingsAdapter
 from core.transcode_settings import get_transcode_settings
 from core.opensubtitles_client import download_subtitle_text, OpenSubtitlesError
@@ -232,11 +235,15 @@ class _TranscodeWorker(QThread):
     file_started = pyqtSignal(int, str)       # index, input filename
     file_finished = pyqtSignal(int, bool, str)  # index, success, stderr/message
 
-    def __init__(self, jobs: list[tuple[Path, Path]], settings, parent=None, remux: bool = False):
+    def __init__(
+        self, jobs: list[tuple[Path, Path]], settings, parent=None,
+        remux: bool = False, mkv: bool = False,
+    ):
         super().__init__(parent)
         self._jobs = jobs
         self._settings = settings
         self._remux = remux
+        self._mkv = mkv  # stream copy into MKV (remux_to_mkv) instead of an MP4 job
         self.cancel_event = threading.Event()
 
     def run(self) -> None:
@@ -247,8 +254,9 @@ class _TranscodeWorker(QThread):
             # A PermissionError, a vanished file... must not kill the
             # thread: the remaining jobs would then look "cancelled".
             try:
-                if self._remux:
-                    ok, message = remux_to_mp4(
+                if self._remux or self._mkv:
+                    remux = remux_to_mkv if self._mkv else remux_to_mp4
+                    ok, message = remux(
                         str(input_path), str(output_path), cancel_event=self.cancel_event,
                     )
                     if ok:
@@ -2407,7 +2415,8 @@ class MainWindow(QMainWindow):
         return False  # dialog dismissed without a button (e.g. Esc) -- default to not deleting
 
     def _run_transcode_jobs(
-        self, jobs: list[tuple[Path, Path]], settings, title: str, remux: bool = False
+        self, jobs: list[tuple[Path, Path]], settings, title: str,
+        remux: bool = False, mkv: bool = False,
     ) -> dict[int, tuple[bool, str]]:
         """Runs `jobs` on a _TranscodeWorker thread behind the shared
         progress dialog (fixed width, elided per-file label) and returns
@@ -2418,7 +2427,8 @@ class MainWindow(QMainWindow):
 
         threshold=1: even a single encode takes minutes, so the dialog
         (and its Cancel button) always shows."""
-        worker = _TranscodeWorker(jobs, settings, parent=self, remux=remux)
+        worker = _TranscodeWorker(jobs, settings, parent=self, remux=remux, mkv=mkv)
+        remux = remux or mkv  # label wording only from here on
         results: dict[int, tuple[bool, str]] = {}
         with ProgressReporter(self, len(jobs), "Starting...", threshold=1, title=title) as reporter:
             def on_started(i: int, name: str) -> None:
@@ -2588,7 +2598,7 @@ class MainWindow(QMainWindow):
         claimed: set[str] = set()
         for raw_path in paths:
             src = Path(raw_path)
-            dest = src.with_suffix(".mp4")
+            dest = src.with_suffix(".mkv" if src.suffix.lower() in REMUX_TO_MKV_EXTENSIONS else ".mp4")
             if not _claim_output(dest, claimed):
                 # Refuse to silently clobber an existing file of that
                 # name -- same safety-first instinct as Convert Selected
@@ -2602,7 +2612,7 @@ class MainWindow(QMainWindow):
             proceed = QMessageBox.question(
                 self,
                 "Some Files Already Exist",
-                f"{len(skipped_existing)} file(s) already have an .mp4 of the same name in "
+                f"{len(skipped_existing)} file(s) already have an .mp4/.mkv of the same name in "
                 f"that folder and will be skipped (not overwritten):\n\n{names}\n\n"
                 f"Convert the remaining {len(jobs)} file(s)?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
@@ -2613,26 +2623,54 @@ class MainWindow(QMainWindow):
         if not jobs:
             return
 
+        mkv_indexes = [
+            i for i, (src, _) in enumerate(jobs) if src.suffix.lower() in REMUX_TO_MKV_EXTENSIONS
+        ]
+        mp4_indexes = [i for i in range(len(jobs)) if i not in set(mkv_indexes)]
+
         settings = get_transcode_settings()
         thread_note = f", {settings.threads} threads" if settings.threads else ""
+        question = []
+        if mp4_indexes:
+            question.append(
+                f"Convert {len(mp4_indexes)} file(s) to H.264/AAC MP4 "
+                f"(CRF {settings.crf}, audio {settings.audio_bitrate}{thread_note})."
+            )
+        if mkv_indexes:
+            question.append(
+                f"Repackage {len(mkv_indexes)} file(s) (OGM) to MKV without re-encoding "
+                "-- fast and lossless, subtitles and extra audio tracks kept. "
+                "Convert the MKV to MP4 afterwards if you need that."
+            )
         confirm = QMessageBox.question(
-            self, "Import & Convert to MP4",
-            f"Convert {len(jobs)} file(s) to H.264/AAC MP4 "
-            f"(CRF {settings.crf}, audio {settings.audio_bitrate}{thread_note})?\n\n"
-            "Originals are never deleted automatically. Adjust these "
-            "defaults via Tools > External Tools.",
+            self, "Import & Convert",
+            "\n\n".join(question) + "\n\nOriginals are never deleted automatically."
+            + (" Adjust the MP4 defaults via Tools > External Tools." if mp4_indexes else ""),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if confirm != QMessageBox.StandardButton.Yes:
             return
 
-        results = self._run_transcode_jobs(jobs, settings, "Importing & Converting")
+        # One worker run per kind (a worker is either MP4 or MKV); results
+        # are keyed back to the position in `jobs`.
+        results: dict[int, tuple[bool, str]] = {}
+        for indexes, mkv in ((mp4_indexes, False), (mkv_indexes, True)):
+            if not indexes or any(m == "Cancelled" for _, m in results.values()):
+                continue
+            batch = self._run_transcode_jobs(
+                [jobs[i] for i in indexes], settings, "Importing & Converting", mkv=mkv,
+            )
+            for local, result in batch.items():
+                results[indexes[local]] = result
+            if len(batch) < len(indexes):
+                break  # cancelled mid-batch: don't start the other kind
 
         set_setting("general", "last_folder", str(Path(paths[0]).parent))
 
         new_files: list[VideoFile] = []
         succeeded = 0
         failed: list[tuple[Path, str]] = []
+        notes: list[str] = []
         cancelled_count = 0
         for i, (input_path, output_path) in enumerate(jobs):
             result = results.get(i)
@@ -2642,6 +2680,8 @@ class MainWindow(QMainWindow):
             ok, message = result
             if ok:
                 succeeded += 1
+                if i in mkv_indexes and message:  # verify_remux: what didn't make it
+                    notes.append(f"{output_path.name}: {message}")
                 new_vf = VideoFile(path=output_path)
                 new_vf.load()
                 new_files.append(new_vf)
@@ -2667,6 +2707,12 @@ class MainWindow(QMainWindow):
                 [f"{path.name}: {err.strip() or 'ffmpeg conversion failed'}" for path, err in failed]
             )
             QMessageBox.warning(self, "Some files failed to convert", details)
+        elif notes:
+            QMessageBox.warning(
+                self, "Import Complete, With Differences",
+                f"Loaded {succeeded} file(s), but compared with the original:\n\n"
+                f"{summarize_errors(notes)}\n\nThe originals were kept.",
+            )
         elif succeeded:
             QMessageBox.information(
                 self, "Import Complete", f"Converted and loaded {succeeded} file(s)."

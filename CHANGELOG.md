@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-11#01 -- Import & Convert takes OGM files
+
+- File > Import & Convert now accepts `.ogm` (old DivX/Xvid rips with Vorbis audio and text subtitles). An OGM is repackaged to an `.mkv` without re-encoding: fast, lossless, and the subtitles and extra audio tracks are kept (an MP4 would have forced an audio re-encode and dropped the subtitles). Need MP4 afterwards? Run Media > Convert to MP4 on the MKV as a second pass.
+- Import & Convert also accepts `.asf`, `.divx` and `.rm` (RealMedia); these are re-encoded to MP4 like the other formats. `.3gp` was already accepted, and `.m4v` is not an import format because the app opens it directly.
+- The copy asks ffmpeg to rebuild the timestamps (`-fflags +genpts`), because OGM packets carry none and ffmpeg otherwise stops after a few seconds. Checked on a real 23-minute OGM with two audio tracks and subtitles.
+- If the MKV lacks a track or is shorter than the original, the import says so; originals are never deleted.
+
 ## 2026-10-10#01 -- Redact: Rename / Move now run after the save; command line fixes
 
 - **Fixed (also in the window):** Redact's Rename and Move into folders ran BEFORE the save, so a file that had tags to save was renamed or moved and then reported "NOT SAVED, the original is untouched" although the save had not been tried on the right file. They now run after the save, on the finished file, and also on a file that had nothing to save.
