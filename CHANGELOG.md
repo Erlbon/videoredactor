@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-13#06 -- Open Folder offers to convert other video formats
+
+- After Open Folder (with its subfolders, if you chose to include them), the app now says when the folder also holds video files in other formats (AVI, WMV, MOV, FLV, MPG, WebM, OGM, 3GP, ASF, DivX, RM...) and offers to convert them to MP4/MKV beside the originals, with the full list under "Show Details". Before, a folder of AVI files loaded "0 files" without a word. Disc images (`.vob`) and `.ts` are not announced, the app's own temp files never are, and nothing is asked when the last folder is restored at launch.
+
 ## 2026-10-13#05 -- Convert to MP4/MKV and ingest subtitles, in Redact
 
 - New Redact step **Convert to MP4/MKV and ingest subtitles** (`convert_library`, off by default, runs after the save and before Rename). It applies the library conversion rules to the finished file: legacy containers to MP4 or MKV by stream copy, only unplayable video (RealVideo, Flash, odd WMV) re-encoded, series episodes over the bitrate/size limits re-encoded and scaled to 720p with hevc_nvenc, disc images left alone. The result is verified before the swap and the app's tags are written onto the new file.

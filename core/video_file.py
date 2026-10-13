@@ -21,7 +21,7 @@ from redactor_common.core.scan_stamp import ScanStamp, make_stamp, parse_stamp
 from core.video_metadata import VideoMetadata, EDITABLE_FIELDS, ContentType
 from core.mp4_backend import read_mp4_metadata, write_mp4_metadata
 from core.mkv_backend import read_mkv_metadata, write_mkv_metadata
-from core.ffmpeg_backend import extract_thumbnail, probe_technical_info
+from core.ffmpeg_backend import IMPORTABLE_EXTENSIONS, extract_thumbnail, probe_technical_info
 from core.external_tools import is_tool_available, MKVTOOLNIX, FFMPEG
 from core.opensubtitles_client import clean_language_code
 from core.video_fingerprint import video_fingerprint
@@ -455,6 +455,25 @@ def has_subfolders(folder: Path) -> bool:
     if not folder.is_dir():
         return False
     return any(p.is_dir() for p in folder.iterdir())
+
+
+# Importable formats that are NOT announced when Open Folder finds them: disc images/streams (.vob is left
+# alone by the conversion rules) and .ts (as often TypeScript as MPEG transport stream in a mixed folder).
+NOT_ANNOUNCED_EXTENSIONS = frozenset({".vob", ".ts"})
+
+
+def discover_convertible_files(folder: Path, recursive: bool = False) -> list[Path]:
+    """Video files in `folder` that Import & Convert can bring in (AVI, WMV, MOV, FLV, MPG, OGM... see
+    ffmpeg_backend.IMPORTABLE_EXTENSIONS) but Open Folder does not load. Used to tell the user what Open Folder
+    left out. Disc images and .ts are not announced; the app's own temp files never are."""
+    if not folder.is_dir():
+        return []
+    announced = IMPORTABLE_EXTENSIONS - NOT_ANNOUNCED_EXTENSIONS
+    candidates = folder.rglob("*") if recursive else folder.iterdir()
+    return sorted(
+        p for p in candidates
+        if p.suffix.lower() in announced and p.is_file() and not is_app_temp_name(p.name)
+    )
 
 
 def discover_video_files(

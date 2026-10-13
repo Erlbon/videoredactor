@@ -28,7 +28,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, QEventLoop, QItemSelection, QItemSelectionModel, QSize, pyqtSignal
 from PyQt6.QtGui import QColor, QImage, QKeySequence, QIcon
 
-from core.video_file import SUPPORTED_EXTENSIONS, VideoFile, discover_video_files, has_subfolders
+from core.video_file import (
+    SUPPORTED_EXTENSIONS, VideoFile, discover_convertible_files, discover_video_files, has_subfolders,
+)
 from core.video_metadata import ContentType, EDITABLE_FIELDS, NUMERIC_FIELDS, TEXT_FIELDS
 from core.filename_pattern import (
     DEFAULT_RENAME_PATTERN, PARSE_NUMERIC_FIELDS, PARSE_STRIP_ZEROS_FIELDS, VALID_FIELD_KEYS,
@@ -1145,6 +1147,30 @@ class MainWindow(QMainWindow):
             msg += f" -- Ignored {len(ignored)} leftover temp file(s)"
         msg += status_suffix
         self.status_bar.showMessage(msg)
+        if not cancelled and not status_suffix:  # not on the automatic restore at launch
+            self._offer_import_of_convertible(folder_path, recursive, loaded)
+
+    def _offer_import_of_convertible(self, folder_path: Path, recursive: bool, loaded: int) -> None:
+        """Open Folder loads only MP4/MKV. Say what else Import & Convert could bring in from the folder (and its
+        subfolders, if included), and offer to convert it."""
+        others = discover_convertible_files(folder_path, recursive=recursive)
+        if not others:
+            return
+        kinds = ", ".join(sorted({p.suffix.lstrip(".").upper() for p in others}))
+        intro = "No MP4 or MKV files found, but" if not loaded else "Also found"
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Other Video Formats Found")
+        box.setText(
+            f"{intro} {len(others)} video file(s) in other formats ({kinds}) that can be converted to MP4/MKV.\n\n"
+            "Convert them now (beside the originals)?"
+        )
+        shown = [str(p) for p in others[:200]]
+        more = f"\n... and {len(others) - len(shown)} more" if len(others) > len(shown) else ""
+        box.setDetailedText("\n".join(shown) + more)
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if box.exec() == QMessageBox.StandardButton.Yes:
+            self._import_paths([str(p) for p in others])
 
     def _refresh_list(self) -> None:
         """Re-scans the folder(s) your currently-loaded files live in
@@ -2597,7 +2623,11 @@ class MainWindow(QMainWindow):
         )
         if not paths:
             return
+        self._import_paths(paths)
 
+    def _import_paths(self, paths: list[str]) -> None:
+        """Converts `paths` (from the picker, or found by Open Folder) to MP4/MKV beside the originals and adds
+        the results to the list. See _on_import_and_convert."""
         jobs: list[tuple[Path, Path]] = []
         skipped_existing: list[Path] = []
         claimed: set[str] = set()
