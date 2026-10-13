@@ -30,7 +30,7 @@ More detail, the command line, and the licences of the data sources: [ABOUT.md](
 
 | Menu | Items |
 | --- | --- |
-| File | Open Files (Ctrl+O), Open Folder (Ctrl+Shift+O), Include Subfolders, Import and Convert; Save All (Ctrl+Shift+A, also Ctrl+S); Rename File (F2), Undo Last Rename, Rename / Export / Move (Ctrl+E); Export Settings, Import Settings; Remove from List (Del), Clear List; Exit |
+| File | Open Files (Ctrl+O), Open Folder (Ctrl+Shift+O), Include Subfolders, Import and Convert; Save All (Ctrl+Shift+A); Rename File (F2), Undo Last Rename, Rename / Export / Move (Ctrl+E); Export Settings, Import Settings; Remove from List (Del), Clear List; Exit |
 | Edit | Undo (Ctrl+Z), Redo (Ctrl+Y); Apply to N Selected (Ctrl+Return); Redact (Ctrl+Shift+E), Edit Redact Recipe; Search and Replace (Ctrl+H), Change Case, Auto-Number |
 | View | Show Metadata Panel; Zoom In / Out / Reset (Ctrl++, Ctrl+-, Ctrl+0); Refresh List (F5, Ctrl+R); Command Palette (Ctrl+K) |
 | Metadata | Parse Filename (Ctrl+I); Look Up: TMDB (Movie) (Ctrl+M), TMDB (TV Show) (Ctrl+T), TheTVDB (TV Show) (Ctrl+Shift+T), IMDb (Local Database), Subtitles (OpenSubtitles) (Ctrl+Shift+L); Number Episodes |
@@ -62,8 +62,9 @@ in place and its original goes to the Recycle Bin.
 | Rename by pattern | off |
 | Move into folders under the library root | off |
 
-Rename and Move run last, after the save. The convert step follows the Library safety settings, including its
-dry-run setting (on by default: the report then lists what would happen and nothing changes).
+Rename and Move run last, after the save. When the convert step is on, every Redact run asks "Dry run the
+conversion step" in its confirm question (ticked by default: the report then lists what would happen and nothing
+is converted). On the command line, `redact --convert-dry-run` does the same; without it the conversion is real.
 
 ## Preferences (Tools > Preferences)
 
@@ -73,8 +74,8 @@ dry-run setting (on by default: the report then lists what would happen and noth
 | Transcode | CRF, audio bitrate and threads of Media > Convert to MP4 (H.264) only |
 | Duplicates | The starting sensitivity of Find Duplicates |
 | Tools / Paths | ffmpeg and MKVToolNix locations, the IMDb database and dataset files (saved as you type) |
-| Conversion | The conversion rules: bitrate and size limits for series episodes (and optionally movies), scaling, NVENC quality, the size ratio a re-encode must beat, when to use MKV, disc images, subtitle languages to ingest |
-| Library safety | Quarantine folder and undo log folder (optional; without one, replaced files go to the Recycle Bin), the Redact convert step's dry run, delete-after-conversion (off by default, cannot be undone), the recent-file guard, and the duration tolerance a conversion result must meet |
+| Conversion | The conversion rules: bitrate and size limits for series episodes (and optionally movies), scaling, NVENC quality, the size ratio a re-encode must beat, when to use MKV (default: 4 or more subtitle tracks), disc images (default: left alone, never converted), subtitle languages to ingest |
+| Library safety | Quarantine folder and undo log folder (optional; without one, replaced files go to the Recycle Bin), delete-after-conversion (off by default, cannot be undone), the recent-file guard, and the duration tolerance a conversion result must meet |
 
 Every page is written on OK or Apply and dropped on Cancel, except Tools / Paths.
 

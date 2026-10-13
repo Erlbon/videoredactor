@@ -8,7 +8,7 @@ this app's settings.
   Transcode    CRF, audio bitrate, threads (Media > Convert to MP4 (H.264) only)
   Duplicates   Find Duplicates sensitivity
   Conversion   the conversion rules: bitrate/size limits, NVENC quality, disc images, subtitle languages
-  Library safety quarantine folder, dry-run default, delete-after-conversion, recent-file guard,
+  Library safety quarantine folder, delete-after-conversion, recent-file guard,
                verification tolerance
   Tools / Paths  ffmpeg / MKVToolNix locations, IMDb database and dataset files
                (a self-saving page, like the Locate External Tools dialog)
@@ -93,7 +93,7 @@ def build_paths_page() -> QWidget:
 
 
 class SafetyPage(QWidget):
-    """Library safety: the quarantine folder, dry-run default, the recent-file guard and the verification
+    """Library safety: the quarantine folder, delete-after-conversion, the recent-file guard and the verification
     tolerance (core/library_safety.py). Saved by save(), which the dialog calls on OK / Apply; Cancel drops the
     edits."""
 
@@ -113,12 +113,9 @@ class SafetyPage(QWidget):
         form = QFormLayout()
         self.quarantine_edit = self._folder_row(form, "Quarantine folder (optional):", s.quarantine_root)
         self.undo_edit = self._folder_row(form, "Undo log folder:", s.undo_log_folder)
-        self.dry_run = QCheckBox(
-            "Dry run (Redact step only): the recipe's convert step lists what would change and touches nothing. "
-            "Media > Convert to MP4/MKV (Rules) asks per run instead."
-        )
-        self.dry_run.setChecked(s.dry_run)
-        form.addRow("", self.dry_run)
+        # No dry-run option here: Redact's confirm and Media > Convert to MP4/MKV (Rules) ask it per run, so a
+        # stale saved setting can never decide. The stored value is kept as it is (nothing reads it).
+        self._stored_dry_run = s.dry_run
         self.delete_after = QCheckBox("Delete the original after a verified conversion (instead of quarantining it; can't be undone)")
         self.delete_after.setChecked(s.delete_after_conversion)
         form.addRow("", self.delete_after)
@@ -163,7 +160,7 @@ class SafetyPage(QWidget):
         """Writes the page (the dialog's OK / Apply)."""
         library_safety.set_safety_settings(library_safety.SafetySettings(
             quarantine_root=self.quarantine_edit.text().strip(),
-            dry_run=self.dry_run.isChecked(),
+            dry_run=self._stored_dry_run,
             delete_after_conversion=self.delete_after.isChecked(),
             recent_minutes=self.recent.value(),
             duration_tolerance_seconds=self.tol_seconds.value(),
@@ -177,6 +174,17 @@ _DISC_LABELS = {
     conversion_plan.DISC_LIST: "Leave alone, but list them for review",
     conversion_plan.DISC_REMUX_VOB: "Stream-copy a single .vob to MKV (ISO/BIN/IMG are only listed)",
 }
+
+
+MANY_SUBS_HELP = (
+    "A file with this many subtitle tracks or more is converted to MKV, not MP4 (MP4 players handle many "
+    "tracks badly). Default: 4."
+)
+DISC_HELP = (
+    "Default: Leave alone. ISO, BIN, IMG and VOB disc images are then never converted and not listed; "
+    "'list them' names each one in the report for a manual decision. Only the third choice converts anything "
+    "(a single .vob, by stream copy to MKV)."
+)
 
 
 class ConversionPage(QWidget):
@@ -213,17 +221,28 @@ class ConversionPage(QWidget):
         form.addRow("hevc_nvenc quality (cq):", self.cq)
         self.ratio = self._dspin(form, "Keep the source unless the result is under:", s.output_max_ratio * 100, " % of it")
         self.many_subs = self._spin(form, "MKV when a file has at least:", 1, 99, s.many_subtitle_tracks, " subtitle tracks")
+        self.many_subs_help = self._help(form, MANY_SUBS_HELP)
         self.disc = QComboBox()
         for key in conversion_plan.DISC_POLICIES:
             self.disc.addItem(_DISC_LABELS[key], key)
         self.disc.setCurrentIndex(max(0, self.disc.findData(s.disc_images)))
         form.addRow("Disc images (.vob .iso .bin .img):", self.disc)
+        self.disc_help = self._help(form, DISC_HELP)
         self.languages = QLineEdit(s.subtitle_languages)
         self.languages.setPlaceholderText("all")
         self.languages.setToolTip('"all", or ISO codes separated by commas, for example: en, nl, de')
         form.addRow("Subtitle languages to ingest:", self.languages)
         layout.addLayout(form)
         layout.addStretch(1)
+
+    @staticmethod
+    def _help(form: QFormLayout, text: str) -> QLabel:
+        """A one-line help text under the control above it."""
+        label = QLabel(text)
+        label.setWordWrap(True)
+        label.setStyleSheet("color: gray;")
+        form.addRow("", label)
+        return label
 
     def _spin(self, form, label, low, high, value, suffix) -> QSpinBox:
         box = QSpinBox()

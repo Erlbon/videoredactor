@@ -6,8 +6,10 @@ videocli/cmd_redact.py
                    subtitles, MKV to MP4 remux, convert to MP4/MKV and ingest subtitles, rename, move), saved
                    in place with each original in the Recycle Bin (or moved to --trash-dir).
 
-The convert step (convert_library) follows the app's Library safety settings: its persistent dry-run setting, the
-quarantine folder, and delete-after-conversion (when that is on, a converted original is deleted for good).
+The convert step (convert_library) converts for real unless --convert-dry-run is given (then it only lists what it
+would do; the other steps still run and save). It follows the app's Library safety settings for the quarantine
+folder and delete-after-conversion (when that is on, a converted original is deleted for good). The old persistent
+dry-run setting is no longer read: the choice is made per run, like the app's Redact confirm.
 
 The recipe is the one saved in the app (Edit > Edit Redact Recipe) unless --recipe FILE names a JSON recipe;
 --enable / --disable / --threshold adjust it for this run only. The API keys come from the TMDB_API_KEY,
@@ -40,6 +42,11 @@ def add_redact_parser(sub) -> None:
     )
     parser.add_argument("paths", nargs="*", metavar="PATH", help="video files, folders or wildcards")
     parser.add_argument("-R", "--no-recurse", action="store_true", help="for a folder, look only at the files directly in it")
+    parser.add_argument(
+        "--convert-dry-run", action="store_true",
+        help="the convert step (convert_library) only lists what it would convert and changes nothing; the other "
+             "steps still run (without it the conversion is real)",
+    )
     add_redact_options(parser)
     add_common_options(parser)
     parser.set_defaults(handler=run_redact)
@@ -48,7 +55,7 @@ def add_redact_parser(sub) -> None:
 def run_redact(args: argparse.Namespace, out: Output) -> int:
     env = RedactEnv(
         rename_log=None, trash=trash_to(args.trash_dir) if args.trash_dir else trash_with_retries(),
-        imdb_local=imdb_settings.load_database(),
+        imdb_local=imdb_settings.load_database(), convert_dry_run=bool(args.convert_dry_run),
     )
     catalogue = build_catalogue(env=env)
     base = recipe_from_setting(read_recipe_file(args.recipe), catalogue) if args.recipe else load_recipe(catalogue)

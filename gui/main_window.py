@@ -133,6 +133,8 @@ ICON_PATH = ASSETS_DIR / "icon.ico"
 CHANGELOG_PATH = PROJECT_ROOT / "CHANGELOG.md"
 ABOUT_PATH = PROJECT_ROOT / "ABOUT.md"
 CREDITS_PATH = PROJECT_ROOT / "CREDITS.md"
+# The menu's own words for getting files into the list (File > Open Files / Open Folder).
+OPEN_FILES_FIRST = "Open some video files first (File > Open Files or Open Folder)."
 
 # Columns always shown regardless of filter (Filename/Status are
 # structural, not metadata fields, so the content-type filter never
@@ -490,8 +492,8 @@ class MainWindow(QMainWindow):
                 open_folder=self._on_open_folder,
                 include_subfolders=include_subfolders_slot(),
                 import_and_convert=self._on_import_and_convert,
-                # One Save: it saves EVERY changed file (Ctrl+S and
-                # Ctrl+Shift+A). A save-selected-only entry is gone: it was
+                # One Save: it saves EVERY changed file (Ctrl+Shift+A).
+                # A save-selected-only entry is gone: it was
                 # almost never wanted, and two Saves next to each other only
                 # invite the wrong one. The helper's separate Save entry would
                 # be a dead duplicate, so it is dropped rather than shown greyed.
@@ -562,13 +564,8 @@ class MainWindow(QMainWindow):
         registry = get_action_registry(self)
         self.actions_by_key = registry
 
-        # Shortcuts that moved keep their old key as a secondary one for one
-        # release (remove these aliases in the release after this one):
-        # Save All is Ctrl+Shift+A; Ctrl+S was Save Selected and Ctrl+Shift+S
-        # was Save All Changed, and both now save every changed file. The old
-        # Ctrl+O (Open Folder) and Ctrl+Shift+O (Subtitles) cannot be kept:
-        # they are Open Files and Open Folder now.
-        with_aliases(registry["save_all"], "Ctrl+S", "Ctrl+Shift+S")
+        # Save All is Ctrl+Shift+A only: the one-release Ctrl+S / Ctrl+Shift+S
+        # compatibility aliases were dropped (owner decision 2026-10-14).
         # F1 used to open About; F1 is Help contents everywhere else, so it is
         # simply unbound now (no alias: lint forbids F1 on About).
 
@@ -2224,7 +2221,7 @@ class MainWindow(QMainWindow):
 
         files = self._selected_video_files() or list(self.video_files)
         if not files:
-            QMessageBox.information(self, "Check Files", "Load some video files first.")
+            QMessageBox.information(self, "Check Files", OPEN_FILES_FIRST)
             return
         run_check_and_repair(self, files, _error_details)
 
@@ -2235,36 +2232,65 @@ class MainWindow(QMainWindow):
         from gui.duplicates_dialog import find_duplicates_flow
 
         if len(self.video_files) < 2:
-            QMessageBox.information(self, "Find Duplicates", "Load at least two video files first.")
+            QMessageBox.information(self, "Find Duplicates", "Open at least two video files first (File > Open Files or Open Folder).")
             return
         find_duplicates_flow(self, list(self.video_files))
 
     # --- Redact ---------------------------------------------------------
 
-    def _redact_targets(self) -> list[VideoFile]:
-        """The selected files, else -- after asking -- every loaded file
-        (Redact is meant to be one click on a whole folder, so nothing
-        selected is not an error)."""
-        targets = self._selected_video_files()
-        if targets:
-            return targets
-        if not self.video_files:
-            QMessageBox.information(self, "Redact", "Load some video files first.")
-            return []
-        answer = QMessageBox.question(
-            self, "Redact all files?",
-            f"Nothing is selected. Redact all {len(self.video_files)} loaded file(s)?\n\n" + self._redact_fate_text(),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-        )
-        return list(self.video_files) if answer == QMessageBox.StandardButton.Yes else []
+    CONVERT_DRY_RUN_LABEL = "Dry run the conversion step (list what would happen, change nothing)"
 
-    def _redact_fate_text(self) -> str:
-        """What happens to originals in THIS run: depends on whether the recipe's convert step is on and on the
-        Library safety settings (quarantine folder, delete-after-conversion, dry run), not a fixed promise."""
-        catalogue = build_catalogue(sample=self._redact_sample_values)
-        recipe = load_recipe(catalogue)
-        convert_on = bool(recipe.enabled.get("convert_library"))
-        return original_fate_text(library_safety.get_safety_settings(), convert_on)
+    def _redact_targets(self) -> tuple[list[VideoFile], Optional[bool]]:
+        """The files to redact and this run's convert dry-run choice (None when the recipe's convert step is
+        off). The selected files, else -- after asking -- every loaded file (Redact is meant to be one click on
+        a whole folder, so nothing selected is not an error). When the convert step is on, the confirm (also
+        shown for a selection then) carries a "Dry run the conversion step" checkbox, ticked by default: the
+        choice is made per run, never by a stale setting."""
+        targets = self._selected_video_files()
+        convert_on = self._redact_convert_on()
+        if targets and not convert_on:
+            return targets, None
+        if not targets and not self.video_files:
+            QMessageBox.information(self, "Redact", OPEN_FILES_FIRST)
+            return [], None
+        if targets:
+            title, question = "Redact", f"Redact the {len(targets)} selected file(s)?"
+        else:
+            targets = list(self.video_files)
+            title, question = "Redact all files?", f"Nothing is selected. Redact all {len(targets)} loaded file(s)?"
+        if not convert_on:
+            answer = QMessageBox.question(
+                self, title, question + "\n\n" + self._redact_fate_text(None),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            )
+            return (targets, None) if answer == QMessageBox.StandardButton.Yes else ([], None)
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle(title)
+        box.setText(
+            question + "\n\n" + self._redact_fate_text(False)
+            + "\n\nThe recipe's conversion step is on. With the box below ticked it only lists what it would convert."
+        )
+        dry_box = QCheckBox(self.CONVERT_DRY_RUN_LABEL)
+        dry_box.setChecked(True)
+        box.setCheckBox(dry_box)
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+        if box.exec() != QMessageBox.StandardButton.Yes:
+            return [], None
+        return targets, dry_box.isChecked()
+
+    def _redact_convert_on(self) -> bool:
+        """Whether the saved Redact recipe has the convert step (convert_library) on."""
+        recipe = load_recipe(build_catalogue(sample=self._redact_sample_values))
+        return bool(recipe.enabled.get("convert_library"))
+
+    def _redact_fate_text(self, convert_dry_run: Optional[bool]) -> str:
+        """What happens to originals in THIS run: depends on whether the recipe's convert step is on, this run's
+        dry-run choice, and the Library safety settings (quarantine folder, delete-after-conversion)."""
+        convert_on = self._redact_convert_on()
+        return original_fate_text(
+            library_safety.get_safety_settings(), convert_on, dry_run=bool(convert_dry_run) if convert_on else None,
+        )
 
     def _on_redact(self) -> None:
         """Edit > Redact (Ctrl+Shift+E, toolbar): runs the saved recipe
@@ -2274,7 +2300,7 @@ class MainWindow(QMainWindow):
         report, never overwritten. Redact isn't on the Undo stack (the
         Recycle Bin copy of each original is the undo), so the stack is
         cleared rather than left pointing at old states."""
-        targets = self._redact_targets()
+        targets, convert_dry_run = self._redact_targets()
         if not targets:
             return
         unsaved = [vf for vf in targets if vf.dirty and not vf.stamp_only_dirty]
@@ -2290,9 +2316,13 @@ class MainWindow(QMainWindow):
         self._active_cancel = cancel_event
         # No `background` hook here: redactor_common's run_redact runs every file on a worker thread now, and
         # that helper only works ON the GUI thread, so the steps call their slow work directly.
-        env = RedactEnv(rename_log=_rename_log(), imdb_local=imdb_settings.load_database(), cancel_event=cancel_event)
+        # convert_dry_run is a bool whenever the convert step is on (asked above), never the old saved setting.
+        env = RedactEnv(
+            rename_log=_rename_log(), imdb_local=imdb_settings.load_database(), cancel_event=cancel_event,
+            convert_dry_run=convert_dry_run,
+        )
         catalogue = build_catalogue(sample=self._redact_sample_values)
-        fate = self._redact_fate_text()
+        fate = self._redact_fate_text(convert_dry_run)
         try:
             report = run_redact_dialog(
                 self, targets, load_recipe(catalogue), catalogue,
@@ -2625,13 +2655,20 @@ class MainWindow(QMainWindow):
             parts.append(f"{cancelled_count} cancelled")
         if skipped_existing:
             parts.append(f"{len(skipped_existing)} skipped (output already exists)")
-        self.status_bar.showMessage(", ".join(parts))
+        summary = ", ".join(parts)
+        self.status_bar.showMessage(summary)
 
-        if failed:
-            details = _error_details(
-                [f"{path.name}: {err.strip() or 'ffmpeg conversion failed'}" for path, err in failed]
-            )
-            QMessageBox.warning(self, "Some files failed to convert", details)
+        # ONE end-of-run summary: every per-file warning and error is in its detailed text, never a box per file.
+        lines = [f"FAILED {path.name}: {err.strip() or 'ffmpeg conversion failed'}" for path, err in failed]
+        lines += [f"SKIPPED {vf.path.name}: the converted output already exists" for vf in skipped_existing]
+        lines += [f"CONVERTED {path.name}" for path in outputs]
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning if failed else QMessageBox.Icon.Information)
+        box.setWindowTitle("Convert to MP4 (H.264)")
+        box.setText(summary + ".")
+        box.setDetailedText("\n".join(lines))
+        box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        box.exec()
 
     # --- Import & Convert / Convert with the rules -----------------------------
 
@@ -2641,7 +2678,7 @@ class MainWindow(QMainWindow):
         MKV, re-encode only what no container can hold, external .srt files muxed in), the same engine as
         the Redact recipe's convert step and Media > Convert to MP4/MKV (Rules). The H.264 re-encode is
         only Media > Convert to MP4 (H.264), chosen on purpose. Additive to the loaded list."""
-        self._convert_with_rules(self._pick_videos_to_convert("Import & Convert to MP4/MKV", IMPORTABLE_EXTENSIONS))
+        self._convert_with_rules(self._pick_videos_to_convert("Import and Convert", IMPORTABLE_EXTENSIONS))
 
     def _pick_videos_to_convert(self, title: str, extensions) -> list[str]:
         extensions_filter = " ".join(f"*{ext}" for ext in sorted(extensions))
@@ -2875,7 +2912,7 @@ class MainWindow(QMainWindow):
         selected = self._selected_video_files()
         targets = [vf for vf in (selected or self.video_files) if not vf.load_error]
         if not targets:
-            QMessageBox.information(self, "No Files", f"Load some files first (or select the ones to {verb}).")
+            QMessageBox.information(self, "No Files", f"Open some files first (File > Open Files or Open Folder), or select the ones to {verb}.")
         return targets
 
     def _on_number_episodes(self) -> None:

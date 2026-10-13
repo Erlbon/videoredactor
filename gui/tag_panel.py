@@ -289,7 +289,7 @@ class TagPanel(QWidget):
         """Programmatically do what clicking Apply does -- exposed so
         Save can trigger it first. "Hit Save" should also mean "I meant
         to Apply first": without this, typing into a field and hitting
-        Save/Ctrl+S directly (without a separate Apply click) would
+        Save All directly (without a separate Apply click) would
         silently save the file's OLD metadata, since VideoFile.save()
         always writes whatever's currently in vf.metadata, and typing
         alone never touches that -- only Apply does. No-op if nothing's

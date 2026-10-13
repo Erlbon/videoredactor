@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-10-14#02 -- Redact asks the conversion dry run per run; one summary after Convert to MP4 (H.264)
+
+- Edit > Redact: when the recipe's "Convert to MP4/MKV and ingest subtitles" step is on, the confirm question (now also shown for a selection, and the "Redact all files?" one) has "Dry run the conversion step (list what would happen, change nothing)", ticked by default. The choice holds for that run only.
+- The "Dry run (Redact step)" option is gone from Preferences > Library safety, and its saved value is no longer read, so an old setting can never decide silently.
+- Command line: `redact --convert-dry-run` makes the convert step a dry run; without it the conversion is real (it used to follow the saved setting, which was on by default).
+- Media > Convert to MP4 (H.264): one confirmation before the run and one summary at the end, with every failure, skipped file and result listed under Show Details.
+- Save All is Ctrl+Shift+A only: the Ctrl+S and Ctrl+Shift+S aliases are gone.
+- Messages say "Open some video files first (File > Open Files or Open Folder)" instead of "Load ..."; the Import and Convert file picker is titled "Import and Convert".
+- Preferences > Conversion explains the two defaults under their controls: MKV from 4 subtitle tracks, and disc images (ISO/BIN/IMG/VOB) left alone, never converted.
+
 ## 2026-10-14#01 -- Check File on the IMDb database no longer freezes the window
 
 - The "Check File" button in the IMDb database dialog now runs the check off the GUI thread under a progress dialog (redactor_common 2026-10-14-01); before, opening a big database file could freeze the window.

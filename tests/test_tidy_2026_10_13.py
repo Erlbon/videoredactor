@@ -204,6 +204,7 @@ def test_h264_convert_reloads_results_under_progress(window, monkeypatch, tmp_pa
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
     monkeypatch.setattr(window, "_run_transcode_jobs", lambda jobs, settings, title: {i: (True, "") for i in range(len(jobs))})
     monkeypatch.setattr(mw.VideoFile, "load", lambda self: None)
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.Ok)  # the end summary
     calls = _record_progress(monkeypatch)
     window._on_convert_to_mp4()
     assert ("Reading the converted files...", 2, False) in calls

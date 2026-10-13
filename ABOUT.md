@@ -58,8 +58,11 @@ WMV, MOV, FLV, MPG, WebM, OGM, ...) becomes MP4 or MKV by stream copy; only vide
 (RealVideo, Flash, odd WMV) is re-encoded; a series episode over the bitrate or size limits is re-encoded with
 hevc_nvenc and scaled to 720p when taller (movies only if you turn that on). A series episode is a file tagged TV,
 or an untagged file whose name reads as an episode (`S01E02`); movies, clips and other tagged files are not.
-External `.srt` files beside the video are muxed in (an MP4 then becomes an MKV) and removed afterwards. Disc
-images are left alone (or listed, per the setting). These rules are separate from Preferences > Transcode, which
+External `.srt` files beside the video are muxed in (an MP4 then becomes an MKV) and removed afterwards. A file
+with 4 or more subtitle tracks (the default of "MKV when a file has at least") becomes an MKV, not an MP4. Disc
+images (ISO, BIN, IMG, VOB) are never converted under the default "Leave alone", and not listed either; "list them"
+names each one in the report for a manual decision, and only the third choice stream-copies a single `.vob` to
+MKV. These rules are separate from Preferences > Transcode, which
 only holds the settings of Media > Convert to MP4 (H.264).
 
 Every conversion is written to a temporary `.part` / `.resize` file beside the source and checked before it
@@ -79,8 +82,10 @@ What happens to an original that a verified result replaced (Tools > Preferences
   `.srt` files are then deleted too. This cannot be undone.
 
 Dry run: Media > Convert to MP4/MKV (Rules), Import and Convert and the Open Folder offer each ask "Dry run first"
-(ticked by default) in their one dialog; the Redact convert step follows the "Dry run" setting on the Library
-safety page instead (on by default). A dry run reports "DRY RUN, nothing changed: would convert ..." for every file
+(ticked by default) in their one dialog. Edit > Redact asks too, per run: when the recipe's "Convert to MP4/MKV
+and ingest subtitles" step is on, its confirm question has "Dry run the conversion step (list what would happen,
+change nothing)", ticked by default (there is no saved dry-run setting any more, so an old choice can never
+decide silently). A dry run reports "DRY RUN, nothing changed: would convert ..." for every file
 and touches nothing.
 
 ## Command line
@@ -231,18 +236,20 @@ checked (FFmpeg's ffprobe is missing).
 
 ### redact
 
-`videoredactor redact [PATH...] [--recipe FILE] [--enable STEP] [--disable STEP] [--threshold N] [--trash-dir FOLDER] [--list-steps]`
+`videoredactor redact [PATH...] [--recipe FILE] [--enable STEP] [--disable STEP] [--threshold N] [--trash-dir FOLDER] [--convert-dry-run] [--list-steps]`
 
 Runs the Redact recipe on the videos, the same steps as Edit > Redact: check and repair, tags from the filename
 and from the folder path, lookups on IMDb, TMDB and TheTVDB, subtitles, MKV to MP4 remux, convert to MP4/MKV and
 ingest subtitles, rename, move into folders. Each changed file is saved in place and its original goes to the
 Recycle Bin (or `--trash-dir`). The convert step (`convert_library`, off unless the recipe or `--enable` turns it
-on) follows the app's Library safety settings, including its dry-run setting and delete-after-conversion.
+on) converts for real unless `--convert-dry-run` is given; it follows the app's Library safety settings for the
+quarantine folder and delete-after-conversion. The old saved dry-run setting is not read any more.
 Guesses below the confidence threshold are listed under "needs review" and not applied. There is no
-`--dry-run`: use `info` and `check` first, and `--disable` for the steps you do not want.
+`--dry-run` for the whole recipe: use `info` and `check` first, and `--disable` for the steps you do not want.
 
 | Option | Meaning |
 | --- | --- |
+| `--convert-dry-run` | The convert step only lists what it would convert ("DRY RUN, nothing changed: would convert ...") and changes nothing; the other steps still run and save. Without it the conversion is real. |
 | `--recipe FILE` | Use this recipe (a JSON file in the format the app stores) instead of the one saved in the app. |
 | `--enable STEP` | Turn a step on for this run (repeatable). |
 | `--disable STEP` | Turn a step off for this run (repeatable). |

@@ -154,6 +154,10 @@ class RedactEnv:
     # Set by the progress dialog's Cancel (run_redact_dialog(on_cancel=cancel_event.set)) and by the app
     # closing: the step that runs ffmpeg hands it to _run_ffmpeg, which kills the encode within half a second.
     cancel_event: Any = None
+    # The convert step's dry-run choice for THIS run only: the GUI's Redact confirm asks it per run (ticked by
+    # default) and the command line passes --dry-run. None falls back to the old Library safety setting
+    # (only callers that never ask, such as tests, still get that).
+    convert_dry_run: bool | None = None
 
 
 # --- per-file context --------------------------------------------------------
@@ -1356,8 +1360,8 @@ def make_safe_run(
     trash: Callable[[str], None] | None = None,
 ) -> "library_safety.SafeRun":
     """The SafeRun for a conversion, from the Library safety settings (with the undo log beside the quarantine
-    folder when one is set). `dry_run` overrides the persistent setting (Media > Convert to MP4/MKV (rules)
-    asks per run); the Redact step leaves it to the setting."""
+    folder when one is set). `dry_run` overrides the persistent setting: Media > Convert to MP4/MKV (rules)
+    and the Redact confirm both ask per run (RedactEnv.convert_dry_run); None falls back to the setting."""
     safety = safety or library_safety.get_safety_settings(setting)
     quarantine = safety.quarantine_root
     log = None
@@ -1372,15 +1376,18 @@ def make_safe_run(
     )
 
 
-def original_fate_text(safety: "library_safety.SafetySettings", convert_enabled: bool) -> str:
+def original_fate_text(
+    safety: "library_safety.SafetySettings", convert_enabled: bool, dry_run: bool | None = None,
+) -> str:
     """What really happens to an original in this Redact run, for the confirm question and the results header:
-    a plain save always puts the original in the Recycle Bin; a conversion (ConvertStep) follows the Library
-    safety settings (quarantine folder / delete-after-conversion / dry run)."""
+    a plain save always puts the original in the Recycle Bin; a conversion (ConvertStep) follows this run's
+    dry-run choice (`dry_run`; None = the old setting) and the Library safety settings (quarantine folder /
+    delete-after-conversion)."""
     text = "Each changed file is saved in place; its original goes to the Recycle Bin (restore it from there to undo)."
     if not convert_enabled:
         return text
-    if safety.dry_run:
-        return text + " Conversions run as a DRY RUN this time (Preferences > Library safety): listed, not done."
+    if safety.dry_run if dry_run is None else dry_run:
+        return text + " Conversions run as a DRY RUN this time: listed, not done."
     if safety.delete_after_conversion:
         return text + " A converted original is DELETED, not recycled (delete-after-conversion is on)."
     if safety.quarantine_root:
@@ -1398,10 +1405,11 @@ class ConvertStep(VideoStep):
         "becomes an MKV) and removed afterwards. Every result is verified before the swap and the original goes "
         "to the Recycle Bin or the quarantine folder (or is deleted, if you turned that on). Disc images are "
         "left alone. An MKV stays an MKV (so 'Remux MKV to MP4' is not run while this step is on). All limits "
-        "are in Preferences > Conversion. Preferences > Library safety > 'Dry run (Redact step)' is on by "
-        "default: the report then shows a 'DRY RUN: would ...' line per file and nothing is changed; turn it off "
-        "there to convert for real. Media > Convert to MP4/MKV (rules) runs the same rules with a per-run "
-        "dry-run choice. Off by default."
+        "are in Preferences > Conversion. Every Redact run with this step on asks 'Dry run the conversion step' "
+        "in its confirm question (ticked by default): the report then shows a 'DRY RUN: would ...' line per file "
+        "and nothing is converted; untick it to convert for real. On the command line, redact --convert-dry-run "
+        "does the same. Media > Convert to MP4/MKV (rules) runs the same rules with its own per-run dry-run "
+        "choice. Off by default."
     )
     position = "after_save"
     run_when_unchanged = True
@@ -1416,7 +1424,7 @@ class ConvertStep(VideoStep):
         safety = library_safety.get_safety_settings(setting)
         conv = conversion_plan.get_conversion_settings(setting)
         path = str(ctx.video.path)
-        run = make_safe_run(setting, safety, trash=ctx.env.trash)
+        run = make_safe_run(setting, safety, dry_run=ctx.env.convert_dry_run, trash=ctx.env.trash)
         if ctx.start_mtime is not None and os.path.normcase(path) == os.path.normcase(ctx.original):
             run.known_mtime[path] = ctx.start_mtime  # Redact's own save must not make the file look "in use"
         is_series = conversion_is_series(ctx.video.metadata.content_type, ctx.video.path.stem)
@@ -1434,7 +1442,7 @@ class ConvertStep(VideoStep):
             if outcome.message == "Cancelled" or any(a.detail.endswith("Cancelled)") for a in skipped):
                 return StepResult.failed("not converted: cancelled (the file is untouched)")
             return StepResult.nothing(note="; ".join(n for n in (note, extra) if n))
-        if safety.dry_run:
+        if run.dry_run:
             return StepResult.nothing(note="; ".join(n for n in (dry_run_line(run.actions), extra) if n))
         # The tags the app had written are carried by ffmpeg only where the container allows; write them again.
         keep = copy.deepcopy(ctx.video.metadata)

@@ -307,12 +307,9 @@ def test_number_episodes_menu_entry_needs_a_selection(window, monkeypatch):
 
 # --- Command palette and lint -----------------------------------------------------
 
-# Violations the lint reports on purpose: Save All keeps its old Ctrl+Shift+S as
-# a secondary shortcut for one release (there is no Save As in this app, so the
-# key is not ambiguous). Delete this entry, and the alias, in the next release.
-DOCUMENTED_LINT_EXCEPTIONS = {
-    "File > Save All is bound to Ctrl+Shift+S: Ctrl+Shift+S is Save As (platform standard)",
-}
+# Violations the lint reports on purpose: none since the Ctrl+S / Ctrl+Shift+S
+# aliases on Save All were dropped (2026-10-14).
+DOCUMENTED_LINT_EXCEPTIONS: set = set()
 
 
 def test_menu_bar_passes_the_skeleton_lint(window):
@@ -348,9 +345,8 @@ def test_skeleton_shortcuts_and_one_release_aliases(window):
     reg = window.actions_by_key
     assert _keys(reg["open_files"]) == ["Ctrl+O"]
     assert _keys(reg["open_folder"]) == ["Ctrl+Shift+O"]
-    # Save All is Ctrl+Shift+A; the old Save Selected and Save All Changed keys
-    # still work, and all of them save every changed file.
-    assert _keys(reg["save_all"]) == ["Ctrl+Shift+A", "Ctrl+S", "Ctrl+Shift+S"]
+    # Save All is Ctrl+Shift+A only; the Ctrl+S / Ctrl+Shift+S aliases are gone.
+    assert _keys(reg["save_all"]) == ["Ctrl+Shift+A"]
     assert _keys(reg["lookup_subtitles"]) == ["Ctrl+Shift+L"]  # was Ctrl+Shift+O
     assert _keys(reg["lookup_tmdb_movie"]) == ["Ctrl+M"] and _keys(reg["lookup_tmdb_tv"]) == ["Ctrl+T"]
     assert _keys(reg["lookup_tvdb"]) == ["Ctrl+Shift+T"] and _keys(reg["convert_to_mp4"]) == ["Ctrl+Shift+C"]
