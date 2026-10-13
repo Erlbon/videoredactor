@@ -53,8 +53,10 @@ PART_MARKER = "part"  # <stem>.part<ext>
 RESIZE_MARKER = "resize"  # <stem>.resize<ext>
 
 DEFAULT_RECENT_MINUTES = 10
-DEFAULT_DURATION_TOLERANCE_SECONDS = 2.0
-DEFAULT_DURATION_TOLERANCE_FRACTION = 0.01
+# The owner's rule: the converted file's duration is within 1.5 s of the source, whatever its length. The share of the
+# length is an optional extra allowance for people who want one (default none).
+DEFAULT_DURATION_TOLERANCE_SECONDS = 1.5
+DEFAULT_DURATION_TOLERANCE_FRACTION = 0.0
 
 UNDO_CREATED = "CREATED"
 

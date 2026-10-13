@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-13#11 -- Conversion duration check back to 1.5 seconds
+
+- The Library safety "duration tolerance" now defaults to 1.5 seconds and 0 percent of the length. Since the setting started to be used by the rules engine (#10) the old defaults (2 s or 1 percent) would have let a 45-minute episode come out about 27 seconds off and still pass. Your own rule is "within 1.5 s"; the share of the length stays available as an optional extra allowance. The 60-second allowance for AVI/OGM files with a stale header is unchanged.
+
 ## 2026-10-13#10 -- Progress everywhere, fewer surprises, honest docs
 
 - **Progress dialogs:** after Remux to MP4, Convert to MP4 (H.264) and the conversion rules, the new files are read back under a progress dialog instead of one by one on a frozen window. Online lookups (TMDB, TheTVDB, OpenSubtitles, and the offline IMDb searches) show a busy dialog when they take more than a moment. Rename / Export by Pattern (an export copies whole videos) and Search and Replace on filenames rename under a progress dialog with Cancel.

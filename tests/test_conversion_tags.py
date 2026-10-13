@@ -127,3 +127,16 @@ def test_write_tags_reports_the_writers_error(monkeypatch):
 
     monkeypatch.setattr(cr, "VideoFile", BrokenVideoFile)
     assert cr.write_tags("x.mkv", _tags()) == "tags did not stick"
+
+
+def test_default_duration_tolerance_is_1_5_seconds_whatever_the_length():
+    from core import library_safety as ls2
+
+    s = ls2.SafetySettings()
+    assert s.duration_tolerance_seconds == 1.5 and s.duration_tolerance_fraction == 0.0
+    long_src = cp.MediaInfo("a.mkv", 100, 2700.0, [cp.StreamInfo(0, "video", "h264", height=480), cp.StreamInfo(1, "audio", "aac")])
+    off = cp.MediaInfo("a.mkv", 100, 2727.0, list(long_src.streams))  # a 45 minute episode 27 s off must NOT pass
+    plan = cp.Plan(container=".mkv", reasons=["x"])
+    assert "duration" in cr.verify_result(long_src, off, plan, cp.ConversionSettings(), tolerance_seconds=s.duration_tolerance_seconds, tolerance_fraction=s.duration_tolerance_fraction)
+    close = cp.MediaInfo("a.mkv", 100, 2701.4, list(long_src.streams))
+    assert cr.verify_result(long_src, close, plan, cp.ConversionSettings(), tolerance_seconds=1.5, tolerance_fraction=0.0) == ""
