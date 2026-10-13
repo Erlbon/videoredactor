@@ -2,7 +2,7 @@
 
 import unittest
 
-from core.format_helpers import format_duration, format_file_size
+from core.format_helpers import bitrate_bps, format_bitrate, format_duration, format_file_size
 
 
 class TestFormatDuration(unittest.TestCase):
@@ -59,6 +59,18 @@ class TestFormatFileSize(unittest.TestCase):
 
     def test_boundary_just_under_1024_stays_bytes(self):
         self.assertEqual(format_file_size(1023), "1023 B")
+
+
+class TestBitrate(unittest.TestCase):
+    def test_formats_decimal_units(self):
+        self.assertEqual(format_bitrate("4213000"), "4.2 Mb/s")
+        self.assertEqual(format_bitrate("640000"), "640 kb/s")
+
+    def test_unknown_is_blank_and_sorts_as_none(self):
+        for raw in ("", None, "N/A", "0", "-5"):
+            self.assertEqual(format_bitrate(raw), "")
+            self.assertIsNone(bitrate_bps(raw))
+        self.assertEqual(bitrate_bps("2000000"), 2000000.0)
 
 
 if __name__ == "__main__":

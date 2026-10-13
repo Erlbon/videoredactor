@@ -53,7 +53,7 @@ from core.settings_adapter import REFRESH_COLUMNS, REFRESH_PANEL, VideoSettingsA
 from core.transcode_settings import get_transcode_settings
 from core.opensubtitles_client import download_subtitle_text, OpenSubtitlesError
 from core.table_settings import PROTECTED_COLUMNS, merge_column_order, is_column_visible, sanitize_hidden_fields
-from core.format_helpers import format_duration, format_file_size
+from core.format_helpers import bitrate_bps, format_bitrate, format_duration, format_file_size
 from core.config import get_setting, set_setting
 from redactor_common.gui.action_factory import make_action
 from redactor_common.core import labels
@@ -140,12 +140,13 @@ ALWAYS_VISIBLE_COLUMNS = ["filename", "status", "content_type"]
 # table-only, informational. Shown regardless of Content Type filter
 # (unlike Director/Cast/etc, technical info isn't content-type-specific)
 # but still user-hideable via the column context menu like anything else.
-TECHNICAL_COLUMNS = ["path", "duration_seconds", "resolution", "size_bytes"]
+TECHNICAL_COLUMNS = ["path", "duration_seconds", "resolution", "size_bytes", "bitrate"]
 TECHNICAL_LABELS = {
     "path": "Path",
     "duration_seconds": "Duration",
     "resolution": "Resolution",
     "size_bytes": "Size",
+    "bitrate": "Bitrate",
 }
 
 FILE_ROLE = Qt.ItemDataRole.UserRole  # row -> VideoFile mapping, not row index
@@ -1314,6 +1315,8 @@ class MainWindow(QMainWindow):
         if field_name == "size_bytes":
             size = vf.size_bytes
             return NumericTableWidgetItem(text, sort_value=float(size) if size is not None else None)
+        if field_name == "bitrate":
+            return NumericTableWidgetItem(text, sort_value=bitrate_bps(vf.metadata.bitrate))
         if field_name in NUMERIC_FIELDS:
             return NumericTableWidgetItem(text)
         return QTableWidgetItem(text)
@@ -1374,6 +1377,8 @@ class MainWindow(QMainWindow):
             # VideoFile's own property, so this can't go through the
             # generic getattr(vf.metadata, ...) fallback below.
             return format_file_size(vf.size_bytes)
+        if field_name == "bitrate":
+            return format_bitrate(vf.metadata.bitrate)
         value = getattr(vf.metadata, field_name, "")
         return "" if value is None else str(value)
 

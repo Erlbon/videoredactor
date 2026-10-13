@@ -43,3 +43,23 @@ def format_file_size(size_bytes: Optional[int]) -> str:
             return f"{size:.1f} {unit}"
         size /= 1024
     return f"{size:.1f} TB"  # unreachable given the loop above, kept for clarity/safety
+
+def bitrate_bps(raw) -> Optional[float]:
+    """ffprobe's overall bit_rate ("4213000", bits per second) -> a number, None when absent or
+    unparseable. The sort and compare value of the Bitrate column."""
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def format_bitrate(raw) -> str:
+    """"4213000" -> '4.2 Mb/s', "640000" -> '640 kb/s'. '' when unknown. Decimal units (1 Mb/s =
+    1,000,000 bits/s), the convention for bitrates, unlike the 1024-based file Size."""
+    bps = bitrate_bps(raw)
+    if bps is None:
+        return ""
+    if bps >= 1_000_000:
+        return f"{bps / 1_000_000:.1f} Mb/s"
+    return f"{round(bps / 1000)} kb/s"

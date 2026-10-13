@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 
+from core.format_helpers import format_bitrate, format_file_size
 from core.filename_pattern import field_text, set_field_text
 from core.video_file import VideoFile
 from redactor_common.cli import EXIT_OK, EXIT_PARTIAL, CliError, Output, add_common_options
@@ -53,13 +54,14 @@ def run_info(args: argparse.Namespace, out: Output) -> int:
         technical = {
             "container": md.container, "resolution": md.resolution, "video_codec": md.video_codec,
             "audio_codec": md.audio_codec, "bitrate": md.bitrate, "frame_rate": md.frame_rate,
-            "duration_seconds": md.duration_seconds,
+            "duration_seconds": md.duration_seconds, "size_bytes": video.size_bytes,
         }
         out.record({"path": path, "status": status, "check": video.scan_status(), "technical": technical, "fields": fields})
         audio = f"{md.audio_codec} audio" if md.audio_codec else ""
         fps = f"{md.frame_rate} fps" if md.frame_rate else ""
         details = ", ".join(p for p in (
             md.container, md.resolution, md.video_codec, audio, fps, _duration_text(md.duration_seconds),
+            format_file_size(video.size_bytes), format_bitrate(md.bitrate),
             f"check: {video.scan_status()}" if video.scan_status() else "", status,
         ) if p)
         out.line(f"{path}  [{details}]")

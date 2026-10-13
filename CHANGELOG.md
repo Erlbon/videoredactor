@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-13#02 -- Bitrate column, Size and Bitrate in `info`
+
+- New **Bitrate** column (overall bitrate from ffprobe, shown as `4.2 Mb/s` / `640 kb/s`, sorts numerically; blank when unknown), next to the existing **Size** column, so files can be compared. Show it from the column menu like any other.
+- `videoredactor info` now prints size and bitrate, and its JSON has `size_bytes` next to `bitrate`.
+
 ## 2026-10-13#01 -- Library safety layer (foundation for the clean-up rules)
 
 - New `core/library_safety.py`: the hard rules every library-cleaning operation will run through. Replaced or superseded files are MOVED to a quarantine folder that mirrors their library-relative path, in a dated subfolder per kind (`remuxed originals`, `duplicates`, `defective`, `cleanup`, `resized originals` + date); nothing is deleted and a quarantine never overwrites.
