@@ -56,7 +56,7 @@ def test_other_menus_hold_what_the_spec_says(window):
         "Subtitles (OpenSubtitles)…",
     ]
     assert _labels(menus["Media"]) == [
-        "Remux to MP4…", "Convert to MP4 (H.264)…", "Check Files…", "Find Duplicates…",
+        "Remux to MP4…", "Convert to MP4 (H.264)…", "Convert to MP4/MKV (Rules)…", "Check Files…", "Find Duplicates…",
     ]
     assert _labels(menus["Tools"]) == [
         "Preferences…", "API Keys…", "External Tools…", "IMDb Database…", "Columns…", "Genres…", "Languages…",

@@ -42,7 +42,13 @@ failure.
 """
 
 from __future__ import annotations
+
+import os
+import shutil
+import tempfile
 from typing import Optional
+
+from redactor_common.core.os_utils import replace_with_retry, retry_on_lock
 
 from core.video_metadata import VideoMetadata, ContentType
 
@@ -162,6 +168,30 @@ def write_mp4_metadata(path: str, meta: VideoMetadata) -> None:
     a file that doesn't have one yet, rather than assuming every file
     already has some tags to work with.
     """
+    from mutagen.mp4 import MP4
+
+    # Never edit the video in place (mutagen rewrites the moov atom and may shift the whole file; a crash
+    # mid-write truncates it): copy to a scratch beside it, edit the copy, check it still parses, then swap it
+    # in with a lock retry. Same approach as mp3redactor's core/tag_writer.py. MKV (mkvpropedit) is unchanged:
+    # it edits in place, by design of the tool.
+    target = os.path.realpath(path)
+    fd, scratch = tempfile.mkstemp(prefix=".videoredactor-", suffix=".tmp", dir=os.path.dirname(target))
+    os.close(fd)
+    try:
+        retry_on_lock(shutil.copy2, target, scratch)  # keeps the permissions
+        _apply_mp4_tags(scratch, meta)
+        MP4(scratch)  # the edited copy must still parse before it replaces anything
+        replace_with_retry(scratch, target)
+    except BaseException:
+        try:
+            os.remove(scratch)
+        except OSError:
+            pass
+        raise
+
+
+def _apply_mp4_tags(path: str, meta: VideoMetadata) -> None:
+    """The mutagen edit itself, on `path` (a scratch copy, see write_mp4_metadata)."""
     from mutagen.mp4 import MP4, MP4FreeForm
 
     mp4 = MP4(path)

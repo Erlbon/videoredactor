@@ -149,6 +149,9 @@ class RedactEnv:
     pattern_history: Callable[[], list[str]] = load_pattern_history
     setting: Callable[[str, str, str], str] = get_setting
     imdb_local: str = ""  # path of the offline IMDb database ("" = none set up: the lookup is online only)
+    # Set by the progress dialog's Cancel (run_redact_dialog(on_cancel=cancel_event.set)) and by the app
+    # closing: the step that runs ffmpeg hands it to _run_ffmpeg, which kills the encode within half a second.
+    cancel_event: Any = None
 
 
 # --- per-file context --------------------------------------------------------
@@ -1130,13 +1133,20 @@ class RemuxStep(VideoStep):
     description = (
         "Repackages an MKV as MP4 without re-encoding (as Media > Remux to MP4). Changes the container, so "
         "it is off by default. The result is verified: if any video/audio/subtitle track or attachment "
-        "would be lost, or it is shorter, nothing is changed. The app's tags are written onto the MP4."
+        "would be lost, or it is shorter, nothing is changed. The app's tags are written onto the MP4. "
+        "Not run while 'Convert to MP4/MKV and ingest subtitles' is on in the same recipe: that step never "
+        "moves an MKV to MP4 (the two would fight), so turn one of them off."
     )
     default_enabled = False
 
     def execute(self, ctx: VideoCtx) -> StepResult:
         if os.path.splitext(ctx.current)[1].lower() != ".mkv":
             return StepResult.nothing()
+        if getattr(ctx, "batch", {}).get(ConvertStep.key):
+            return StepResult.nothing(
+                note="not remuxed: 'Convert to MP4/MKV and ingest subtitles' is on in this recipe and keeps MKV files "
+                "as MKV; turn one of the two steps off"
+            )
         if os.path.islink(ctx.video.path):
             return StepResult.nothing(note="not remuxed: the file is a symbolic link")
         final = os.path.splitext(ctx.original)[0] + ".mp4"
@@ -1308,6 +1318,59 @@ class MoveIntoFoldersStep(PatternStep):
 # --- step 9: convert to MP4/MKV and ingest subtitles (after the save) --------------------
 
 
+def dry_run_line(actions: list) -> str:
+    """The explicit report line for a dry run: "DRY RUN: would convert a.avi -> a.mkv (legacy container .avi);
+    would recycle a.en.srt (...)". Never a quiet 'nothing'."""
+    parts = []
+    for a in actions:
+        if a.verb == "skip":
+            parts.append(f"would skip {os.path.basename(a.path)} ({a.detail}; {a.reason})")
+        else:
+            detail = os.path.basename(a.detail) if a.verb == "convert" else a.detail
+            parts.append(f"would {a.verb} {os.path.basename(a.path)} -> {detail} ({a.reason})")
+    return "DRY RUN, nothing changed: " + ("; ".join(parts) if parts else "nothing to do")
+
+
+def make_safe_run(
+    setting: Callable[[str, str, str], str],
+    safety: "library_safety.SafetySettings | None" = None,
+    *,
+    dry_run: bool | None = None,
+    trash: Callable[[str], None] | None = None,
+) -> "library_safety.SafeRun":
+    """The SafeRun for a conversion, from the Library safety settings (with the undo log beside the quarantine
+    folder when one is set). `dry_run` overrides the persistent setting (Media > Convert to MP4/MKV (rules)
+    asks per run); the Redact step leaves it to the setting."""
+    safety = safety or library_safety.get_safety_settings(setting)
+    quarantine = safety.quarantine_root
+    log = None
+    if quarantine:
+        log_folder = safety.undo_log_folder or os.path.join(quarantine, "_undo logs")
+        log = library_safety.UndoLog(os.path.join(log_folder, f"undo {library_safety.stamp_now()[:10]}.tsv"))
+    return library_safety.SafeRun(
+        library_root=setting("rename", "library_root", "").strip(), quarantine_root=quarantine, log=log,
+        dry_run=safety.dry_run if dry_run is None else dry_run, recent_minutes=safety.recent_minutes, trash=trash,
+        delete_after_conversion=safety.delete_after_conversion,
+        tolerance_seconds=safety.duration_tolerance_seconds, tolerance_fraction=safety.duration_tolerance_fraction,
+    )
+
+
+def original_fate_text(safety: "library_safety.SafetySettings", convert_enabled: bool) -> str:
+    """What really happens to an original in this Redact run, for the confirm question and the results header:
+    a plain save always puts the original in the Recycle Bin; a conversion (ConvertStep) follows the Library
+    safety settings (quarantine folder / delete-after-conversion / dry run)."""
+    text = "Each changed file is saved in place; its original goes to the Recycle Bin (restore it from there to undo)."
+    if not convert_enabled:
+        return text
+    if safety.dry_run:
+        return text + " Conversions run as a DRY RUN this time (Preferences > Library safety): listed, not done."
+    if safety.delete_after_conversion:
+        return text + " A converted original is DELETED, not recycled (delete-after-conversion is on)."
+    if safety.quarantine_root:
+        return text + f" A converted original is moved to the quarantine folder {safety.quarantine_root}."
+    return text + " A converted original goes to the Recycle Bin too (on a network or removable drive it is kept beside the result instead)."
+
+
 class ConvertStep(VideoStep):
     key = "convert_library"
     label = "Convert to MP4/MKV and ingest subtitles"
@@ -1317,42 +1380,44 @@ class ConvertStep(VideoStep):
         "limits are re-encoded and scaled to 720p; external .srt files beside the video are muxed in (an MP4 "
         "becomes an MKV) and removed afterwards. Every result is verified before the swap and the original goes "
         "to the Recycle Bin or the quarantine folder (or is deleted, if you turned that on). Disc images are "
-        "left alone. All limits are in Preferences > Conversion; Preferences > Library safety starts in dry-run, "
-        "which lists what would happen and changes nothing. Off by default."
+        "left alone. An MKV stays an MKV (so 'Remux MKV to MP4' is not run while this step is on). All limits "
+        "are in Preferences > Conversion. Preferences > Library safety > 'Dry run (Redact step)' is on by "
+        "default: the report then shows a 'DRY RUN: would ...' line per file and nothing is changed; turn it off "
+        "there to convert for real. Media > Convert to MP4/MKV (rules) runs the same rules with a per-run "
+        "dry-run choice. Off by default."
     )
     position = "after_save"
     run_when_unchanged = True
     default_enabled = False
+
+    def prepare(self, items, env) -> bool:
+        """Marks the run so RemuxStep can see this step is on (ctx.batch[self.key])."""
+        return True
 
     def execute(self, ctx: VideoCtx) -> StepResult:
         setting = ctx.env.setting
         safety = library_safety.get_safety_settings(setting)
         conv = conversion_plan.get_conversion_settings(setting)
         path = str(ctx.video.path)
-        quarantine = safety.quarantine_root
-        log = None
-        if quarantine:
-            log_folder = safety.undo_log_folder or os.path.join(quarantine, "_undo logs")
-            log = library_safety.UndoLog(os.path.join(log_folder, f"undo {library_safety.stamp_now()[:10]}.tsv"))
-        run = library_safety.SafeRun(
-            library_root=setting("rename", "library_root", "").strip(), quarantine_root=quarantine, log=log,
-            dry_run=safety.dry_run, recent_minutes=safety.recent_minutes, trash=ctx.env.trash,
-            delete_after_conversion=safety.delete_after_conversion,
-            tolerance_seconds=safety.duration_tolerance_seconds, tolerance_fraction=safety.duration_tolerance_fraction,
-        )
+        run = make_safe_run(setting, safety, trash=ctx.env.trash)
         if ctx.start_mtime is not None and os.path.normcase(path) == os.path.normcase(ctx.original):
             run.known_mtime[path] = ctx.start_mtime  # Redact's own save must not make the file look "in use"
         is_series = ctx.video.metadata.content_type != ContentType.MOVIE
         try:
-            outcome = ctx.bg(conversion_run.process_file, run, path, conv, is_series=is_series)
+            outcome = ctx.bg(
+                conversion_run.process_file, run, path, conv, is_series=is_series, cancel_event=ctx.env.cancel_event,
+            )
         except library_safety.SafetyError as exc:
             return StepResult.failed(f"not converted, the file is untouched: {exc}")
         skipped = [a for a in run.actions if a.verb == "skip"]
+        extra = "; ".join(outcome.notes)
         if not outcome.converted:
             note = skipped[0].detail if skipped else outcome.message
-            return StepResult.nothing(note=note)
+            if outcome.message == "Cancelled" or any(a.detail.endswith("Cancelled)") for a in skipped):
+                return StepResult.failed("not converted: cancelled (the file is untouched)")
+            return StepResult.nothing(note="; ".join(n for n in (note, extra) if n))
         if safety.dry_run:
-            return StepResult.nothing(note="dry run, nothing changed: " + "; ".join(str(a) for a in run.actions))
+            return StepResult.nothing(note="; ".join(n for n in (dry_run_line(run.actions), extra) if n))
         # The tags the app had written are carried by ffmpeg only where the container allows; write them again.
         keep = copy.deepcopy(ctx.video.metadata)
         ctx.video.path = Path(outcome.final_path)

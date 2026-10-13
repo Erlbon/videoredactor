@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import os
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 from core import conversion_plan as cp
@@ -93,6 +93,7 @@ class ConversionOutcome:
     converted: bool
     final_path: str = ""
     message: str = ""
+    notes: list[str] = field(default_factory=list)  # FYIs for the report (an .srt that was left alone, ...)
 
 
 def convert_file(
@@ -174,20 +175,32 @@ def process_file(
     info = probe(source)
     if info is None:
         return ConversionOutcome(False, message="couldn't read the file (ffprobe failed)")
-    externals = [] if info.ext in cp.DISC_EXTENSIONS else si.find_external_subs(source)
-    for ext_sub in externals:
-        si.load(ext_sub, reader=reader)
-    chosen = si.prepare(
-        externals, video_had_subtitles=bool(info.of("subtitle")), whitelist=si.language_whitelist(settings.subtitle_languages),
-    )
-    if chosen and info.of("subtitle"):
-        embedded = embedded_texts(info, source)
-        chosen = [s for s in chosen if not si.duplicate_of_embedded(s.text, embedded)]
-    plan = cp.plan_conversion(info, settings, is_series=is_series, extra_subtitles=len(chosen))
+    # Plan first: a file the rules won't touch (disc image, unknown codec) needs no sidecar work at all.
+    plan = cp.plan_conversion(info, settings, is_series=is_series)
     if plan.needs_review:
         return ConversionOutcome(False, message=plan.needs_review)
+    if plan.skip_reason:
+        return ConversionOutcome(False, message=plan.skip_reason)
+    notes: list[str] = []
+    externals = si.find_external_subs(source)
+    readable = []
+    for ext_sub in externals:
+        try:
+            si.load(ext_sub, reader=reader)
+        except (si.SubtitleDecodeError, OSError) as exc:
+            notes.append(f"{os.path.basename(ext_sub.path)} left alone, not ingested: {exc}")
+            continue
+        readable.append(ext_sub)
+    chosen = si.prepare(
+        readable, video_had_subtitles=bool(info.of("subtitle")), whitelist=si.language_whitelist(settings.subtitle_languages),
+    )
+    if chosen and info.of("subtitle"):  # the embedded-text extraction (ffmpeg) only when there is something to compare
+        embedded = embedded_texts(info, source)
+        chosen = [s for s in chosen if not si.duplicate_of_embedded(s.text, embedded)]
+    if chosen:
+        plan = cp.plan_conversion(info, settings, is_series=is_series, extra_subtitles=len(chosen))
     if not plan.does_something:
-        return ConversionOutcome(False, message=plan.skip_reason or "nothing to do")
+        return ConversionOutcome(False, message=plan.skip_reason or "nothing to do", notes=notes)
     with tempfile.TemporaryDirectory(prefix="videoredactor-subs-") as folder:
         added = []
         for n, s in enumerate(chosen):
@@ -197,8 +210,10 @@ def process_file(
                     f.write(s.text)
             added.append(cp.AddedSub(path, s.language, s.title, s.default, s.hearing_impaired))
         outcome = convert_file(run, source, plan, info, settings, added=added, probe=probe, **convert_kwargs)
+    outcome.notes = notes + outcome.notes
     if outcome.converted:
-        # Only the files that went into the video are removed; a skipped duplicate stays where it is.
+        # Only the files that went into the video are removed; a skipped duplicate (or an unreadable file)
+        # stays where it is.
         for s in chosen:
             run.dispose(s.path, KIND_CLEANUP, "subtitle ingested into the video")
     return outcome

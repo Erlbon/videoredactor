@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-13#08 -- Conversion review fixes (A1-A12): one engine, safer swaps, Cancel that stops ffmpeg
+
+- **Media > Convert to MP4/MKV (Rules)...** (A6): the library conversion rules on the selected files, or on files picked from disk (AVI, WMV, MOV... loaded or not). The confirm dialog has a per-run **Dry run first** checkbox (on by default); a dry run reports an explicit "DRY RUN, nothing changed: would convert a.avi -> a.mkv (...)" line per file. The persistent Library safety dry-run setting now only applies to the Redact convert step and is labelled so; that step's dry-run result is the same explicit DRY RUN line in the Redact report.
+- **One conversion engine** (A7): the Open Folder "other video formats found" offer and File > Import and Convert now run the rules engine (stream copy, verified swap, Recycle Bin / quarantine) instead of a blind H.264 re-encode. The H.264 re-encode remains only as Media > Convert to MP4 (H.264). The Redact step **Remux MKV to MP4** refuses to run while **Convert to MP4/MKV and ingest subtitles** is on in the same recipe (noted in the report); both descriptions say so.
+- **Cancel stops the encode** (A8): the progress dialog's Cancel (Redact and the Media action) now kills the running ffmpeg within half a second instead of waiting for the file to finish (up to 12 h); closing the app also stops any running ffmpeg. Needs redactor_common 2026-10-13-04.
+- **MKV with external subtitles** (A1): an MKV that has `.srt` files beside it is now ingested (it counted as "nothing to do"). Sidecar files are only read, and embedded subtitles only extracted for the duplicate check, when the plan can act.
+- **mov_text into MKV** (A2): an MP4 whose subtitles are mov_text is converted to MKV with those tracks re-encoded to SubRip per stream (`-c:s:N srt`); ffmpeg refused the old `-c:s copy`. SubRip/ASS/SSA/WebVTT and bitmap tracks are still copied.
+- **Bitmap subtitles force MKV** (A5): a legacy file with PGS/VobSub/DVB subtitles goes to MKV with a reason; before, it went to MP4 and the bitmap tracks were silently dropped (and the check expected the drop).
+- **Safer swap** (A3, A4): the conversion swap is redactor_common's `commit_in_place` (the result takes its name first, every rename retried on a lock, a failed Recycle Bin keeps the original beside the result). With delete-after-conversion on and a new extension, the original was removed BEFORE the result was renamed, so a failed rename left only the `.part` file; now the original is deleted only after the rename succeeded.
+- **MP4 saves go through a scratch copy** (A9): Save edits a copy beside the file, checks it parses and swaps it in with a lock retry, so a crash mid-write can no longer truncate the video. MKV (mkvpropedit) edits in place as before.
+- **UTF-16 subtitles** (A10): `.srt` files with a UTF-16/UTF-32 BOM are decoded correctly (they were read as cp1252 garbage, muxed in and the source removed). A file that still decodes to NUL or replacement characters is refused, left alone and named in the report.
+- **Honest texts** (A11, A12): the Redact question and the results header say what really happens to an original (Recycle Bin, quarantine folder, deleted, or dry run) from the actual settings; on a network share or removable drive, where the Recycle Bin is not available, the original is kept beside the result (`<name>.redact-orig.<ext>`) and the Library safety page says so.
+- Requires redactor_common 2026-10-13-04.
+
 ## 2026-10-13#07 -- Shared Include Subfolders item; folder scans show progress
 
 - **File > Include Subfolders** is now redactor_common's shared menu item (on by default, remembered in the settings file) and replaces the "Include Subfolders?" question Open Folder asked whenever a folder had subfolders. It also decides what Refresh List and the folder restored at launch look at. Before, subfolders were off unless you answered Yes each time.

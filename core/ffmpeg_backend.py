@@ -10,6 +10,7 @@ file, not just syntax-checked -- see tests/test_ffmpeg_backend.py.
 """
 
 from __future__ import annotations
+import atexit
 import json
 import os
 import subprocess
@@ -171,21 +172,70 @@ def _run_ffmpeg(
 
     waited = 0.0
     stderr = ""
-    while True:
-        try:
-            _, stderr = proc.communicate(timeout=0.5)
-            break
-        except subprocess.TimeoutExpired:
-            waited += 0.5
-            if cancel_event is not None and cancel_event.is_set():
+    with _live_lock:
+        _live_processes.add(proc)
+    try:
+        while True:
+            try:
+                _, stderr = proc.communicate(timeout=0.5)
+                break
+            except subprocess.TimeoutExpired:
+                waited += 0.5
+                if cancel_event is not None and cancel_event.is_set():
+                    proc.kill()
+                    proc.communicate()
+                    return None, "Cancelled"
+                if timeout is not None and waited >= timeout:
+                    proc.kill()
+                    proc.communicate()
+                    return None, "ffmpeg stopped responding and was stopped."
+        if _killed_by_shutdown(proc):
+            return None, "Cancelled"
+        return proc.returncode, stderr or ""
+    finally:
+        with _live_lock:
+            _live_processes.discard(proc)
+            _shutdown_killed.discard(proc)
+
+
+# Every ffmpeg started by _run_ffmpeg() while it runs, so closing the app
+# (gui closeEvent -> kill_running_ffmpeg, also at interpreter exit) never
+# leaves a 12-hour encode running headless. A killed run returns
+# (None, "Cancelled") like a Cancel click; its ".part" temp is cleaned up
+# by the caller's normal failure path.
+_live_processes: set[subprocess.Popen] = set()
+_shutdown_killed: set[subprocess.Popen] = set()
+_live_lock = threading.Lock()
+
+
+def _killed_by_shutdown(proc: subprocess.Popen) -> bool:
+    with _live_lock:
+        return proc in _shutdown_killed
+
+
+def kill_running_ffmpeg() -> int:
+    """Kills every ffmpeg _run_ffmpeg() still has running. Returns how many were killed."""
+    with _live_lock:
+        procs = list(_live_processes)
+    killed = 0
+    for proc in procs:
+        if proc.poll() is None:
+            try:
+                with _live_lock:
+                    _shutdown_killed.add(proc)
                 proc.kill()
-                proc.communicate()
-                return None, "Cancelled"
-            if timeout is not None and waited >= timeout:
-                proc.kill()
-                proc.communicate()
-                return None, "ffmpeg stopped responding and was stopped."
-    return proc.returncode, stderr or ""
+                killed += 1
+            except OSError:
+                pass
+    return killed
+
+
+def running_ffmpeg_count() -> int:
+    with _live_lock:
+        return sum(1 for p in _live_processes if p.poll() is None)
+
+
+atexit.register(kill_running_ffmpeg)
 
 
 def _publish(temp: str, output_path: str) -> tuple[bool, str]:

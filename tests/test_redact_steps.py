@@ -925,5 +925,5 @@ def test_convert_step_dry_run_changes_nothing(work, bin_, tmp_path, monkeypatch)
     ctx.video = type("V", (), {"path": path, "metadata": type("M", (), {"content_type": rs.ContentType.TV})()})()
     ctx.bg = lambda fn, *a, **k: fn(*a, **k)
     result = rs.ConvertStep().execute(ctx)
-    assert "dry run" in (result.note or "")
+    assert (result.note or "").startswith("DRY RUN") and "would convert Show S01E01.avi -> Show S01E01.mp4" in result.note
     assert os.listdir(work) == ["Show S01E01.avi"]

@@ -139,7 +139,7 @@ def test_ffmpeg_args_map_streams_explicitly_and_drop_bitmap_subs_in_mp4():
     assert "0:9" not in maps(a) and "0:2" in maps(a) and "0:3" not in maps(a)  # cover art and PGS dropped
     assert a[a.index("-c:s") + 1] == "mov_text"
     mkv = cp.build_ffmpeg_args(m, cp.Plan(container=".mkv", reasons=["x"]), "in", "out.mkv")
-    assert "0:3" in maps(mkv) and mkv[mkv.index("-c:s") + 1] == "copy"
+    assert "0:3" in maps(mkv) and mkv[mkv.index("-c:s:0") + 1] == "copy" and mkv[mkv.index("-c:s:1") + 1] == "copy"
 
 
 def test_output_must_be_under_85_percent():
@@ -172,7 +172,7 @@ def test_ffmpeg_args_added_subtitles():
     assert a.index("-i") < a.index("1:0")
     assert "-metadata:s:s:1" in a and "language=eng" in a and "title=(SDH)" in a  # position after the kept one
     assert a[a.index("-disposition:s:2") + 1] == "hearing_impaired" and a[a.index("-disposition:s:1") + 1] == "0"
-    assert a[a.index("-c:s") + 1] == "copy"
+    assert a[a.index("-c:s:0") + 1] == "copy" and a[a.index("-c:s:1") + 1] == "copy" and a[a.index("-c:s:2") + 1] == "copy"
     import pytest
     with pytest.raises(ValueError):
         cp.build_ffmpeg_args(m, cp.Plan(container=".mp4", reasons=["x"]), "in", "out.mp4", added=added)

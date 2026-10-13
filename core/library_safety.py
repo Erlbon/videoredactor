@@ -423,54 +423,40 @@ class SafeRun:
         except BaseException:
             _remove_temp(temp)
             raise
+        # Verified. The swap itself is redactor_common's commit_in_place: the result takes its name first
+        # (a different name) or the original is set aside as "<stem>.redact-orig<ext>" first (same name), so
+        # the original exists under SOME name at every instant, every rename is retried on a lock, and the
+        # set-aside original is only handed to `disposer` once the result is in place. A disposer that fails
+        # keeps the original beside the result (never a delete).
+        from redactor_common.core.pipeline import CommitError, commit_in_place  # noqa: PLC0415
+
         if self.delete_after_conversion:
             # The user's explicit setting: the verified result replaces the original for good (not undoable).
-            try:
-                if same:
-                    os.replace(temp, final)
-                else:
-                    os.remove(source)
-                    os.rename(temp, final)
-            except OSError as exc:
-                raise SafetyError(f"couldn't swap the result in ({exc}); result at {temp}") from exc
-            action.detail = f"{final} (original deleted: delete-after-conversion is on)"
-            if self.log:
-                self.log.created(final)
-            action.done = True
-            return True
-        # Verified. Original aside first (it exists under SOME name at every instant), then the temp in.
-        recycle = not self.quarantine_root
-        if recycle:  # set aside beside the original, then the Recycle Bin once the result is in place
-            stem, ext = os.path.splitext(source)
-            dest = _free_name(f"{stem}.redact-orig{ext}")
-        else:
+            disposer, how = os.remove, "original deleted: delete-after-conversion is on"
+        elif self.quarantine_root:
             dest = _free_name(mirrored_quarantine_path(source, self.library_root, self.quarantine_root, kind, self.day))
+
+            def disposer(set_aside: str) -> None:
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                shutil.move(set_aside, dest)
+                if self.log:
+                    self.log.moved(dest, source)
+
+            how = f"original in {dest}"
+        else:
+            disposer, how = self._trash, "original in the Recycle Bin"
         try:
-            os.makedirs(os.path.dirname(dest), exist_ok=True)
-            shutil.move(source, dest)
-        except OSError as exc:
-            _remove_temp(temp)
-            action.verb, action.detail = "skip", f"original kept (couldn't quarantine it: {exc})"
-            return False
-        if self.log and not recycle:
-            self.log.moved(dest, source)
-        try:
-            os.rename(temp, final)
-        except OSError as exc:
-            # Put the original back; the temp stays for the user (it is a complete, verified file).
-            try:
-                shutil.move(dest, source)
-                if self.log and not recycle:
-                    self.log.moved(source, dest)
-            except OSError:
-                pass
-            raise SafetyError(f"couldn't move the result into place ({exc}); original at {source if os.path.exists(source) else dest}, result at {temp}") from exc
-        if recycle:
-            try:
-                self._trash(dest)
-            except Exception as exc:  # noqa: BLE001 -- a doubtful trash never becomes a delete: the original stays beside the result
-                action.detail = f"{final} (the original is kept at {dest}: couldn't use the Recycle Bin: {exc})"
-        if self.log and not recycle:
+            result = commit_in_place(source, temp, disposer, None, new_path=None if same else final)
+        except CommitError as exc:
+            # The original is intact (commit_in_place rolled back); a complete, verified result may still be
+            # at the temp name, which the message names so the user can keep it.
+            where = f"; result at {temp}" if os.path.lexists(temp) else ""
+            raise SafetyError(f"couldn't swap the result in ({exc}){where}") from exc
+        if result.backup_kept:
+            action.detail = f"{final} (the original is kept at {result.backup}: {result.warning})"
+        else:
+            action.detail = f"{final} ({how})"
+        if self.log and (self.quarantine_root or self.delete_after_conversion):
             self.log.created(final)
         action.done = True
         return True

@@ -272,6 +272,10 @@ def plan_conversion(
     if len(subs) >= s.many_subtitle_tracks:
         needs_mkv = True
         why_mkv.append(f"{len(subs)} subtitle tracks: MKV")
+    bitmap = [t for t in subs if t.codec in BITMAP_SUBTITLES]
+    if bitmap:  # MP4 can't hold PGS/VobSub: they would be silently dropped
+        needs_mkv = True
+        why_mkv.append(f"{len(bitmap)} bitmap subtitle track(s) ({bitmap[0].codec}) only MKV can hold")
     if extra_subtitles:
         needs_mkv = True
         why_mkv.append(f"{extra_subtitles} external subtitle(s) to add: MKV")
@@ -283,6 +287,8 @@ def plan_conversion(
         plan.reasons += why_mkv
     elif ext == ".mkv":
         plan.container = ".mkv"  # an MKV is already sane; it is never moved to MP4 here
+        if extra_subtitles:  # ...but adding external subtitles to it is still work
+            plan.reasons.append(f"{extra_subtitles} external subtitle(s) to add")
     elif plan.container == ".mkv":
         plan.reasons.append(f"{ext} to .mkv")
         plan.reasons += why_mkv
@@ -312,6 +318,18 @@ def _mp4_subtitle_ok(codec: str) -> bool:
     return codec in TEXT_SUBTITLES
 
 
+# Subtitle codecs Matroska takes as they are. The MP4-only text codecs (mov_text, plain "text") are
+# refused by ffmpeg's matroska muxer ("Subtitle codec mov_text is not supported") and are re-encoded to
+# SubRip for an MKV target instead.
+MKV_COPY_SUBTITLES = frozenset({"subrip", "srt", "ass", "ssa", "webvtt"}) | BITMAP_SUBTITLES
+
+
+def mkv_subtitle_codec(codec: str) -> str:
+    """The -c:s value for one source subtitle stream going into an MKV: "copy", or "srt" for a codec
+    Matroska can't hold (mov_text and other MP4-only text codecs)."""
+    return "copy" if codec in MKV_COPY_SUBTITLES else "srt"
+
+
 @dataclass
 class AddedSub:
     """An external subtitle (a UTF-8 .srt file) to mux in as a new track."""
@@ -329,8 +347,8 @@ def build_ffmpeg_args(
 ) -> list[str]:
     """The ffmpeg argument LIST (never a shell string). Streams are mapped explicitly: cover art is not video,
     data/timecode tracks are dropped (-dn), audio and kept subtitles are copied. For an MP4 target text
-    subtitles become mov_text and bitmap ones are dropped; for MKV they are copied. `cuda` False = software
-    scale fallback."""
+    subtitles become mov_text and bitmap ones are dropped; for MKV they are copied, except MP4-only text codecs
+    (mov_text), which become SubRip (see mkv_subtitle_codec). `cuda` False = software scale fallback."""
     s = settings or ConversionSettings()
     args = ["ffmpeg", "-v", "error", "-y"]
     scaling = plan.scales
@@ -368,8 +386,14 @@ def build_ffmpeg_args(
         args += ["-c:a", "aac", "-b:a", s.fallback_audio_bitrate]
     else:
         args += ["-c:a", "copy"]
-    if kept_subs or added:
-        args += ["-c:s", "mov_text" if mp4 else "copy"]
+    if mp4:
+        if kept_subs:
+            args += ["-c:s", "mov_text"]
+    else:  # MKV: per stream, so a mov_text track is converted while subrip/ass/bitmap ones are copied
+        for position, t in enumerate(kept_subs):
+            args += [f"-c:s:{position}", mkv_subtitle_codec(t.codec)]
+        for position in range(len(kept_subs), len(kept_subs) + len(added)):
+            args += [f"-c:s:{position}", "copy"]
     first = len(kept_subs)
     for n, extra in enumerate(added):
         position = first + n

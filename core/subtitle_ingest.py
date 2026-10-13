@@ -128,21 +128,54 @@ def find_external_subs(video_path: str, listdir=os.listdir) -> list[ExternalSub]
     return out
 
 
+class SubtitleDecodeError(ValueError):
+    """The bytes are not readable subtitle text in any encoding this module knows: the file is left alone."""
+
+
+_BOMS = (  # longest first: the UTF-32 LE BOM starts with the UTF-16 LE one
+    (b"\xff\xfe\x00\x00", "utf-32"),
+    (b"\x00\x00\xfe\xff", "utf-32"),
+    (b"\xff\xfe", "utf-16"),
+    (b"\xfe\xff", "utf-16"),
+)
+_REPLACEMENT_RUN = "�" * 3
+
+
+def _looks_broken(text: str) -> bool:
+    """A NUL (UTF-16 read as a single-byte codepage) or a run of replacement characters means the
+    decoding went wrong, whatever the codec said."""
+    return "\x00" in text or _REPLACEMENT_RUN in text
+
+
 def decode_srt(data: bytes, language: str = "und") -> str:
-    """Bytes -> text: UTF-8 (with or without BOM) when it decodes, else the language's legacy codepage, else
-    cp1252 (which never fails for the bytes it defines; the rest are replaced)."""
-    for encoding in ("utf-8-sig",):
+    """Bytes -> text: a UTF-16/UTF-32 BOM wins; else UTF-8 (with or without BOM) when it decodes, else the
+    language's legacy codepage, else cp1252. Raises SubtitleDecodeError when the result still contains NUL
+    characters or runs of U+FFFD: that file is not ingested (a garbled track must never replace a readable
+    .srt)."""
+    text = None
+    for bom, encoding in _BOMS:
+        if data.startswith(bom):
+            try:
+                text = data.decode(encoding)
+            except UnicodeDecodeError as exc:
+                raise SubtitleDecodeError(f"{encoding} with a BOM, but the content doesn't decode: {exc}") from exc
+            break
+    if text is None:
         try:
-            return data.decode(encoding)
+            text = data.decode("utf-8-sig")
         except UnicodeDecodeError:
-            pass
-    page = _CODEPAGE.get(language, DEFAULT_CODEPAGE)
-    for encoding in (page, DEFAULT_CODEPAGE):
-        try:
-            return data.decode(encoding)
-        except (UnicodeDecodeError, LookupError):
-            continue
-    return data.decode(DEFAULT_CODEPAGE, errors="replace")
+            page = _CODEPAGE.get(language, DEFAULT_CODEPAGE)
+            for encoding in (page, DEFAULT_CODEPAGE):
+                try:
+                    text = data.decode(encoding)
+                    break
+                except (UnicodeDecodeError, LookupError):
+                    continue
+            else:
+                text = data.decode(DEFAULT_CODEPAGE, errors="replace")
+    if _looks_broken(text):
+        raise SubtitleDecodeError("not readable text in any known encoding (NUL or replacement characters)")
+    return text
 
 
 _SOUND_TAG_RE = re.compile(r"\[[^\]\n]{1,60}\]|\([A-Z][A-Z ,.'-]{2,40}\)|[♪♫]")

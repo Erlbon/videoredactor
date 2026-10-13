@@ -114,7 +114,18 @@ def _install_fake_mutagen(tags_value=None, strict_int_atoms=False):
     fake_mp4_module.MP4FreeForm = FakeMP4FreeForm
     sys.modules["mutagen"] = fake_mutagen
     sys.modules["mutagen.mp4"] = fake_mp4_module
+    # The fake keeps its "files" in memory, keyed by path: there is no real
+    # file for write_mp4_metadata's scratch copy to copy, so these tests
+    # exercise the edit step directly (the copy/verify/swap mechanics are
+    # tested with real mutagen in test_mp4_write_scratch.py). Every tearDown
+    # restores the real function.
+    import core.mp4_backend as backend
+    backend.write_mp4_metadata = backend._apply_mp4_tags
     return created_instances
+
+
+import core.mp4_backend as _backend  # noqa: E402
+_REAL_WRITE = _backend.write_mp4_metadata
 
 
 class TestMp4BackendNoneTagsHandling(unittest.TestCase):
@@ -134,6 +145,7 @@ class TestMp4BackendNoneTagsHandling(unittest.TestCase):
                 sys.modules.pop(name, None)
             else:
                 sys.modules[name] = original
+        _backend.write_mp4_metadata = _REAL_WRITE
         # mp4_backend imports mutagen.mp4 INSIDE each function (deferred
         # import), so no module-level cache to clear on our side.
 
@@ -230,6 +242,7 @@ class TestMp4BackendTvNumericAtoms(unittest.TestCase):
                 sys.modules.pop(name, None)
             else:
                 sys.modules[name] = original
+        _backend.write_mp4_metadata = _REAL_WRITE
 
     def test_season_and_episode_written_as_int_not_str(self):
         instances = _install_fake_mutagen(tags_value={}, strict_int_atoms=True)
@@ -328,6 +341,7 @@ class TestMp4CustomFieldFreeFormWrapping(unittest.TestCase):
                 sys.modules.pop(name, None)
             else:
                 sys.modules[name] = original
+        _backend.write_mp4_metadata = _REAL_WRITE
 
     def test_custom_field_value_is_wrapped_in_mp4freeform_not_bare_bytes(self):
         instances = _install_fake_mutagen(tags_value={})

@@ -97,12 +97,17 @@ class SafetyPage(QWidget):
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(
             "Replaced files go to the Recycle Bin. If you set a quarantine folder they are moved there instead "
-            "(mirroring their library path, in a dated subfolder), and each move is written to a TSV undo log."
+            "(mirroring their library path, in a dated subfolder), and each move is written to a TSV undo log. "
+            "On a network share or removable drive the Recycle Bin is not available: without a quarantine folder "
+            "the original is then kept beside the result as <name>.redact-orig.<ext>."
         ))
         form = QFormLayout()
         self.quarantine_edit = self._folder_row(form, "Quarantine folder (optional):", s.quarantine_root)
         self.undo_edit = self._folder_row(form, "Undo log folder:", s.undo_log_folder)
-        self.dry_run = QCheckBox("Dry run first: list what would change and touch nothing")
+        self.dry_run = QCheckBox(
+            "Dry run (Redact step only): the recipe's convert step lists what would change and touches nothing. "
+            "Media > Convert to MP4/MKV (Rules) asks per run instead."
+        )
         self.dry_run.setChecked(s.dry_run)
         self.dry_run.toggled.connect(self._save)
         form.addRow("", self.dry_run)

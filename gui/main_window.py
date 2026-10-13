@@ -23,7 +23,7 @@ import threading
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
     QTableWidget, QTableWidgetItem, QComboBox, QLabel, QFileDialog,
-    QStatusBar, QMessageBox, QToolBar,
+    QStatusBar, QMessageBox, QToolBar, QCheckBox,
 )
 from PyQt6.QtCore import Qt, QThread, QEventLoop, QItemSelection, QItemSelectionModel, QSize, pyqtSignal
 from PyQt6.QtGui import QColor, QImage, QKeySequence, QIcon
@@ -45,10 +45,12 @@ from core.release_name_parser import parse_release_name
 from core.redact_steps import _tv_guess
 from core.sidecars import with_sidecars
 from core.redact_steps import (
-    RedactEnv, VideoCtx, build_catalogue, finalize_file, load_recipe, pin_patterns, recipe_is_saved, save_recipe,
+    RedactEnv, VideoCtx, build_catalogue, dry_run_line, finalize_file, load_recipe, make_safe_run,
+    original_fate_text, pin_patterns, recipe_is_saved, save_recipe,
 )
+from core import conversion_plan, conversion_run, library_safety
 from core.ffmpeg_backend import (
-    IMPORTABLE_EXTENSIONS, REMUX_TO_MKV_EXTENSIONS, remux_to_mkv, remux_to_mp4,
+    IMPORTABLE_EXTENSIONS, kill_running_ffmpeg, remux_to_mkv, remux_to_mp4,
     transcode_to_mp4, verify_remux,
 )
 from core.settings_adapter import REFRESH_COLUMNS, REFRESH_PANEL, VideoSettingsAdapter
@@ -68,7 +70,7 @@ from redactor_common.gui.standard_menus import (
     standard_tools_items, standard_view_items, with_aliases,
 )
 from redactor_common.gui.async_preview import AsyncPreviewLoader
-from redactor_common.gui.background_call import call_in_background
+from redactor_common.gui.background_call import BackgroundCancelled, call_in_background
 from redactor_common.gui.auto_numbering_dialog import AutoNumberingDialog
 from redactor_common.gui.case_conversion_dialog import CaseConversionDialog
 from redactor_common.gui.parse_filename_dialog import ParseFilenameDialog
@@ -538,6 +540,7 @@ class MainWindow(QMainWindow):
                     MenuAction("remux", "&Remux to MP4…", self._on_remux_selected, shortcut="Ctrl+R"),
                     MenuAction("convert_to_mp4", "Con&vert to MP4 (H.264)…", self._on_convert_to_mp4,
                                shortcut="Ctrl+Shift+C"),
+                    MenuAction("convert_rules", "Convert to MP4/MKV (R&ules)…", self._on_convert_with_rules),
                     Separator(),
                     MenuAction("check_files", "&Check Files…", self._on_check_files),
                     MenuAction("find_duplicates", labels.FIND_DUPLICATES, self._on_find_duplicates),
@@ -1692,6 +1695,12 @@ class MainWindow(QMainWindow):
         if self._count_dirty() and not self._confirm_discard("quit without saving"):
             event.ignore()
             return
+        # A conversion still running (Redact's convert step, Media > Convert to MP4/MKV (rules)) must not keep
+        # ffmpeg encoding for hours after the window is gone: tell the run to stop and kill the process.
+        active = getattr(self, "_active_cancel", None)
+        if active is not None:
+            active.set()
+        kill_running_ffmpeg()
         super().closeEvent(event)
 
     # --- Applying bulk edits ----------------------------------------------
@@ -2218,11 +2227,18 @@ class MainWindow(QMainWindow):
             return []
         answer = QMessageBox.question(
             self, "Redact all files?",
-            f"Nothing is selected. Redact all {len(self.video_files)} loaded file(s)?\n\n"
-            "Each changed file is saved in place; the original goes to the Recycle Bin.",
+            f"Nothing is selected. Redact all {len(self.video_files)} loaded file(s)?\n\n" + self._redact_fate_text(),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
         )
         return list(self.video_files) if answer == QMessageBox.StandardButton.Yes else []
+
+    def _redact_fate_text(self) -> str:
+        """What happens to originals in THIS run: depends on whether the recipe's convert step is on and on the
+        Library safety settings (quarantine folder, delete-after-conversion, dry run), not a fixed promise."""
+        catalogue = build_catalogue(sample=self._redact_sample_values)
+        recipe = load_recipe(catalogue)
+        convert_on = bool(recipe.enabled.get("convert_library"))
+        return original_fate_text(library_safety.get_safety_settings(), convert_on)
 
     def _on_redact(self) -> None:
         """Edit > Redact (Ctrl+Shift+E, toolbar): runs the saved recipe
@@ -2244,25 +2260,29 @@ class MainWindow(QMainWindow):
         ) != QMessageBox.StandardButton.Yes:
             return
 
+        cancel_event = threading.Event()  # Cancel (and closing the app) stops a running ffmpeg encode
+        self._active_cancel = cancel_event
         env = RedactEnv(rename_log=_rename_log(), background=call_in_background,
-                        imdb_local=imdb_settings.load_database())
+                        imdb_local=imdb_settings.load_database(), cancel_event=cancel_event)
         catalogue = build_catalogue(sample=self._redact_sample_values)
-        report = run_redact_dialog(
-            self, targets, load_recipe(catalogue), catalogue,
-            make_context=lambda vf: VideoCtx(vf, env),
-            describe=lambda vf: vf.path.name,
-            title="Redact", show_results=False,
-            finalize=finalize_file, finalize_label="Save",
-        )
+        fate = self._redact_fate_text()
+        try:
+            report = run_redact_dialog(
+                self, targets, load_recipe(catalogue), catalogue,
+                make_context=lambda vf: VideoCtx(vf, env),
+                describe=lambda vf: vf.path.name,
+                title="Redact", show_results=False,
+                finalize=finalize_file, finalize_label="Save",
+                on_cancel=cancel_event.set,
+            )
+        finally:
+            self._active_cancel = None
         self._clear_undo()
         self._after_batch_edit("Redact finished")
         if report is not None:
             RedactResultsDialog(
                 report, self, title="Redact results",
-                header=(
-                    "Each changed file was saved in place; its original is in the Recycle Bin -- restore "
-                    "it from there to undo. A rename or move is also listed under File > Undo Last Rename."
-                ),
+                header=fate + " A rename or move is also listed under File > Undo Last Rename.",
             ).exec()
 
     def _on_edit_redact_recipe(self) -> None:
@@ -2591,166 +2611,157 @@ class MainWindow(QMainWindow):
             )
             QMessageBox.warning(self, "Some files failed to convert", details)
 
-    # --- Import & Convert --------------------------------------------------
+    # --- Import & Convert / Convert with the rules -----------------------------
 
     def _on_import_and_convert(self) -> None:
-        """File > Import and Convert... -- brings a
-        non-MP4/M4V/MKV video file (AVI/MOV/WMV/FLV/WebM/MPG/...) into
-        the library by re-encoding it to H.264/AAC MP4 via ffmpeg
-        (core.ffmpeg_backend.transcode_to_mp4), same directory, same
-        base filename. The only place a foreign format can enter this
-        app at all -- Open Folder only ever picks up .mp4/.m4v/.mkv
-        (core.video_file.SUPPORTED_EXTENSIONS).
+        """File > Import and Convert...: brings a non-MP4/MKV video file (AVI/MOV/WMV/FLV/WebM/MPG/...)
+        into the library through the conversion rules (core/conversion_plan.py: stream copy into MP4 or
+        MKV, re-encode only what no container can hold, external .srt files muxed in), the same engine as
+        the Redact recipe's convert step and Media > Convert to MP4/MKV (Rules). The H.264 re-encode is
+        only Media > Convert to MP4 (H.264), chosen on purpose. Additive to the loaded list."""
+        self._convert_with_rules(self._pick_videos_to_convert("Import & Convert to MP4/MKV", IMPORTABLE_EXTENSIONS))
 
-        Deliberately ADDITIVE to self.video_files, unlike Open Folder's
-        replace-wholesale semantics -- same reasoning as mp3redactor's
-        own Import & Convert (see that project's gui/main_window.py).
-        Reuses the exact same _TranscodeWorker + Tool Settings
-        (CRF/audio bitrate/threads) as Media > Convert to
-        MP4 (H.264) -- transcode_to_mp4() is already format-agnostic on
-        its input (whatever `ffmpeg -i` can read), so nothing in
-        core/ffmpeg_backend.py needed to change to support this, only
-        what the GUI lets a user pick.
-        """
-        extensions_filter = " ".join(f"*{ext}" for ext in sorted(IMPORTABLE_EXTENSIONS))
+    def _pick_videos_to_convert(self, title: str, extensions) -> list[str]:
+        extensions_filter = " ".join(f"*{ext}" for ext in sorted(extensions))
         last_folder = get_setting("general", "last_folder", "")
-        paths, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Import & Convert to MP4",
-            last_folder,
-            f"Video Files ({extensions_filter})",
-        )
-        if not paths:
-            return
-        self._import_paths(paths)
+        paths, _ = QFileDialog.getOpenFileNames(self, title, last_folder, f"Video Files ({extensions_filter})")
+        return list(paths)
 
     def _import_paths(self, paths: list[str]) -> None:
-        """Converts `paths` (from the picker, or found by Open Folder) to MP4/MKV beside the originals and adds
-        the results to the list. See _on_import_and_convert."""
-        jobs: list[tuple[Path, Path]] = []
-        skipped_existing: list[Path] = []
-        claimed: set[str] = set()
-        for raw_path in paths:
-            src = Path(raw_path)
-            dest = src.with_suffix(".mkv" if src.suffix.lower() in REMUX_TO_MKV_EXTENSIONS else ".mp4")
-            if not _claim_output(dest, claimed):
-                # Refuse to silently clobber an existing file of that
-                # name -- same safety-first instinct as Convert Selected
-                # to MP4's own existing-output check below.
-                skipped_existing.append(dest)
-                continue
-            jobs.append((src, dest))
+        """Converts `paths` (from the picker, or found by Open Folder) with the rules engine and adds the
+        results to the list."""
+        self._convert_with_rules(paths)
 
-        if skipped_existing:
-            names = summarize_errors([p.name for p in skipped_existing])
-            proceed = QMessageBox.question(
-                self,
-                "Some Files Already Exist",
-                f"{len(skipped_existing)} file(s) already have an .mp4/.mkv of the same name in "
-                f"that folder and will be skipped (not overwritten):\n\n{names}\n\n"
-                f"Convert the remaining {len(jobs)} file(s)?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+    def _on_convert_with_rules(self) -> None:
+        """Media > Convert to MP4/MKV (Rules)...: the library conversion rules on the selected files, or,
+        with nothing selected, on files picked from disk (any importable format, loaded or not). Each run
+        asks "Dry run first" (default on) instead of relying on the persistent Library safety setting."""
+        selected = self._selected_video_files()
+        if selected:
+            paths = [str(vf.path) for vf in selected]
+        else:
+            paths = self._pick_videos_to_convert(
+                "Convert to MP4/MKV (Rules)", set(IMPORTABLE_EXTENSIONS) | set(SUPPORTED_EXTENSIONS),
             )
-            if proceed != QMessageBox.StandardButton.Yes:
-                return
+        self._convert_with_rules(paths)
 
-        if not jobs:
+    def _convert_with_rules(self, paths: list[str]) -> None:
+        """The one conversion flow: confirm (with the per-run "Dry run first" checkbox), run
+        conversion_run.process_file through a SafeRun for each path under a cancellable progress dialog
+        (Cancel kills ffmpeg), then report every file -- a dry run as explicit "DRY RUN: would ..." lines --
+        and refresh / add the affected rows."""
+        paths = [p for p in dict.fromkeys(os.path.abspath(p) for p in paths)]
+        if not paths:
             return
-
-        mkv_indexes = [
-            i for i, (src, _) in enumerate(jobs) if src.suffix.lower() in REMUX_TO_MKV_EXTENSIONS
-        ]
-        mp4_indexes = [i for i in range(len(jobs)) if i not in set(mkv_indexes)]
-
-        settings = get_transcode_settings()
-        thread_note = f", {settings.threads} threads" if settings.threads else ""
-        question = []
-        if mp4_indexes:
-            question.append(
-                f"Convert {len(mp4_indexes)} file(s) to H.264/AAC MP4 "
-                f"(CRF {settings.crf}, audio {settings.audio_bitrate}{thread_note})."
-            )
-        if mkv_indexes:
-            question.append(
-                f"Repackage {len(mkv_indexes)} file(s) (OGM) to MKV without re-encoding "
-                "-- fast and lossless, subtitles and extra audio tracks kept. "
-                "Convert the MKV to MP4 afterwards if you need that."
-            )
-        confirm = QMessageBox.question(
-            self, "Import & Convert",
-            "\n\n".join(question) + "\n\nOriginals are never deleted automatically."
-            + (" Adjust the MP4 defaults via Tools > External Tools." if mp4_indexes else ""),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        safety = library_safety.get_safety_settings()
+        conv = conversion_plan.get_conversion_settings()
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Convert to MP4/MKV (Rules)")
+        box.setText(
+            f"Apply the conversion rules to {len(paths)} file(s)?\n\n"
+            "Legacy containers become MP4 or MKV by stream copy; only video no container can hold is re-encoded; "
+            "series episodes over the bitrate limits are re-encoded (720p); .srt files beside a video are muxed in. "
+            "Every result is verified before the original is replaced.\n\n"
+            + original_fate_text(safety, True).split(". ", 1)[-1]
+            + "\n\nLimits: Tools > Preferences > Conversion. Safety: Tools > Preferences > Library safety."
         )
-        if confirm != QMessageBox.StandardButton.Yes:
+        box.setDetailedText("\n".join(paths[:200]) + (f"\n... and {len(paths) - 200} more" if len(paths) > 200 else ""))
+        dry_box = QCheckBox("Dry run first: list what would happen, change nothing")
+        dry_box.setChecked(True)
+        box.setCheckBox(dry_box)
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+        if box.exec() != QMessageBox.StandardButton.Yes:
             return
+        dry_run = dry_box.isChecked()
 
-        # One worker run per kind (a worker is either MP4 or MKV); results
-        # are keyed back to the position in `jobs`.
-        results: dict[int, tuple[bool, str]] = {}
-        for indexes, mkv in ((mp4_indexes, False), (mkv_indexes, True)):
-            if not indexes or any(m == "Cancelled" for _, m in results.values()):
-                continue
-            batch = self._run_transcode_jobs(
-                [jobs[i] for i in indexes], settings, "Importing & Converting", mkv=mkv,
-            )
-            for local, result in batch.items():
-                results[indexes[local]] = result
-            if len(batch) < len(indexes):
-                break  # cancelled mid-batch: don't start the other kind
+        loaded_by_path = {os.path.normcase(os.path.abspath(str(vf.path))): vf for vf in self.video_files}
+        cancel_event = threading.Event()
+        self._active_cancel = cancel_event
+        lines: list[str] = []
+        converted: list[tuple[str, str]] = []  # (source, final)
+        cancelled = False
 
-        set_setting("general", "last_folder", str(Path(paths[0]).parent))
-
-        new_files: list[VideoFile] = []
-        succeeded = 0
-        failed: list[tuple[Path, str]] = []
-        notes: list[str] = []
-        cancelled_count = 0
-        for i, (input_path, output_path) in enumerate(jobs):
-            result = results.get(i)
-            if result is None:
-                cancelled_count += 1  # never started -- batch was cancelled first
-                continue
-            ok, message = result
-            if ok:
-                succeeded += 1
-                if i in mkv_indexes and message:  # verify_remux: what didn't make it
-                    notes.append(f"{output_path.name}: {message}")
-                new_vf = VideoFile(path=output_path)
-                new_vf.load()
-                new_files.append(new_vf)
-            elif message == "Cancelled":
-                cancelled_count += 1
+        def one(path: str, _index: int) -> None:
+            nonlocal cancelled
+            if cancel_event.is_set():
+                cancelled = True
+                return
+            vf = loaded_by_path.get(os.path.normcase(path))
+            if vf is not None and vf.dirty and not vf.stamp_only_dirty:
+                lines.append(f"{os.path.basename(path)}: skipped, it has unsaved edits")
+                return
+            if vf is not None:
+                is_series = vf.metadata.content_type != ContentType.MOVIE
             else:
-                failed.append((output_path, message))
+                is_series = _tv_guess(os.path.splitext(os.path.basename(path))[0])[0].season is not None
+            run = make_safe_run(get_setting, safety, dry_run=dry_run)
+            try:
+                outcome = call_in_background(
+                    conversion_run.process_file, run, path, conv, is_series=is_series, cancel_event=cancel_event,
+                )
+            except library_safety.SafetyError as exc:
+                lines.append(f"{os.path.basename(path)}: not converted, the file is untouched: {exc}")
+                return
+            except BackgroundCancelled:
+                cancelled = True
+                return
+            notes = ("; " + "; ".join(outcome.notes)) if outcome.notes else ""
+            if outcome.message == "Cancelled" or any(a.detail.endswith("Cancelled)") for a in run.actions):
+                cancelled = True
+                lines.append(f"{os.path.basename(path)}: cancelled, the file is untouched")
+                return
+            if not outcome.converted:
+                skipped = [a for a in run.actions if a.verb == "skip"]
+                lines.append(f"{os.path.basename(path)}: {skipped[0].detail if skipped else outcome.message}{notes}")
+                return
+            if dry_run:
+                lines.append(f"{os.path.basename(path)}: {dry_run_line(run.actions)}{notes}")
+                return
+            converted.append((path, outcome.final_path))
+            done = "; ".join(f"{a.verb}: {os.path.basename(a.path)} -> {os.path.basename(a.detail)}" for a in run.actions if a.done)
+            lines.append(f"{os.path.basename(path)}: converted to {os.path.basename(outcome.final_path)} ({done}){notes}")
 
-        self.video_files.extend(new_files)
-        self._refresh_table_rows()
+        try:
+            finished = run_with_progress(
+                self, paths, one, "Converting with the rules...", threshold=1, cancellable=True,
+                label_for=lambda p: f"Converting {os.path.basename(p)}", on_cancel=cancel_event.set,
+            )
+        finally:
+            self._active_cancel = None
+        cancelled = cancelled or not finished
 
-        parts = [f"Imported and converted {succeeded} file(s)"]
-        if failed:
-            parts.append(f"{len(failed)} failed")
-        if cancelled_count:
-            parts.append(f"{cancelled_count} cancelled")
-        if skipped_existing:
-            parts.append(f"{len(skipped_existing)} skipped (output already exists)")
-        self.status_bar.showMessage(", ".join(parts))
-
-        if failed:
-            details = _error_details(
-                [f"{path.name}: {err.strip() or 'ffmpeg conversion failed'}" for path, err in failed]
-            )
-            QMessageBox.warning(self, "Some files failed to convert", details)
-        elif notes:
-            QMessageBox.warning(
-                self, "Import Complete, With Differences",
-                f"Loaded {succeeded} file(s), but compared with the original:\n\n"
-                f"{summarize_errors(notes)}\n\nThe originals were kept.",
-            )
-        elif succeeded:
-            QMessageBox.information(
-                self, "Import Complete", f"Converted and loaded {succeeded} file(s)."
-            )
+        # Loaded rows follow their converted file; converted files that were not loaded are added.
+        new_files: list[VideoFile] = []
+        for source, final in converted:
+            vf = loaded_by_path.get(os.path.normcase(source))
+            if vf is None:
+                vf = VideoFile(path=Path(final))
+                new_files.append(vf)
+            else:
+                vf.path = Path(final)
+                vf.dirty = False
+            vf.load()
+        if new_files:
+            self.video_files.extend(new_files)
+        if converted:
+            set_setting("general", "last_folder", str(Path(paths[0]).parent))
+            self._clear_undo()
+        self._after_batch_edit(
+            ("Dry run: nothing changed" if dry_run else f"Converted {len(converted)} file(s)") + (", cancelled" if cancelled else "")
+        )
+        title = "Dry run" if dry_run else "Convert to MP4/MKV (Rules)"
+        summary = (
+            f"DRY RUN of {len(paths)} file(s): nothing was changed. Each line says what a real run would do."
+            if dry_run else f"{len(converted)} of {len(paths)} file(s) converted."
+        ) + (" Cancelled before the end." if cancelled else "")
+        report = QMessageBox(self)
+        report.setIcon(QMessageBox.Icon.Information)
+        report.setWindowTitle(title)
+        report.setText(summary)
+        report.setDetailedText("\n".join(lines))
+        report.setStandardButtons(QMessageBox.StandardButton.Ok)
+        report.exec()
 
     # --- Subtitles -------------------------------------------------------
 
