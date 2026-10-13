@@ -6,7 +6,9 @@ that leaves files ready for a media server). It owns the hard rules:
 
 1. NEVER delete user media: a replaced or superseded file is MOVED to a
    quarantine folder that mirrors its library-relative path, under a dated
-   subfolder per kind ("remuxed originals 2026-10-13"). The ONE exception is
+   subfolder per kind ("remuxed originals 2026-10-13"). The quarantine folder is
+   OPTIONAL: with none set, a replaced file goes to the Recycle Bin (the app's
+   normal behaviour) and the TSV undo log is only kept when a log is given. The ONE exception is
    the setting delete_after_conversion (off by default): when the user turned
    it on, a VERIFIED conversion deletes its original instead of quarantining it.
 2. A TSV undo log, UTF-8, one line per change, written right AFTER the change
@@ -44,6 +46,9 @@ KIND_RESIZED = "resized originals"
 KIND_UNDONE = "undone"
 KINDS = (KIND_REMUXED, KIND_DUPLICATES, KIND_DEFECTIVE, KIND_CLEANUP, KIND_RESIZED, KIND_UNDONE)
 
+# The only containers the app produces.
+OUTPUT_EXTENSIONS = (".mp4", ".mkv")
+
 PART_MARKER = "part"  # <stem>.part<ext>
 RESIZE_MARKER = "resize"  # <stem>.resize<ext>
 
@@ -65,7 +70,7 @@ class SafetyError(Exception):
 class SafetySettings:
     """Persisted in videoredactor_settings.ini, [safety]. Never hard-coded."""
 
-    quarantine_root: str = ""  # "" = not chosen yet: nothing that replaces a file may run
+    quarantine_root: str = ""  # "" = no quarantine: replaced files go to the Recycle Bin
     dry_run: bool = True  # the UI starts in dry-run until the user confirms
     recent_minutes: int = DEFAULT_RECENT_MINUTES
     duration_tolerance_seconds: float = DEFAULT_DURATION_TOLERANCE_SECONDS
@@ -278,6 +283,7 @@ class SafeRun:
     tolerance_fraction: float = DEFAULT_DURATION_TOLERANCE_FRACTION
     day: date = field(default_factory=date.today)
     clock: Callable[[], float] = time.time
+    trash: Callable[[str], None] | None = None  # Recycle Bin mover when no quarantine folder is set
     probe: Callable[[str], tuple[dict[str, int], float | None] | None] | None = None  # ffmpeg_backend._stream_summary
     actions: list[Action] = field(default_factory=list)
 
@@ -297,18 +303,27 @@ class SafeRun:
             return f"modified in the last {self.recent_minutes} minutes (may still be downloading or being written)"
         return ""
 
-    def _require_quarantine(self) -> None:
-        if not self.quarantine_root:
-            raise SafetyError("no quarantine folder is set; nothing that replaces or removes a file may run")
+    def _trash(self, path: str) -> None:
+        if self.trash is None:
+            from redactor_common.core.trash import move_to_trash  # noqa: PLC0415
+            move_to_trash(path)
+        else:
+            self.trash(path)
 
     def quarantine(self, path: str, kind: str, reason: str) -> str | None:
         """Moves `path` into the dated quarantine folder, mirroring its library-relative path.
         Returns the destination (the would-be one in dry-run), None if the file was skipped."""
-        self._require_quarantine()
         busy = self.busy_reason(path)
         if busy:
             self._note("skip", path, "left alone", busy)
             return None
+        if not self.quarantine_root:
+            self._note("recycle", path, "Recycle Bin", reason)
+            if self.dry_run:
+                return "Recycle Bin"
+            self._trash(path)
+            self.actions[-1].done = True
+            return "Recycle Bin"
         dest = _free_name(mirrored_quarantine_path(path, self.library_root, self.quarantine_root, kind, self.day))
         action = self._note("quarantine", path, dest, reason)
         if self.dry_run:
@@ -352,8 +367,8 @@ class SafeRun:
         the original goes to quarantine `kind`, then the temp takes `final`'s name. On any failure only the temp
         is removed. `final` may equal `source` (same name) or differ (new extension); an existing `final` that is
         not `source` is never replaced."""
-        if not self.delete_after_conversion:
-            self._require_quarantine()
+        if os.path.splitext(final)[1].lower() not in OUTPUT_EXTENSIONS:
+            raise SafetyError(f"{final}: only MP4 and MKV files are produced")
         busy = self.busy_reason(source)
         if busy:
             self._note("skip", source, "left alone", busy)
@@ -401,7 +416,12 @@ class SafeRun:
             action.done = True
             return True
         # Verified. Original aside first (it exists under SOME name at every instant), then the temp in.
-        dest = _free_name(mirrored_quarantine_path(source, self.library_root, self.quarantine_root, kind, self.day))
+        recycle = not self.quarantine_root
+        if recycle:  # set aside beside the original, then the Recycle Bin once the result is in place
+            stem, ext = os.path.splitext(source)
+            dest = _free_name(f"{stem}.redact-orig{ext}")
+        else:
+            dest = _free_name(mirrored_quarantine_path(source, self.library_root, self.quarantine_root, kind, self.day))
         try:
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             shutil.move(source, dest)
@@ -409,7 +429,7 @@ class SafeRun:
             _remove_temp(temp)
             action.verb, action.detail = "skip", f"original kept (couldn't quarantine it: {exc})"
             return False
-        if self.log:
+        if self.log and not recycle:
             self.log.moved(dest, source)
         try:
             os.rename(temp, final)
@@ -417,12 +437,17 @@ class SafeRun:
             # Put the original back; the temp stays for the user (it is a complete, verified file).
             try:
                 shutil.move(dest, source)
-                if self.log:
+                if self.log and not recycle:
                     self.log.moved(source, dest)
             except OSError:
                 pass
             raise SafetyError(f"couldn't move the result into place ({exc}); original at {source if os.path.exists(source) else dest}, result at {temp}") from exc
-        if self.log:
+        if recycle:
+            try:
+                self._trash(dest)
+            except Exception as exc:  # noqa: BLE001 -- a doubtful trash never becomes a delete: the original stays beside the result
+                action.detail = f"{final} (the original is kept at {dest}: couldn't use the Recycle Bin: {exc})"
+        if self.log and not recycle:
             self.log.created(final)
         action.done = True
         return True

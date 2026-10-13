@@ -95,11 +95,11 @@ class SafetyPage(QWidget):
         s = library_safety.get_safety_settings()
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(
-            "Replaced or superseded files are moved to the quarantine folder (mirroring their library path, in a "
-            "dated subfolder), never deleted. Every change is written to a TSV undo log."
+            "Replaced files go to the Recycle Bin. If you set a quarantine folder they are moved there instead "
+            "(mirroring their library path, in a dated subfolder), and each move is written to a TSV undo log."
         ))
         form = QFormLayout()
-        self.quarantine_edit = self._folder_row(form, "Quarantine folder:", s.quarantine_root)
+        self.quarantine_edit = self._folder_row(form, "Quarantine folder (optional):", s.quarantine_root)
         self.undo_edit = self._folder_row(form, "Undo log folder:", s.undo_log_folder)
         self.dry_run = QCheckBox("Dry run first: list what would change and touch nothing")
         self.dry_run.setChecked(s.dry_run)

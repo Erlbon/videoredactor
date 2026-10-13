@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-13#03 -- Library safety: quarantine is optional
+
+- The safety layer only produces MP4 or MKV files (anything else is refused).
+- The quarantine folder is now optional. With none set, a file a conversion replaces goes to the Recycle Bin as before (set aside beside the result first and only trashed once the verified result is in place; if the Recycle Bin fails the original stays next to it). With a folder set, files are moved there (dated, mirroring the library path) and logged to the TSV undo log.
+
 ## 2026-10-13#02 -- Bitrate column, Size and Bitrate in `info`
 
 - New **Bitrate** column (overall bitrate from ffprobe, shown as `4.2 Mb/s` / `640 kb/s`, sorts numerically; blank when unknown), next to the existing **Size** column, so files can be compared. Show it from the column menu like any other.

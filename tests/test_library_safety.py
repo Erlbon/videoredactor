@@ -67,10 +67,35 @@ def test_recent_file_is_never_touched(tmp_path):
     assert fresh.exists() and run.actions[0].verb == "skip"
 
 
-def test_no_quarantine_folder_refuses(tmp_path):
-    run = ls.SafeRun(library_root=str(tmp_path), quarantine_root="")
-    with pytest.raises(ls.SafetyError):
-        run.quarantine(str(tmp_path / "a.mkv"), ls.KIND_CLEANUP, "r")
+def test_no_quarantine_folder_uses_the_recycle_bin(tmp_path):
+    trashed = []
+    run = ls.SafeRun(library_root=str(tmp_path), quarantine_root="", dry_run=False, trash=trashed.append, day=DAY)
+    src = _old(tmp_path / "a.mkv")
+    assert run.quarantine(src, ls.KIND_CLEANUP, "r") == "Recycle Bin"
+    assert trashed == [src] and run.actions[0].verb == "recycle" and run.actions[0].done
+
+
+def test_convert_without_quarantine_trashes_the_original_after_the_swap(tmp_path):
+    trashed = []
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    run = ls.SafeRun(library_root=str(lib), quarantine_root="", dry_run=False, trash=trashed.append, day=DAY, probe=lambda p: GOOD)
+    src = _old(lib / "a.mkv", "big")
+    assert run.convert(src, src, _writer("small"), ls.KIND_RESIZED, "r", marker=ls.RESIZE_MARKER)
+    assert open(src, encoding="utf-8").read() == "small"  # result in place under the original name
+    assert len(trashed) == 1 and open(trashed[0], encoding="utf-8").read() == "big"
+    assert os.path.basename(trashed[0]) == "a.redact-orig.mkv"
+
+
+def test_trash_failure_keeps_the_original_beside_the_result(tmp_path):
+    def broken(_p):
+        raise OSError("bin unavailable")
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    run = ls.SafeRun(library_root=str(lib), quarantine_root="", dry_run=False, trash=broken, probe=lambda p: GOOD)
+    src = _old(lib / "a.mkv", "big")
+    assert run.convert(src, src, _writer("small"), ls.KIND_RESIZED, "r")
+    assert (lib / "a.redact-orig.mkv").read_text() == "big" and "kept" in run.actions[0].detail
 
 
 def test_file_outside_library_still_quarantined(tmp_path):
@@ -217,3 +242,11 @@ def test_delete_setting_defaults_off_and_roundtrips():
     assert ls.get_safety_settings(get).delete_after_conversion is False
     ls.set_safety_settings(ls.SafetySettings(delete_after_conversion=True), lambda s, k, v: store.__setitem__((s, k), v))
     assert ls.get_safety_settings(get).delete_after_conversion is True
+
+
+def test_only_mp4_and_mkv_are_produced(tmp_path):
+    lib, run = _setup(tmp_path)
+    src = _old(lib / "a.avi")
+    with pytest.raises(ls.SafetyError):
+        run.convert(src, str(lib / "a.avi.webm"), _writer(), ls.KIND_REMUXED, "r")
+    assert os.path.exists(src)
