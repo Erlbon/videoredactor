@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-13#04 -- Library conversion rules: decision engine and runner (not wired to Redact yet)
+
+- `core/conversion_plan.py`: the F:\Video cleanup rules as a pure decision engine. MP4 and MKV are the only outputs; legacy containers (avi, m4v, mpg, wmv, flv/f4v, mov, webm, ogm, 3gp, asf, divx, rm/rmvb) are converted; sane codecs are copied, never re-encoded (MP4 when every stream fits, MKV for vorbis/flac/dts/truehd/pcm/wma audio, MKV-only video codecs, many subtitle tracks, or external subtitles being added); only RealVideo/Flash/odd WMV is re-encoded (libx265 CRF 23, AAC 160k). Series episodes (movies exempt unless `apply_to_movies`) over the bitrate/size limits are re-encoded with hevc_nvenc (cq 30), scaled to 720p when taller. Files under 400 MB are ignored; a bitrate-driven result must be under 85 percent of the source. Every number is a setting (`[conversion]` in the ini).
+- Disc images (`.vob .iso .bin .img`): new policy setting `disc_images`: `leave` (default, never touched), `list` (left alone but listed for review) or `remux_vob` (a `.vob` is stream-copied to MKV; ISO/BIN/IMG are still only listed).
+- `core/conversion_run.py`: runs a plan through the safety layer. ffmpeg writes a `.resize`/`.part` file (CUDA scaling first, software scaling as the fallback), and the result is verified before the swap: duration within 1.5 s (up to 60 s for an AVI/OGM with a stale header when the result's own video and audio agree), same video/audio track count, subtitle count = existing + added, height at most 720 when scaling, size under 85 percent. A failed check keeps the original.
+- Cover art is never counted as video, data/timecode tracks are dropped, `-fflags +genpts` is always set, and bitmap subtitles are not converted (dropped for MP4, copied into MKV).
+
 ## 2026-10-13#03 -- Library safety: quarantine is optional
 
 - The safety layer only produces MP4 or MKV files (anything else is refused).

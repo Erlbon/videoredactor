@@ -381,6 +381,21 @@ def transcode_to_mp4(
         _remove_quietly(temp)  # no-op after a successful rename
 
 
+def probe_media(path: str):
+    """Everything the conversion rules need (streams with bit rates, tags, dispositions; size; duration) as a
+    conversion_plan.MediaInfo, or None when ffprobe is missing or the file can't be read."""
+    from core.conversion_plan import parse_ffprobe  # noqa: PLC0415 -- conversion_plan imports config only
+
+    result = _run(["ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", path])
+    if result is None or result.returncode != 0:
+        return None
+    try:
+        data = json.loads(result.stdout)
+    except (ValueError, TypeError):
+        return None
+    return parse_ffprobe(path, data) if isinstance(data, dict) else None
+
+
 def ffmpeg_command(input_path: str, *extra: str, seek: Optional[float] = None) -> list[str]:
     """An ffmpeg argument LIST (never a shell string: ffmpeg.exe can't open an MSYS-style "/f/Video/..."
     path) with "-v error -y" and, for a fast seek, "-ss" BEFORE "-i". `extra` follows the input (maps,

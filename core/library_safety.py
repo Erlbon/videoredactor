@@ -362,6 +362,7 @@ class SafeRun:
         kind: str,
         reason: str,
         marker: str = PART_MARKER,
+        verify: Callable[[str, str], str] | None = None,
     ) -> bool:
         """build(source, temp) -> (ok, message) writes the new file to `temp`. The temp is verified (rule 3),
         the original goes to quarantine `kind`, then the temp takes `final`'s name. On any failure only the temp
@@ -387,10 +388,13 @@ class SafeRun:
             ok, message = build(source, temp)
             if not ok or not os.path.isfile(temp) or os.path.getsize(temp) == 0:
                 raise SafetyError(f"conversion failed: {message or 'no output'}")
-            probe = self.probe
-            if probe is None:
-                from core.ffmpeg_backend import _stream_summary as probe  # noqa: PLC0415
-            problem = verify_streams(probe(source), probe(temp), self.tolerance_seconds, self.tolerance_fraction)
+            if verify is not None:  # the caller's own check: (source, temp) -> problem or ""
+                problem = verify(source, temp)
+            else:
+                probe = self.probe
+                if probe is None:
+                    from core.ffmpeg_backend import _stream_summary as probe  # noqa: PLC0415
+                problem = verify_streams(probe(source), probe(temp), self.tolerance_seconds, self.tolerance_fraction)
             if problem:
                 raise SafetyError(f"verification failed: {problem}")
         except SafetyError as exc:
