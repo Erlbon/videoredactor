@@ -1406,6 +1406,7 @@ class ConvertStep(VideoStep):
         try:
             outcome = ctx.bg(
                 conversion_run.process_file, run, path, conv, is_series=is_series, cancel_event=ctx.env.cancel_event,
+                carry_tags=False,  # this step rewrites the tags itself, from its working copy, just below
             )
         except library_safety.SafetyError as exc:
             return StepResult.failed(f"not converted, the file is untouched: {exc}")

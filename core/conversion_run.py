@@ -16,15 +16,18 @@ Verification (before the swap):
 
 from __future__ import annotations
 
+import copy
 import os
 import tempfile
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable
 
 from core import conversion_plan as cp
 from core.ffmpeg_backend import _run_ffmpeg, probe_media
 from core import subtitle_ingest as si
 from core.library_safety import KIND_CLEANUP, KIND_REMUXED, KIND_RESIZED, SafeRun
+from core.video_file import SUPPORTED_EXTENSIONS, VideoFile
 
 DURATION_TOLERANCE = 1.5
 STALE_HEADER_TOLERANCE = 60.0
@@ -159,6 +162,34 @@ def embedded_subtitle_texts(info: cp.MediaInfo, source: str) -> list[str]:
     return texts
 
 
+def read_source_tags(path: str):
+    """The app's tags of an MP4/MKV (a copy), read BEFORE a conversion replaces it; None for any other container
+    (an AVI carries none) or when the file can't be read. A conversion through ffmpeg carries tags over only
+    under ffmpeg's own names (an MP4 'show' becomes 'SHOW', not this app's 'SHOW_TITLE'), so they are written
+    again afterwards by write_tags()."""
+    if os.path.splitext(path)[1].lower() not in SUPPORTED_EXTENSIONS:
+        return None
+    vf = VideoFile(path=Path(path))
+    vf.load()
+    if vf.load_error:
+        return None
+    tags = copy.deepcopy(vf.metadata)
+    tags.scan_stamp = ""  # a Check Files stamp describes the OLD file's bytes: the new file is unchecked
+    return tags
+
+
+def write_tags(final_path: str, metadata) -> str:
+    """Writes `metadata` onto the converted file with the app's own writer (write, re-read, compare). Returns
+    "" when it stuck, else what went wrong."""
+    try:
+        vf = VideoFile(path=Path(final_path), metadata=copy.deepcopy(metadata))
+        vf.save_error = ""
+        vf.save()
+        return vf.save_error
+    except Exception as exc:  # noqa: BLE001 -- a tag problem must not hide that the conversion itself worked
+        return str(exc)
+
+
 def process_file(
     run: SafeRun,
     source: str,
@@ -168,10 +199,16 @@ def process_file(
     probe: Callable[[str], cp.MediaInfo | None] = probe_media,
     embedded_texts: Callable[[cp.MediaInfo, str], list[str]] = embedded_subtitle_texts,
     reader=None,
+    carry_tags: bool = True,
+    tags=None,
     **convert_kwargs,
 ) -> ConversionOutcome:
     """The whole job for one file: probe, find and prepare the external .srt files, plan, convert (verified swap),
-    then remove the ingested .srt files. A file with nothing to do returns converted=False with the reason."""
+    then remove the ingested .srt files. A file with nothing to do returns converted=False with the reason.
+
+    `carry_tags` (default on): the app's tags (`tags`, or read from the source when None) are written onto the
+    converted file afterwards, because ffmpeg renames them on the way (see read_source_tags). The Redact step
+    passes False: it rewrites the tags from its own working copy."""
     info = probe(source)
     if info is None:
         return ConversionOutcome(False, message="couldn't read the file (ffprobe failed)")
@@ -201,6 +238,8 @@ def process_file(
         plan = cp.plan_conversion(info, settings, is_series=is_series, extra_subtitles=len(chosen))
     if not plan.does_something:
         return ConversionOutcome(False, message=plan.skip_reason or "nothing to do", notes=notes)
+    if carry_tags and tags is None and not run.dry_run:
+        tags = read_source_tags(source)
     with tempfile.TemporaryDirectory(prefix="videoredactor-subs-") as folder:
         added = []
         for n, s in enumerate(chosen):
@@ -211,6 +250,10 @@ def process_file(
             added.append(cp.AddedSub(path, s.language, s.title, s.default, s.hearing_impaired))
         outcome = convert_file(run, source, plan, info, settings, added=added, probe=probe, **convert_kwargs)
     outcome.notes = notes + outcome.notes
+    if outcome.converted and carry_tags and tags is not None and not run.dry_run:
+        problem = write_tags(outcome.final_path, tags)
+        if problem:
+            outcome.notes.append(f"converted, but the tags could not be rewritten onto the new file: {problem}")
     if outcome.converted:
         # Only the files that went into the video are removed; a skipped duplicate (or an unreadable file)
         # stays where it is.

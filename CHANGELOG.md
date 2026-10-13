@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-13#09 -- The app's tags survive a conversion
+
+- **Fixed:** Media > Convert to MP4/MKV (Rules), Import and Convert and the Open Folder offer could lose the show title, season/episode numbers and content type when a conversion changed the container (for example an MP4 that became an MKV to hold an external `.srt`). ffmpeg carries tags over only under its own names (`SHOW`, `EPISODE_SORT`, `CONTENT_TYPE`), not the ones this app reads (`SHOW_TITLE`, `EPISODE_NUMBER`, `VIDEOREDACTOR_CONTENT_TYPE`). The tags are now read before the original is replaced (a loaded row hands over its own) and written onto the new file with the app's own writer (write, re-read, compare); a failure is reported in the result but does not undo the conversion. The Check Files stamp is not carried (it described the old file's bytes). The Redact step already did this and is unchanged.
+- Found in the independent review of 0d2c86f; the original is in the Recycle Bin in every case, nothing was destroyed.
+
 ## 2026-10-13#08 -- Conversion review fixes (A1-A12): one engine, safer swaps, Cancel that stops ffmpeg
 
 - **Media > Convert to MP4/MKV (Rules)...** (A6): the library conversion rules on the selected files, or on files picked from disk (AVI, WMV, MOV... loaded or not). The confirm dialog has a per-run **Dry run first** checkbox (on by default); a dry run reports an explicit "DRY RUN, nothing changed: would convert a.avi -> a.mkv (...)" line per file. The persistent Library safety dry-run setting now only applies to the Redact convert step and is labelled so; that step's dry-run result is the same explicit DRY RUN line in the Redact report.

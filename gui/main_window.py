@@ -2696,9 +2696,16 @@ class MainWindow(QMainWindow):
             else:
                 is_series = _tv_guess(os.path.splitext(os.path.basename(path))[0])[0].season is not None
             run = make_safe_run(get_setting, safety, dry_run=dry_run)
+            # The app's tags travel with the file: a loaded row hands over its own (saved) tags, any other
+            # file has them read from disk just before it is replaced (conversion_run.process_file).
+            tags = None
+            if vf is not None:
+                tags = copy.deepcopy(vf.metadata)
+                tags.scan_stamp = ""  # the stamp describes the old file's bytes
             try:
                 outcome = call_in_background(
                     conversion_run.process_file, run, path, conv, is_series=is_series, cancel_event=cancel_event,
+                    tags=tags,
                 )
             except library_safety.SafetyError as exc:
                 lines.append(f"{os.path.basename(path)}: not converted, the file is untouched: {exc}")
