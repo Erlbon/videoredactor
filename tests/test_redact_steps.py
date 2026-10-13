@@ -131,8 +131,14 @@ def test_default_recipe_enabled_flags_and_pinned_last_steps():
     }
     assert recipe.order[-2:] == ["rename", "move_into_folders"]
     assert [s.key for s, _o in recipe.resolve(catalogue)] == ["check_repair", "filename_tags", "path_tags", "lookup"]
-    # Rename starts on only once a rename pattern exists.
-    assert Recipe.default_for(rs.build_catalogue(lambda: ["%title%"])).enabled["rename"] is True
+    # Rename stays OFF even once a rename pattern exists (it used to switch itself on); a saved recipe keeps
+    # what it saved.
+    assert Recipe.default_for(rs.build_catalogue(lambda: ["%title%"])).enabled["rename"] is False
+    saved = Recipe.default_for(catalogue)
+    saved.enabled["rename"] = True
+    rs.save_recipe(saved)
+    assert rs.load_recipe(rs.build_catalogue(lambda: ["%title%"])).enabled["rename"] is True
+    assert "Edit > Edit Redact Recipe" in next(s for s in catalogue if s.key == "rename").description
 
 
 def test_recipe_round_trips_through_the_settings_file_as_one_line():
@@ -850,6 +856,7 @@ def test_end_to_end_run_redact_with_a_fake_bin(clips, work, bin_, tmp_path):
     catalogue = rs.build_catalogue(env.pattern_history)
     recipe = Recipe.default_for(catalogue)
     recipe.enabled["lookup"] = False  # no network in tests
+    recipe.enabled["rename"] = True  # off by default: the user turns it on
     report = run_redact(
         None, files, recipe, catalogue, lambda v: rs.VideoCtx(v, env), describe=lambda v: v.path.name,
         show_results=False, finalize=rs.finalize_file, finalize_label="Save",

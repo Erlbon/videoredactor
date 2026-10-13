@@ -164,6 +164,7 @@ def test_redact_saves_a_real_file_in_place_and_refreshes_the_row(window, monkeyp
     catalogue = rs.build_catalogue()
     recipe = Recipe.default_for(catalogue)
     recipe.enabled["lookup"] = False  # no network in tests
+    recipe.enabled["rename"] = True  # off by default: the user turns it on
     rs.save_recipe(recipe)
     window._on_redact()
     renamed = tmp_path / "The Office S2E5 Halloween.mp4"  # the Rename step runs after the save

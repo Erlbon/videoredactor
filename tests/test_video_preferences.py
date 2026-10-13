@@ -166,6 +166,8 @@ def test_conversion_page_saves_settings(tmp_path, monkeypatch):
     page.disc.setCurrentIndex(page.disc.findData(cp.DISC_LIST))
     page.languages.setText("en, nl")
     page.languages.editingFinished.emit()
+    assert "obj" not in store  # nothing is written while editing (OK / Apply saves, Cancel drops)
+    page.save()
     saved = _read(store)
     assert saved.apply_to_movies and saved.nvenc_cq == 27 and saved.disc_images == cp.DISC_LIST and saved.subtitle_languages == "en, nl"
 

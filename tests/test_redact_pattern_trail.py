@@ -105,6 +105,7 @@ def test_a_pinned_recipe_ignores_later_rename_export_changes(tmp_path):
     env = env_with(history)
     catalogue = rs.build_catalogue(env=env)
     pinned = rs.pin_patterns(Recipe.default_for(catalogue), catalogue)
+    pinned.enabled["rename"] = True  # Rename is off by default; the user ticked it
     # The user later uses a different Rename/Export pattern.
     history.insert(0, "%show_title% - %title%")
     resolved = dict((s.key, o) for s, o in pinned.resolve(catalogue))

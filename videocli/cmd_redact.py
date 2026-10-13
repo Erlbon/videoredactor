@@ -3,8 +3,11 @@ videocli/cmd_redact.py
 
   redact PATH...   run the Redact recipe on the video files: the same steps as Edit > Redact in the app
                    (check and repair, tags from the filename and the path, lookups on IMDb / TMDB / TheTVDB,
-                   subtitles, MKV to MP4 remux, rename, move), saved in place with each original in the
-                   Recycle Bin (or moved to --trash-dir).
+                   subtitles, MKV to MP4 remux, convert to MP4/MKV and ingest subtitles, rename, move), saved
+                   in place with each original in the Recycle Bin (or moved to --trash-dir).
+
+The convert step (convert_library) follows the app's Library safety settings: its persistent dry-run setting, the
+quarantine folder, and delete-after-conversion (when that is on, a converted original is deleted for good).
 
 The recipe is the one saved in the app (Edit > Edit Redact Recipe) unless --recipe FILE names a JSON recipe;
 --enable / --disable / --threshold adjust it for this run only. The API keys come from the TMDB_API_KEY,

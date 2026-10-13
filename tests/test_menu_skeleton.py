@@ -354,8 +354,8 @@ def test_skeleton_shortcuts_and_one_release_aliases(window):
     assert _keys(reg["lookup_subtitles"]) == ["Ctrl+Shift+L"]  # was Ctrl+Shift+O
     assert _keys(reg["lookup_tmdb_movie"]) == ["Ctrl+M"] and _keys(reg["lookup_tmdb_tv"]) == ["Ctrl+T"]
     assert _keys(reg["lookup_tvdb"]) == ["Ctrl+Shift+T"] and _keys(reg["convert_to_mp4"]) == ["Ctrl+Shift+C"]
-    assert _keys(reg["refresh_list"]) == ["F5"]  # Ctrl+R is Remux here
-    assert _keys(reg["remux"]) == ["Ctrl+R"]
+    assert _keys(reg["refresh_list"]) == ["F5", "Ctrl+R"]  # the family's pair (Ctrl+R was Remux here)
+    assert _keys(reg["remux"]) == ["Ctrl+Shift+M"]
     assert _keys(reg["apply"]) == ["Ctrl+Return"]
     assert _keys(reg["redact"]) == ["Ctrl+Shift+E"]
     assert _keys(reg["command_palette"]) == ["Ctrl+K"]

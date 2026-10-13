@@ -42,7 +42,7 @@ from core.tmdb_client import (
 )
 from core.tvdb_client import get_series_details, get_episode_details, download_image, TVDBError
 from core.release_name_parser import parse_release_name
-from core.redact_steps import _tv_guess
+from core.redact_steps import _tv_guess, conversion_is_series
 from core.sidecars import with_sidecars
 from core.redact_steps import (
     RedactEnv, VideoCtx, build_catalogue, dry_run_line, finalize_file, load_recipe, make_safe_run,
@@ -508,7 +508,7 @@ class MainWindow(QMainWindow):
             edit=standard_edit_items(
                 undo=self.undo_last_action,
                 redo=self.redo_last_action,
-                apply=lambda: self.tag_panel.apply_pending_changes(),
+                apply=self._on_apply_menu,
                 redact=self._on_redact,
                 edit_redact_recipe=self._on_edit_redact_recipe,
                 search_replace=self._on_search_replace,
@@ -521,9 +521,8 @@ class MainWindow(QMainWindow):
                 zoom_in=lambda: self.zoom.zoom_in(),
                 zoom_out=lambda: self.zoom.zoom_out(),
                 reset_zoom=lambda: self.zoom.zoom_reset(),
+                # The family's F5 and Ctrl+R (Ctrl+R used to be Remux here; Remux is Ctrl+Shift+M now).
                 refresh_list=self._refresh_list,
-                # F5 only: Ctrl+R is Remux to MP4 in this app.
-                refresh_shortcuts=["F5"],
             ),
             app_menus=[
                 AppMenu(labels.MENU_METADATA, [
@@ -537,7 +536,8 @@ class MainWindow(QMainWindow):
                 # Only the heavy video-specific operations: what acts on the
                 # container/streams rather than on tags.
                 AppMenu(labels.MENU_MEDIA, [
-                    MenuAction("remux", "&Remux to MP4…", self._on_remux_selected, shortcut="Ctrl+R"),
+                    # Ctrl+Shift+M (M for MP4): Ctrl+R is Refresh List in the whole family.
+                    MenuAction("remux", "&Remux to MP4…", self._on_remux_selected, shortcut="Ctrl+Shift+M"),
                     MenuAction("convert_to_mp4", "Con&vert to MP4 (H.264)…", self._on_convert_to_mp4,
                                shortcut="Ctrl+Shift+C"),
                     MenuAction("convert_rules", "Convert to MP4/MKV (R&ules)…", self._on_convert_with_rules),
@@ -1167,14 +1167,17 @@ class MainWindow(QMainWindow):
         box.setWindowTitle("Other Video Formats Found")
         box.setText(
             f"{intro} {len(others)} video file(s) in other formats ({kinds}) that can be converted to MP4/MKV.\n\n"
-            "Convert them now (beside the originals)?"
+            "Convert them now with the conversion rules?\n\n" + self._rules_text()
         )
         shown = [str(p) for p in others[:200]]
         more = f"\n... and {len(others) - len(shown)} more" if len(others) > len(shown) else ""
         box.setDetailedText("\n".join(shown) + more)
+        # One dialog: the per-run "Dry run first" choice is asked here, so no second confirm follows.
+        dry_box = self._dry_run_checkbox()
+        box.setCheckBox(dry_box)
         box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if box.exec() == QMessageBox.StandardButton.Yes:
-            self._import_paths([str(p) for p in others])
+            self._convert_with_rules([str(p) for p in others], dry_run=dry_box.isChecked())
 
     def _refresh_list(self) -> None:
         """Re-scans the folder(s) your currently-loaded files live in
@@ -1195,6 +1198,7 @@ class MainWindow(QMainWindow):
         video-specific wiring: how paths come out of self.video_files,
         and what to do once the new set is known."""
         if not self.video_files:
+            self.status_bar.showMessage("Nothing to refresh: the list is empty (use Open Folder first)")
             return
         if self._count_dirty() and not self._confirm_discard("refresh the list (discarding unsaved changes)"):
             return
@@ -1470,7 +1474,9 @@ class MainWindow(QMainWindow):
         if not (0 <= col < len(self._column_order)) or self._column_order[col] != "filename":
             return
         vf = self._file_for_row(row)
-        if vf is not None and not vf.load_error:
+        if vf is not None and vf.load_error:
+            self.status_bar.showMessage(f"Can't rename {vf.path.name}: it failed to load")
+        elif vf is not None:
             self.rename_single_file(vf)
 
     def rename_single_file(self, vf: VideoFile) -> None:
@@ -1507,7 +1513,15 @@ class MainWindow(QMainWindow):
         since F2 and that menu item are the same action reached two
         ways."""
         files = self._selected_video_files()
-        if len(files) == 1 and not files[0].load_error:
+        if not files:
+            self.status_bar.showMessage("Rename File: select the one file to rename first")
+        elif len(files) > 1:
+            self.status_bar.showMessage(
+                f"Rename File renames one file; {len(files)} are selected (use Rename / Export / Move for several)"
+            )
+        elif files[0].load_error:
+            self.status_bar.showMessage(f"Can't rename {files[0].path.name}: it failed to load")
+        else:
             self.rename_single_file(files[0])
 
     # --- TagPanel collapse/restore ----------------------------------------
@@ -1705,6 +1719,14 @@ class MainWindow(QMainWindow):
 
     # --- Applying bulk edits ----------------------------------------------
 
+    def _on_apply_menu(self) -> None:
+        """Edit > Apply to N Selected (Ctrl+Return, toolbar): applies the panel's typed changes, or says why
+        there is nothing to do (it used to return silently)."""
+        if not self.tag_panel.has_pending_changes():
+            self.status_bar.showMessage("Nothing to apply: no field in the panel was changed")
+            return
+        self.tag_panel.apply_pending_changes()
+
     def _on_apply_to_selected(self, changed_fields: dict[str, object]) -> None:
         if not changed_fields:
             # Nothing was actually touched -- marking every selected
@@ -1713,8 +1735,12 @@ class MainWindow(QMainWindow):
             # nothing was ever applied to them. Real bug, caught while
             # moving the Apply button to the toolbar and reconsidering
             # what triggering it with nothing pending should do.
+            self.status_bar.showMessage("Nothing to apply: no field in the panel was changed")
             return
         selected = self._selected_video_files()
+        if not selected:
+            self.status_bar.showMessage("Nothing to apply to: select the file(s) first")
+            return
         self._push_undo("Bulk Edit", selected)
         for vf in selected:
             for field_name, value in changed_fields.items():
@@ -2308,13 +2334,11 @@ class MainWindow(QMainWindow):
     def _on_remux_selected(self) -> None:
         """Remux selected MKV files to MP4 (batch-capable, -c copy so
         it's lossless -- no re-encode), on a worker thread with a
-        progress dialog and Cancel. For each remux whose result holds
-        every track of the original (verify_remux), asks whether to move
-        the original MKV to the Recycle Bin (per-file confirmation, with
-        Yes/No-to-All shortcuts so a large batch doesn't demand 20
-        individual clicks); a result that lost something is added but
-        the original is kept. Auto-adds the new MP4 as a row in the
-        table.
+        progress dialog and Cancel. The new MP4s are read back under a
+        progress dialog and added as rows; then ONE question offers to
+        move the originals of the verified results (every track kept,
+        verify_remux) to the Recycle Bin. A result that lost something is
+        added but its original is always kept.
         """
         selected = self._selected_video_files()
         mkv_files = [vf for vf in selected if vf.is_mkv]
@@ -2348,14 +2372,12 @@ class MainWindow(QMainWindow):
             self._run_transcode_jobs(jobs, None, "Remuxing to MP4", remux=True) if jobs else {}
         )
 
-        # None = ask per file; True/False = "to all" choice already made
-        delete_all_choice: Optional[bool] = None
         succeeded: list[tuple[VideoFile, Path]] = []
         failed: list[tuple[VideoFile, str]] = []
         unverified: list[tuple[VideoFile, str]] = []
+        verified: list[tuple[VideoFile, Path]] = []  # every track kept: the original may go
         cancelled_count = 0
         deletion_failures: list[tuple[VideoFile, str]] = []
-        new_files: list[VideoFile] = []
         removed_originals: list[VideoFile] = []
 
         for i, vf in enumerate(job_files):
@@ -2371,33 +2393,31 @@ class MainWindow(QMainWindow):
                 else:
                     failed.append((vf, message.strip() or "ffmpeg remux failed"))
                 continue
-
             succeeded.append((vf, output_path))
-
-            new_vf = VideoFile(path=output_path)
-            new_vf.load()
-            new_files.append(new_vf)
-
             if message:
                 # Something didn't make it into the MP4 (or it couldn't
                 # be compared): keep the original, don't even offer.
                 unverified.append((vf, message))
-                continue
-
-            if delete_all_choice is not None:
-                delete_original: object = delete_all_choice
             else:
-                delete_original = self._confirm_delete_original(vf, output_path)
-            if isinstance(delete_original, tuple):
-                delete_original, remembered_choice = delete_original
-                delete_all_choice = remembered_choice
+                verified.append((vf, output_path))
 
-            if delete_original:
+        # Each new MP4 is read (ffprobe + tags) under a progress dialog, not frozen on the GUI thread.
+        new_files = self._load_results([out for _vf, out in succeeded], "Reading the remuxed files...")
+
+        # ONE question for the whole batch (it used to ask per file inside the loop).
+        if verified and self._confirm_delete_originals(verified):
+            def trash_one(item: tuple[VideoFile, Path], _index: int) -> None:
+                vf = item[0]
                 try:
                     move_to_trash(str(vf.path))
                     removed_originals.append(vf)
                 except (TrashError, OSError) as e:
                     deletion_failures.append((vf, str(e)))
+
+            run_with_progress(
+                self, verified, trash_one, "Moving originals to the Recycle Bin...", threshold=3,
+                label_for=lambda item: f"Recycling {item[0].path.name}",
+            )
 
         self.video_files.extend(new_files)
         if removed_originals:
@@ -2434,35 +2454,39 @@ class MainWindow(QMainWindow):
             details = _error_details([f"{vf.path.name}: {err}" for vf, err in deletion_failures])
             QMessageBox.warning(self, "Some originals could not be deleted", details)
 
-    def _confirm_delete_original(self, vf: VideoFile, output_path: Path):
-        """Ask whether to delete the original MKV after a successful
-        remux. Returns a plain bool normally; returns (bool, bool) when
-        a "to all" button is clicked, so the caller can remember the
-        choice for the rest of the batch without asking again.
-        """
+    def _confirm_delete_originals(self, verified: list[tuple[VideoFile, Path]]) -> bool:
+        """One question after the whole remux batch: move the originals of the verified results (every
+        track kept) to the Recycle Bin? The files are listed under Show Details. Esc / No keeps them all."""
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Question)
-        box.setWindowTitle("Delete Original MKV?")
+        box.setWindowTitle("Recycle the Original MKVs?")
         box.setText(
-            f"Remuxed to {output_path.name} (all tracks kept).\n\n"
-            f"Move the original file {vf.path.name} to the Recycle Bin?"
+            f"{len(verified)} file(s) were remuxed to MP4 with every track kept.\n\n"
+            f"Move the {len(verified)} original MKV file(s) to the Recycle Bin?"
         )
-        btn_yes = box.addButton("Yes", QMessageBox.ButtonRole.YesRole)
-        btn_no = box.addButton("No", QMessageBox.ButtonRole.NoRole)
-        btn_yes_all = box.addButton("Yes to All", QMessageBox.ButtonRole.AcceptRole)
-        btn_no_all = box.addButton("No to All", QMessageBox.ButtonRole.RejectRole)
-        box.exec()
-        clicked = box.clickedButton()
+        shown = [f"{vf.path.name} -> {out.name}" for vf, out in verified[:200]]
+        more = f"\n... and {len(verified) - len(shown)} more" if len(verified) > len(shown) else ""
+        box.setDetailedText("\n".join(shown) + more)
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        return box.exec() == QMessageBox.StandardButton.Yes
 
-        if clicked == btn_yes:
-            return True
-        if clicked == btn_no:
-            return False
-        if clicked == btn_yes_all:
-            return (True, True)
-        if clicked == btn_no_all:
-            return (False, False)
-        return False  # dialog dismissed without a button (e.g. Esc) -- default to not deleting
+    def _load_results(self, paths: list[Path], label: str) -> list[VideoFile]:
+        """Reads freshly written files (ffprobe + tags, VideoFile.load) under a progress dialog -- a batch of
+        conversions used to be re-read one by one on the GUI thread with nothing on screen. Not cancellable:
+        the files exist either way, and stopping halfway would leave some of them out of the list."""
+        loaded: list[VideoFile] = []
+
+        def step(path: Path, _index: int) -> None:
+            vf = VideoFile(path=Path(path))
+            vf.load()
+            loaded.append(vf)
+
+        run_with_progress(
+            self, paths, step, label, threshold=1, cancellable=False,
+            label_for=lambda p: f"Reading {Path(p).name}",
+        )
+        return loaded
 
     def _run_transcode_jobs(
         self, jobs: list[tuple[Path, Path]], settings, title: str,
@@ -2509,8 +2533,8 @@ class MainWindow(QMainWindow):
 
     def _on_convert_to_mp4(self) -> None:
         """Re-encode selected files to H.264/AAC MP4 (batch-capable),
-        using the CRF/audio-bitrate/thread defaults from Tool Settings
-        (core/transcode_settings.py). Unlike Remux (-c copy, lossless,
+        using the CRF/audio-bitrate/thread defaults from Tools > Preferences >
+        Transcode (core/transcode_settings.py). Unlike Remux (-c copy, lossless,
         MKV-only), this applies to any selected file and is a genuine
         re-encode -- slower, and a generation/quality loss versus the
         source, so unlike _on_remux_selected there is deliberately NO
@@ -2564,8 +2588,8 @@ class MainWindow(QMainWindow):
             f"(CRF {settings.crf}, audio {settings.audio_bitrate}{thread_note})?\n\n"
             "This re-encodes video -- slower than Remux, and a quality/"
             "generation loss versus the source. Originals are never "
-            "deleted automatically. Adjust these defaults via "
-            "Tools > External Tools.",
+            "deleted automatically. Adjust these defaults in "
+            "Tools > Preferences > Transcode.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if confirm != QMessageBox.StandardButton.Yes:
@@ -2573,8 +2597,7 @@ class MainWindow(QMainWindow):
 
         results = self._run_transcode_jobs(jobs, settings, "Converting to MP4")
 
-        new_files: list[VideoFile] = []
-        succeeded = 0
+        outputs: list[Path] = []
         failed: list[tuple[Path, str]] = []
         cancelled_count = 0
         for i, (input_path, output_path) in enumerate(jobs):
@@ -2584,16 +2607,14 @@ class MainWindow(QMainWindow):
                 continue
             ok, message = result
             if ok:
-                succeeded += 1
-                new_vf = VideoFile(path=output_path)
-                new_vf.load()
-                new_files.append(new_vf)
+                outputs.append(output_path)
             elif message == "Cancelled":
                 cancelled_count += 1
             else:
                 failed.append((output_path, message))
+        succeeded = len(outputs)
 
-        self.video_files.extend(new_files)
+        self.video_files.extend(self._load_results(outputs, "Reading the converted files..."))
         self._refresh_table_rows()
 
         parts = [f"Converted {succeeded} file(s)"]
@@ -2645,35 +2666,48 @@ class MainWindow(QMainWindow):
             )
         self._convert_with_rules(paths)
 
-    def _convert_with_rules(self, paths: list[str]) -> None:
-        """The one conversion flow: confirm (with the per-run "Dry run first" checkbox), run
-        conversion_run.process_file through a SafeRun for each path under a cancellable progress dialog
-        (Cancel kills ffmpeg), then report every file -- a dry run as explicit "DRY RUN: would ..." lines --
-        and refresh / add the affected rows."""
-        paths = [p for p in dict.fromkeys(os.path.abspath(p) for p in paths)]
-        if not paths:
-            return
+    @staticmethod
+    def _rules_text() -> str:
+        """What the conversion rules do and where the original goes, for the confirm / offer dialogs."""
         safety = library_safety.get_safety_settings()
-        conv = conversion_plan.get_conversion_settings()
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Icon.Question)
-        box.setWindowTitle("Convert to MP4/MKV (Rules)")
-        box.setText(
-            f"Apply the conversion rules to {len(paths)} file(s)?\n\n"
+        return (
             "Legacy containers become MP4 or MKV by stream copy; only video no container can hold is re-encoded; "
             "series episodes over the bitrate limits are re-encoded (720p); .srt files beside a video are muxed in. "
             "Every result is verified before the original is replaced.\n\n"
             + original_fate_text(safety, True).split(". ", 1)[-1]
             + "\n\nLimits: Tools > Preferences > Conversion. Safety: Tools > Preferences > Library safety."
         )
-        box.setDetailedText("\n".join(paths[:200]) + (f"\n... and {len(paths) - 200} more" if len(paths) > 200 else ""))
-        dry_box = QCheckBox("Dry run first: list what would happen, change nothing")
-        dry_box.setChecked(True)
-        box.setCheckBox(dry_box)
-        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
-        if box.exec() != QMessageBox.StandardButton.Yes:
+
+    @staticmethod
+    def _dry_run_checkbox() -> QCheckBox:
+        """The per-run "Dry run first" choice, on by default."""
+        box = QCheckBox("Dry run first: list what would happen, change nothing")
+        box.setChecked(True)
+        return box
+
+    def _convert_with_rules(self, paths: list[str], dry_run: Optional[bool] = None) -> None:
+        """The one conversion flow: confirm (with the per-run "Dry run first" checkbox), run
+        conversion_run.process_file through a SafeRun for each path under a cancellable progress dialog
+        (Cancel kills ffmpeg), then report every file -- a dry run as explicit "DRY RUN: would ..." lines --
+        and refresh / add the affected rows. A caller that already asked (the Open Folder offer, with its own
+        dry-run checkbox) passes `dry_run` and no second confirm is shown."""
+        paths = [p for p in dict.fromkeys(os.path.abspath(p) for p in paths)]
+        if not paths:
             return
-        dry_run = dry_box.isChecked()
+        safety = library_safety.get_safety_settings()
+        conv = conversion_plan.get_conversion_settings()
+        if dry_run is None:
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Icon.Question)
+            box.setWindowTitle("Convert to MP4/MKV (Rules)")
+            box.setText(f"Apply the conversion rules to {len(paths)} file(s)?\n\n" + self._rules_text())
+            box.setDetailedText("\n".join(paths[:200]) + (f"\n... and {len(paths) - 200} more" if len(paths) > 200 else ""))
+            dry_box = self._dry_run_checkbox()
+            box.setCheckBox(dry_box)
+            box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+            if box.exec() != QMessageBox.StandardButton.Yes:
+                return
+            dry_run = dry_box.isChecked()
 
         loaded_by_path = {os.path.normcase(os.path.abspath(str(vf.path))): vf for vf in self.video_files}
         cancel_event = threading.Event()
@@ -2691,10 +2725,10 @@ class MainWindow(QMainWindow):
             if vf is not None and vf.dirty and not vf.stamp_only_dirty:
                 lines.append(f"{os.path.basename(path)}: skipped, it has unsaved edits")
                 return
-            if vf is not None:
-                is_series = vf.metadata.content_type != ContentType.MOVIE
-            else:
-                is_series = _tv_guess(os.path.splitext(os.path.basename(path))[0])[0].season is not None
+            # A series episode: tagged TV, or untagged (or not loaded) with an episode-like name.
+            is_series = conversion_is_series(
+                vf.metadata.content_type if vf is not None else None, os.path.splitext(os.path.basename(path))[0],
+            )
             run = make_safe_run(get_setting, safety, dry_run=dry_run)
             # The app's tags travel with the file: a loaded row hands over its own (saved) tags, any other
             # file has them read from disk just before it is replaced (conversion_run.process_file).
@@ -2738,9 +2772,12 @@ class MainWindow(QMainWindow):
             self._active_cancel = None
         cancelled = cancelled or not finished
 
-        # Loaded rows follow their converted file; converted files that were not loaded are added.
+        # Loaded rows follow their converted file; converted files that were not loaded are added. Each is
+        # re-read (ffprobe + tags) under a progress dialog, not on a frozen GUI thread.
         new_files: list[VideoFile] = []
-        for source, final in converted:
+
+        def reload(item: tuple[str, str], _index: int) -> None:
+            source, final = item
             vf = loaded_by_path.get(os.path.normcase(source))
             if vf is None:
                 vf = VideoFile(path=Path(final))
@@ -2749,6 +2786,11 @@ class MainWindow(QMainWindow):
                 vf.path = Path(final)
                 vf.dirty = False
             vf.load()
+
+        run_with_progress(
+            self, converted, reload, "Reading the converted files...", threshold=1, cancellable=False,
+            label_for=lambda item: f"Reading {os.path.basename(item[1])}",
+        )
         if new_files:
             self.video_files.extend(new_files)
         if converted:
@@ -2892,9 +2934,14 @@ class MainWindow(QMainWindow):
         done = 0
         errors: list[str] = []
         renamed: list[tuple[str, str]] = []
-        for vf, old_path, new_path in dialog.planned_renames():
-            if os.path.normcase(os.path.abspath(old_path)) == os.path.normcase(os.path.abspath(new_path)):
-                continue
+        planned = [
+            (vf, old_path, new_path) for vf, old_path, new_path in dialog.planned_renames()
+            if os.path.normcase(os.path.abspath(old_path)) != os.path.normcase(os.path.abspath(new_path))
+        ]
+
+        def one(item, _index: int) -> None:
+            nonlocal done
+            vf, old_path, new_path = item
             try:
                 if export_mode:
                     _copy_no_clobber(old_path, new_path)
@@ -2905,11 +2952,18 @@ class MainWindow(QMainWindow):
                 done += 1
             except OSError as exc:
                 errors.append(f"{os.path.basename(old_path)}: {exc}")
+
+        # Copies (Export) of large videos take real time, and renames on a network share are not instant.
+        finished = run_with_progress(
+            self, planned, one, "Exporting files..." if export_mode else "Renaming files...", threshold=3,
+            label_for=lambda item: f"{'Copying' if export_mode else 'Renaming'} {os.path.basename(item[1])}",
+        )
         _rename_log().record("Rename by Pattern", renamed)
 
         self._refresh_table_rows()
         verb = "Exported" if export_mode else "Renamed"
-        self.status_bar.showMessage(f"{verb} {done} file(s)")
+        cancel_note = f", cancelled -- {len(planned) - done - len(errors)} not done" if not finished else ""
+        self.status_bar.showMessage(f"{verb} {done} file(s){cancel_note}")
         if errors:
             QMessageBox.warning(self, "Some files failed", _error_details(errors))
 
@@ -2965,6 +3019,7 @@ class MainWindow(QMainWindow):
         save_pattern_to_history(dialog.pattern_edit.text())
         changes = dialog.accepted_changes()
         if not changes:
+            self.status_bar.showMessage("Import from Filename: no file had a change to apply")
             return
         self._push_undo("Import from Filename", [targets[i] for i in changes])
         for index, fields in changes.items():
@@ -3028,7 +3083,10 @@ class MainWindow(QMainWindow):
         errors: list[str] = []
         renamed = 0
         logged: list[tuple[str, str]] = []
-        for index, new_stem in changes.items():
+
+        def one(item: tuple[int, str], _index: int) -> None:
+            nonlocal renamed
+            index, new_stem = item
             vf = targets[index]
             new_path = vf.path.with_name(new_stem + vf.path.suffix)
             try:
@@ -3041,6 +3099,11 @@ class MainWindow(QMainWindow):
                 renamed += 1
             except OSError as exc:
                 errors.append(f"{vf.path.name}: {exc}")
+
+        run_with_progress(
+            self, list(changes.items()), one, "Renaming files...", threshold=3,
+            label_for=lambda item: f"Renaming {targets[item[0]].path.name}",
+        )
         _rename_log().record("Search/Replace (filename)", logged)
         self._after_batch_edit(f"Renamed {renamed} file(s)")
         if errors:
@@ -3053,6 +3116,7 @@ class MainWindow(QMainWindow):
         """Shared tail of the one-field batch dialogs: stage each accepted
         new value (undoably), then refresh."""
         if not changes:
+            self.status_bar.showMessage(f"{label}: no file had a change to apply")
             return
         self._push_undo(label, [targets[i] for i in changes])
         applied = 0

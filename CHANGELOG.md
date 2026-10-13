@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-10-13#10 -- Progress everywhere, fewer surprises, honest docs
+
+- **Progress dialogs:** after Remux to MP4, Convert to MP4 (H.264) and the conversion rules, the new files are read back under a progress dialog instead of one by one on a frozen window. Online lookups (TMDB, TheTVDB, OpenSubtitles, and the offline IMDb searches) show a busy dialog when they take more than a moment. Rename / Export by Pattern (an export copies whole videos) and Search and Replace on filenames rename under a progress dialog with Cancel.
+- **Remux asks once:** the "Delete Original MKV?" question per file is gone; after the batch ONE question offers to move the originals of the verified results (every track kept) to the Recycle Bin, with the list under Show Details.
+- **Open Folder offer is one dialog:** the "Other Video Formats Found" question now has the "Dry run first" checkbox (ticked by default) and starts the conversion itself; the second confirm is gone.
+- **Rename in Redact stays off** until you tick it in Edit > Edit Redact Recipe (it used to switch itself on once any rename pattern existed). A saved recipe keeps what it saved.
+- **Remux to MP4 is Ctrl+Shift+M;** Ctrl+R is Refresh List again (with F5), as in the rest of the family.
+- **Conversion rules, series episodes:** only a file tagged TV, or an untagged file whose name reads as an episode (S01E02), counts as a series episode for the bitrate/720p re-encode. Untagged files, clips and other content types are no longer re-encoded as if they were episodes.
+- **Duration tolerance:** the Library safety "Duration tolerance" settings now apply to the conversion rules' check (the larger of the seconds and the share of the length); it was a fixed 1.5 s. The 60 s allowance for a stale AVI/OGM header is unchanged.
+- **Preferences > Conversion and Library safety obey Cancel:** they are written on OK / Apply like the other pages; before, every click was saved at once, so Cancel could not undo, for example, ticking "Delete the original after a verified conversion".
+- **Texts:** Convert to MP4 (H.264) points to Tools > Preferences > Transcode for its defaults (it said Tools > External Tools); the Transcode and Conversion pages each say what the other one is for.
+- **No silent no-ops:** F2 with no or several rows selected, double-clicking a file that failed to load, Apply with nothing changed, Refresh List on an empty list, and the batch dialogs accepted with no change now say why in the status bar.
+- **Docs:** new README.md; ABOUT.md has a "Library safety and conversion" section and no longer claims the command line never deletes anything (Redact's convert step does, when delete-after-conversion is on).
+- Requires redactor_common 2026-10-13-05 (menu lint rejects Ctrl+Alt shortcuts).
+- **Corrections to earlier entries:**
+  - 2026-10-13#05: the Redact convert step only reaches files the app can load (MP4, M4V, MKV), so of the legacy containers only `.m4v` was converted by Redact; AVI, WMV and the rest are converted by Media > Convert to MP4/MKV (Rules), Import and Convert and the Open Folder offer.
+  - 2026-10-13#06: the Open Folder offer said "MP4/MKV" but ran the H.264 re-encode into MP4 until 2026-10-13#08 moved it to the conversion rules.
+  - 2026-10-13#01: the "duration within tolerance" settings were not used by the conversion rules until this entry (they used a fixed 1.5 s).
+
 ## 2026-10-13#09 -- The app's tags survive a conversion
 
 - **Fixed:** Media > Convert to MP4/MKV (Rules), Import and Convert and the Open Folder offer could lose the show title, season/episode numbers and content type when a conversion changed the container (for example an MP4 that became an MKV to hold an external `.srt`). ffmpeg carries tags over only under its own names (`SHOW`, `EPISODE_SORT`, `CONTENT_TYPE`), not the ones this app reads (`SHOW_TITLE`, `EPISODE_NUMBER`, `VIDEOREDACTOR_CONTENT_TYPE`). The tags are now read before the original is replaced (a loaded row hands over its own) and written onto the new file with the app's own writer (write, re-read, compare); a failure is reported in the result but does not undo the conversion. The Check Files stamp is not carried (it described the old file's bytes). The Redact step already did this and is unchanged.

@@ -199,13 +199,15 @@ def window(monkeypatch, tmp_path):
     w.close()
 
 
-def _remux_window(window, monkeypatch, tmp_path, verdict):
+def _remux_window(window, monkeypatch, tmp_path, verdict, names=("m.mkv",)):
     import gui.main_window as mw
 
-    src = tmp_path / "m.mkv"
-    src.write_bytes(b"")
-    vf = VideoFile(path=src)
-    window.video_files = [vf]
+    files = []
+    for name in names:
+        src = tmp_path / name
+        src.write_bytes(b"")
+        files.append(VideoFile(path=src))
+    window.video_files = list(files)
     window._refresh_table_rows()
     window.table.selectAll()
     monkeypatch.setattr(mw.VideoFile, "load", lambda self: None)
@@ -213,16 +215,24 @@ def _remux_window(window, monkeypatch, tmp_path, verdict):
 
     def fake_run(jobs, settings, title, remux=False):
         seen["remux"] = remux
-        return {0: (True, verdict)}
+        return {i: (True, verdict) for i in range(len(jobs))}
 
     monkeypatch.setattr(window, "_run_transcode_jobs", fake_run)
     asked = []
-    monkeypatch.setattr(window, "_confirm_delete_original", lambda vf, out: asked.append(vf) or True)
+    monkeypatch.setattr(window, "_confirm_delete_originals", lambda verified: asked.append(list(verified)) or True)
+    loads = []
+    real_progress = mw.run_with_progress
+    monkeypatch.setattr(
+        mw, "run_with_progress",
+        lambda parent, items, step, label, **kw: loads.append((label, len(list(items)), kw.get("cancellable", True)))
+        or real_progress(parent, items, step, label, **kw),
+    )
+    seen["progress"] = loads
     trashed = []
     monkeypatch.setattr(mw, "move_to_trash", lambda p: trashed.append(p))
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
     window._on_remux_selected()
-    return seen, asked, trashed, src
+    return seen, asked, trashed, files[0].path
 
 
 def test_remux_verified_original_goes_to_the_recycle_bin_not_unlinked(window, monkeypatch, tmp_path):
@@ -234,3 +244,11 @@ def test_remux_verified_original_goes_to_the_recycle_bin_not_unlinked(window, mo
 def test_remux_that_lost_a_track_keeps_the_original_and_does_not_offer_deletion(window, monkeypatch, tmp_path):
     _seen, asked, trashed, _src = _remux_window(window, monkeypatch, tmp_path, verdict="1 audio track(s) missing")
     assert asked == [] and trashed == []
+
+
+def test_remux_batch_asks_once_and_reloads_under_a_progress_dialog(window, monkeypatch, tmp_path):
+    seen, asked, trashed, _src = _remux_window(window, monkeypatch, tmp_path, verdict="", names=("a.mkv", "b.mkv", "c.mkv"))
+    assert len(asked) == 1 and len(asked[0]) == 3  # ONE question for the batch, not one per file
+    assert len(trashed) == 3
+    reads = [entry for entry in seen["progress"] if entry[0].startswith("Reading")]
+    assert reads == [("Reading the remuxed files...", 3, False)]  # the reload is under progress, not cancellable

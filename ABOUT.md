@@ -39,14 +39,49 @@ into files one at a time.
   Information courtesy of IMDb (https://www.imdb.com). Used with permission.
 - **Remux to MP4** for MKV files (fast, lossless container swap, not a
   re-encode), with control over what happens to the original.
-- **Convert to MP4 (H.264)** for a real re-encode when a container swap
-  alone won't do, and **Import & Convert to MP4** to bring in AVI, MOV,
-  WMV, FLV, WebM, MPG, and other video formats this tool doesn't
-  otherwise load — both via ffmpeg.
+- **Convert to MP4 (H.264)** for a real H.264/AAC re-encode when a
+  container swap alone won't do (it never deletes the original).
+- **Conversion rules** (Media > Convert to MP4/MKV (Rules), File > Import
+  and Convert, the Open Folder offer and the Redact convert step) bring
+  AVI, MOV, WMV, FLV, WebM, MPG and other formats into MP4 or MKV,
+  copying streams wherever a container can hold them — see "Library
+  safety and conversion" below.
 - **Poster art** saved as a sidecar image next to the video, the
   convention Plex/Jellyfin/Kodi already expect.
 - **Thumbnail preview** — pulls a real frame from the video so you can
   see what you're tagging without opening a player.
+
+## Library safety and conversion
+
+The conversion rules (Tools > Preferences > Conversion) decide what happens to a file: a legacy container (AVI,
+WMV, MOV, FLV, MPG, WebM, OGM, ...) becomes MP4 or MKV by stream copy; only video that no container can hold
+(RealVideo, Flash, odd WMV) is re-encoded; a series episode over the bitrate or size limits is re-encoded with
+hevc_nvenc and scaled to 720p when taller (movies only if you turn that on). A series episode is a file tagged TV,
+or an untagged file whose name reads as an episode (`S01E02`); movies, clips and other tagged files are not.
+External `.srt` files beside the video are muxed in (an MP4 then becomes an MKV) and removed afterwards. Disc
+images are left alone (or listed, per the setting). These rules are separate from Preferences > Transcode, which
+only holds the settings of Media > Convert to MP4 (H.264).
+
+Every conversion is written to a temporary `.part` / `.resize` file beside the source and checked before it
+replaces anything: the same number of video and audio tracks, the expected number of subtitle tracks, the target
+height when scaling, a bitrate-driven re-encode smaller than the set share of the source, and a length within the duration
+tolerance (Preferences > Library safety: the larger of the seconds and the percentage you set; an AVI/OGM whose
+header length is stale may be up to 60 s off when the result's own streams agree). A result that fails is deleted
+and the original stays as it was. A file modified in the last few minutes (setting) is never touched.
+
+What happens to an original that a verified result replaced (Tools > Preferences > Library safety):
+
+- **Recycle Bin** (default, no quarantine folder set). On a network share or removable drive, where there is no
+  Recycle Bin, the original is kept beside the result as `<name>.redact-orig.<ext>`.
+- **Quarantine folder** (if set): moved there, under a dated folder per kind of change that mirrors its path in
+  the library, and logged line by line in a TSV undo log.
+- **Deleted for good** when "Delete the original after a verified conversion" is on (off by default). The ingested
+  `.srt` files are then deleted too. This cannot be undone.
+
+Dry run: Media > Convert to MP4/MKV (Rules), Import and Convert and the Open Folder offer each ask "Dry run first"
+(ticked by default) in their one dialog; the Redact convert step follows the "Dry run" setting on the Library
+safety page instead (on by default). A dry run reports "DRY RUN, nothing changed: would convert ..." for every file
+and touches nothing.
 
 ## Command line
 
@@ -199,8 +234,10 @@ checked (FFmpeg's ffprobe is missing).
 `videoredactor redact [PATH...] [--recipe FILE] [--enable STEP] [--disable STEP] [--threshold N] [--trash-dir FOLDER] [--list-steps]`
 
 Runs the Redact recipe on the videos, the same steps as Edit > Redact: check and repair, tags from the filename
-and from the folder path, lookups on IMDb, TMDB and TheTVDB, subtitles, MKV to MP4 remux, rename, move into
-folders. Each changed file is saved in place and its original goes to the Recycle Bin (or `--trash-dir`).
+and from the folder path, lookups on IMDb, TMDB and TheTVDB, subtitles, MKV to MP4 remux, convert to MP4/MKV and
+ingest subtitles, rename, move into folders. Each changed file is saved in place and its original goes to the
+Recycle Bin (or `--trash-dir`). The convert step (`convert_library`, off unless the recipe or `--enable` turns it
+on) follows the app's Library safety settings, including its dry-run setting and delete-after-conversion.
 Guesses below the confidence threshold are listed under "needs review" and not applied. There is no
 `--dry-run`: use `info` and `check` first, and `--disable` for the steps you do not want.
 
@@ -282,8 +319,11 @@ videoredactor check "D:\Films" --repair --stamp --json -o report.json       repa
 videoredactor redact "D:\Incoming" --disable lookup --disable subtitles --trash-dir "D:\Trash"
 ```
 
-What the commands will not do: overwrite a file, delete anything for good, or ask a question. Everything that
-could be a prompt in the window is a flag here or a skipped file in the report.
+What the commands will not do: overwrite a file or ask a question. Everything that could be a prompt in the
+window is a flag here or a skipped file in the report. They do not delete anything for good either, with one
+exception: `redact` with the convert step on and "Delete the original after a verified conversion" turned on in
+Preferences > Library safety deletes each converted original (and the ingested `.srt` files), exactly as the
+window does.
 
 ## Design principles carried over from The ƎPUB Redactor
 

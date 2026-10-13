@@ -46,12 +46,41 @@ def test_open_folder_offers_conversion_and_hands_the_files_over(window, monkeypa
     _tree(folder)
     seen = {}
     asked = []
-    monkeypatch.setattr(QMessageBox, "exec", lambda self: asked.append(self.text()) or QMessageBox.StandardButton.Yes)
-    monkeypatch.setattr(window, "_import_paths", lambda paths: seen.setdefault("paths", paths))
+
+    def fake_exec(self):
+        asked.append((self.text(), self.checkBox()))
+        self.checkBox().setChecked(False)  # the user unticks "Dry run first" in the ONE dialog
+        return QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(QMessageBox, "exec", fake_exec)
+    monkeypatch.setattr(window, "_convert_with_rules", lambda paths, dry_run=None: seen.update(paths=paths, dry_run=dry_run))
     monkeypatch.setattr("gui.main_window.discover_video_files", lambda f, recursive, ignored=None: [])
     window._load_folder(folder, recursive=True)
     assert [os.path.basename(p) for p in seen["paths"]] == ["b.avi", "c.WMV", "d.mov"]
-    assert "3 video file(s)" in asked[0] and "AVI, MOV, WMV" in asked[0]
+    assert "3 video file(s)" in asked[0][0] and "AVI, MOV, WMV" in asked[0][0]
+    assert len(asked) == 1 and asked[0][1] is not None  # the offer carries the dry-run checkbox itself
+    assert seen["dry_run"] is False  # handed over, so _convert_with_rules asks nothing more
+
+
+def test_open_folder_offer_defaults_to_a_dry_run_with_no_second_dialog(window, monkeypatch, tmp_path):
+    import gui.main_window as mw
+
+    folder = tmp_path / "lib"
+    _tree(folder)
+    boxes = []
+
+    def fake_exec(self):
+        boxes.append((self.windowTitle(), self.checkBox().isChecked() if self.checkBox() else None))
+        return QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(QMessageBox, "exec", fake_exec)
+    monkeypatch.setattr("gui.main_window.discover_video_files", lambda f, recursive, ignored=None: [])
+    ran = []
+    monkeypatch.setattr(mw.conversion_run, "process_file", lambda run, p, conv, **kw: ran.append(run.dry_run) or mw.conversion_run.ConversionOutcome(False, message="nothing to do"))
+    window._load_folder(folder, recursive=True)
+    assert boxes[0] == ("Other Video Formats Found", True)  # dry run on by default
+    assert ran == [True, True, True]
+    assert [title for title, _ in boxes] == ["Other Video Formats Found", "Dry run"]  # offer, then the report
 
 
 def test_declining_converts_nothing_and_no_prompt_on_the_launch_restore(window, monkeypatch, tmp_path):
@@ -59,7 +88,7 @@ def test_declining_converts_nothing_and_no_prompt_on_the_launch_restore(window, 
     _tree(folder)
     calls = []
     monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.No)
-    monkeypatch.setattr(window, "_import_paths", lambda paths: calls.append(paths))
+    monkeypatch.setattr(window, "_convert_with_rules", lambda paths, dry_run=None: calls.append(paths))
     window._load_folder(folder, recursive=True)
     assert calls == []
     monkeypatch.setattr(QMessageBox, "exec", lambda self: pytest.fail("no prompt when restoring the last folder at launch"))

@@ -6,8 +6,10 @@ Runs a conversion plan (core/conversion_plan.py) for one file through the safety
 rules below, and only then is it swapped in (original to the Recycle Bin / quarantine / deleted, per setting).
 
 Verification (before the swap):
-  * duration within 1.5 s of the source (up to 60 s for an AVI/OGM source, whose header duration is often stale,
-    provided the result's own video and audio streams agree with each other within 1.5 s);
+  * duration within the Library safety tolerance of the source (Preferences > Library safety: the larger of
+    "Duration tolerance" in seconds and its share of the length; the run's SafeRun carries both), and up to 60 s
+    for an AVI/OGM source, whose header duration is often stale, provided the result's own video and audio
+    streams agree with each other within 1.5 s;
   * the same number of video and audio tracks;
   * subtitle count = the source's kept subtitles + the added ones;
   * height <= the target when scaling;
@@ -52,8 +54,12 @@ def verify_result(
     *,
     added_subtitles: int = 0,
     result_size: int | None = None,
+    tolerance_seconds: float = DURATION_TOLERANCE,
+    tolerance_fraction: float = 0.0,
 ) -> str:
-    """"" when the converted file is good, else what is wrong. Takes both probes so it needs no ffprobe."""
+    """"" when the converted file is good, else what is wrong. Takes both probes so it needs no ffprobe.
+    The duration may differ by the larger of `tolerance_seconds` and `tolerance_fraction` of the source's
+    length (the Library safety settings, passed in by convert_file from its SafeRun)."""
     if result is None:
         return "couldn't read the result back (ffprobe failed)"
     problems = []
@@ -73,7 +79,8 @@ def verify_result(
             problems.append("no duration")
         else:
             gap = abs(result.duration - source.duration)
-            if gap > DURATION_TOLERANCE:
+            allowed = max(tolerance_seconds, source.duration * tolerance_fraction)
+            if gap > allowed:
                 stale_ok = source.ext in STALE_HEADER_EXTENSIONS and gap <= STALE_HEADER_TOLERANCE and _streams_agree(result)
                 if not stale_ok:
                     problems.append(f"duration {result.duration:.1f}s vs {source.duration:.1f}s")
@@ -138,7 +145,10 @@ def convert_file(
 
     def verify(src: str, temp: str) -> str:
         size = os.path.getsize(temp) if os.path.exists(temp) else None
-        return verify_result(info, probe(temp), plan, settings, added_subtitles=added_subtitles, result_size=size)
+        return verify_result(
+            info, probe(temp), plan, settings, added_subtitles=added_subtitles, result_size=size,
+            tolerance_seconds=run.tolerance_seconds, tolerance_fraction=run.tolerance_fraction,
+        )
 
     reason = "; ".join(plan.reasons)
     ok = run.convert(source, final, build, kind, reason, marker=marker, verify=verify)

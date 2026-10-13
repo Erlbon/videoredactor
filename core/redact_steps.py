@@ -700,6 +700,19 @@ def _tv_guess(stem: str):
     return guess, title, year
 
 
+def conversion_is_series(content_type, stem: str) -> bool:
+    """Whether the conversion rules treat a file as a series episode (the bitrate/720p re-encode rules apply to
+    series only, unless Preferences > Conversion says movies too). A file tagged TV is one; a file whose content
+    type is not set is one when its NAME parses as an episode (a season AND an episode number); anything tagged
+    otherwise (Movie, Music Video, Clip, Misc) is not."""
+    if content_type == ContentType.TV:
+        return True
+    if content_type in (None, "", ContentType.UNSET):
+        guess = _tv_guess(stem)[0]
+        return guess.season is not None and guess.episode is not None
+    return False
+
+
 class LookupStep(VideoStep):
     key = "lookup"
     label = "Look up metadata (IMDb, TMDB, TheTVDB)"
@@ -1202,10 +1215,12 @@ class RenameStep(PatternStep):
         "Renames the finished file with a %field% pattern (empty: the one you last used in Rename/Export by "
         "Pattern, with its zero-pad and ASCII choices), never overwriting anything; logged for File > Undo "
         "Last Rename. Sidecar files (poster, subtitles) are renamed with it. Always runs last, after the "
-        "file is saved. A file whose pattern would leave a required field empty is left as it is."
+        "file is saved. A file whose pattern would leave a required field empty is left as it is. Off by "
+        "default: tick it in Edit > Edit Redact Recipe to turn it on."
     )
     position = "after_save"
     run_when_unchanged = True  # a file with nothing to save is still renamed/moved
+    default_enabled = False  # like Move: never switched on just because a pattern exists
     options = (
         OptionSpec("pattern", "Pattern (empty: the most recently used)", "str", "", max_length=300),
     )
@@ -1402,7 +1417,7 @@ class ConvertStep(VideoStep):
         run = make_safe_run(setting, safety, trash=ctx.env.trash)
         if ctx.start_mtime is not None and os.path.normcase(path) == os.path.normcase(ctx.original):
             run.known_mtime[path] = ctx.start_mtime  # Redact's own save must not make the file look "in use"
-        is_series = ctx.video.metadata.content_type != ContentType.MOVIE
+        is_series = conversion_is_series(ctx.video.metadata.content_type, ctx.video.path.stem)
         try:
             outcome = ctx.bg(
                 conversion_run.process_file, run, path, conv, is_series=is_series, cancel_event=ctx.env.cancel_event,
@@ -1442,8 +1457,9 @@ def build_catalogue(
     sample: Callable[[], dict[str, str] | None] | None = None,
 ) -> list[Step]:
     """The steps, in default run order ("last" steps pinned after the
-    rest by the engine). Rename starts enabled only once a rename
-    pattern exists. `env` supplies the history/settings the pattern trail
+    rest by the engine). Rename and Move start OFF (renaming files is
+    never switched on behind the user's back); a saved recipe keeps
+    whatever it saved. `env` supplies the history/settings the pattern trail
     reads (default: the app's own); `sample` returns placeholder values
     for the pattern previews (None: a built-in Show/Season/Episode)."""
     if env is None:
@@ -1456,7 +1472,7 @@ def build_catalogue(
         SubtitlesStep(),
         RemuxStep(),
         ConvertStep(),
-        RenameStep(default_enabled=bool(latest_file_pattern(env.pattern_history())), env=env, sample=sample),
+        RenameStep(env=env, sample=sample),
         MoveIntoFoldersStep(env=env, sample=sample),
     ]
 

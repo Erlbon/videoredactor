@@ -76,7 +76,9 @@ def build_sections() -> list[PrefSection]:
             PrefSpec(KEY_THREADS, "Threads", "int", DEFAULT_THREADS,
                      help="How many CPU threads ffmpeg may use. 0 lets ffmpeg decide.",
                      minimum=0, maximum=256),
-        ), "Defaults for Media > Convert to MP4 (H.264)."),
+        ), "Defaults for Media > Convert to MP4 (H.264), the plain H.264/AAC re-encode, only. The conversion "
+           "rules (Media > Convert to MP4/MKV (Rules), Import and Convert, the Redact convert step) have their "
+           "own limits on the Conversion page."),
         PrefSection("duplicates", "Duplicates", (
             PrefSpec(KEY_DUPLICATE_THRESHOLD, "Duplicate sensitivity (bits apart)", "int",
                      HAMMING_THRESHOLD,
