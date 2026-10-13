@@ -2288,8 +2288,9 @@ class MainWindow(QMainWindow):
 
         cancel_event = threading.Event()  # Cancel (and closing the app) stops a running ffmpeg encode
         self._active_cancel = cancel_event
-        env = RedactEnv(rename_log=_rename_log(), background=call_in_background,
-                        imdb_local=imdb_settings.load_database(), cancel_event=cancel_event)
+        # No `background` hook here: redactor_common's run_redact runs every file on a worker thread now, and
+        # that helper only works ON the GUI thread, so the steps call their slow work directly.
+        env = RedactEnv(rename_log=_rename_log(), imdb_local=imdb_settings.load_database(), cancel_event=cancel_event)
         catalogue = build_catalogue(sample=self._redact_sample_values)
         fate = self._redact_fate_text()
         try:

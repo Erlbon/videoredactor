@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-13#12 -- Redact no longer freezes the window on a slow file
+
+- Redact now runs each file on a worker thread (redactor_common 2026-10-13-06): the window keeps painting and Cancel stays clickable while a big save, a conversion, an ffmpeg call or a lookup is running, and Cancel stops a running encode at once. Before, the window could freeze for the whole length of one slow file and the Cancel click was only seen between files.
+- Requires redactor_common 2026-10-13-06.
+
 ## 2026-10-13#11 -- Conversion duration check back to 1.5 seconds
 
 - The Library safety "duration tolerance" now defaults to 1.5 seconds and 0 percent of the length. Since the setting started to be used by the rules engine (#10) the old defaults (2 s or 1 percent) would have let a 45-minute episode come out about 27 seconds off and still pass. Your own rule is "within 1.5 s"; the share of the length stays available as an optional extra allowance. The 60-second allowance for AVI/OGM files with a stale header is unchanged.

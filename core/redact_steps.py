@@ -138,9 +138,11 @@ def latest_path_pattern(history: list[str]) -> str:
 class RedactEnv:
     """What the steps of one Redact run share, all injectable for tests:
     the trash function (None = the Recycle Bin), the rename log
-    (anything with .record(label, pairs, ...)), `background` (runs a slow
-    call -- ffmpeg, a request -- keeping the window alive; the GUI passes
-    redactor_common's call_in_background), and where the saved rename
+    (anything with .record(label, pairs, ...)), `background` (how a slow
+    call -- ffmpeg, a request -- is run: directly by default. The GUI leaves
+    it at the default because redactor_common's run_redact already runs each
+    file on a worker thread; its call_in_background helper only works ON the
+    GUI thread, so passing it here would break), and where the saved rename
     patterns and settings come from."""
 
     trash: Callable[[str], None] | None = None

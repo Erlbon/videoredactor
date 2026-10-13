@@ -140,3 +140,12 @@ def test_default_duration_tolerance_is_1_5_seconds_whatever_the_length():
     assert "duration" in cr.verify_result(long_src, off, plan, cp.ConversionSettings(), tolerance_seconds=s.duration_tolerance_seconds, tolerance_fraction=s.duration_tolerance_fraction)
     close = cp.MediaInfo("a.mkv", 100, 2701.4, list(long_src.streams))
     assert cr.verify_result(long_src, close, plan, cp.ConversionSettings(), tolerance_seconds=1.5, tolerance_fraction=0.0) == ""
+
+
+def test_the_gui_redact_env_leaves_background_direct_because_redact_runs_on_a_worker_thread():
+    import inspect
+
+    import gui.main_window as mw
+
+    src = inspect.getsource(mw.MainWindow._on_redact)
+    assert "background=call_in_background" not in src  # that helper only works on the GUI thread
