@@ -34,7 +34,7 @@ def test_every_storage_key_is_one_the_settings_bundle_already_exports():
 
 def test_pages_and_defaults():
     dlg = VideoPreferencesDialog()
-    assert dlg.page_titles() == ["Filenames", "Transcode", "Duplicates", "Tools / Paths", "Library safety"]
+    assert dlg.page_titles() == ["Filenames", "Transcode", "Duplicates", "Tools / Paths", "Conversion", "Library safety"]
     assert dlg.value("zero_pad_width") == 2 and dlg.value("crf") == 23
     assert dlg.value("audio_bitrate") == "128k" and dlg.value("threads") == 0
     assert dlg.value("duplicate_threshold") == 6
@@ -148,3 +148,33 @@ def test_menu_entry_opens_the_dialog(window, monkeypatch):
     monkeypatch.setattr(VideoPreferencesDialog, "exec", lambda self: opened.append(self) or 0)
     window.actions_by_key["preferences"].trigger()
     assert len(opened) == 1
+
+
+def test_conversion_page_saves_settings(tmp_path, monkeypatch):
+    from core import conversion_plan as cp
+    from gui.video_preferences import ConversionPage
+
+    store = {}
+    monkeypatch.setattr(cp, "get_setting", lambda s, k, d="": store.get((s, k), d))
+    monkeypatch.setattr(cp, "set_setting", lambda s, k, v: store.__setitem__((s, k), v))
+    # the module-level defaults were bound at import: patch the helpers the page calls
+    monkeypatch.setattr(cp, "get_conversion_settings", lambda get=None: _read(store))
+    monkeypatch.setattr(cp, "set_conversion_settings", lambda s, put=None: _write(store, s))
+    page = ConversionPage()
+    page.movies.setChecked(True)
+    page.cq.setCurrentIndex(page.cq.findData(27))
+    page.disc.setCurrentIndex(page.disc.findData(cp.DISC_LIST))
+    page.languages.setText("en, nl")
+    page.languages.editingFinished.emit()
+    saved = _read(store)
+    assert saved.apply_to_movies and saved.nvenc_cq == 27 and saved.disc_images == cp.DISC_LIST and saved.subtitle_languages == "en, nl"
+
+
+def _read(store):
+    from core import conversion_plan as cp
+    return cp.ConversionSettings(**store.get("obj", {}))
+
+
+def _write(store, s):
+    import dataclasses
+    store["obj"] = dataclasses.asdict(s)

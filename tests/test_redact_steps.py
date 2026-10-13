@@ -127,7 +127,7 @@ def test_default_recipe_enabled_flags_and_pinned_last_steps():
     recipe = Recipe.default_for(catalogue)
     assert recipe.enabled == {
         "check_repair": True, "filename_tags": True, "path_tags": True, "lookup": True, "subtitles": False,
-        "remux_mkv_to_mp4": False, "rename": False, "move_into_folders": False,
+        "remux_mkv_to_mp4": False, "convert_library": False, "rename": False, "move_into_folders": False,
     }
     assert recipe.order[-2:] == ["rename", "move_into_folders"]
     assert [s.key for s, _o in recipe.resolve(catalogue)] == ["check_repair", "filename_tags", "path_tags", "lookup"]
@@ -892,3 +892,38 @@ def test_rename_and_move_after_a_real_save_keep_the_save(clips, work, bin_, tmp_
     assert (md.show_title, md.title) == ("The Office", "Halloween")  # the save happened, on the renamed file
     assert any(a.startswith("Save:") for a in entry.applied) and any(a.startswith("Rename") for a in entry.applied)
     assert leftovers(work) == []
+
+
+def _convert_env(bin_, tmp_path, work, **extra):
+    settings = {("safety", "dry_run"): "0", ("safety", "recent_minutes"): "0", ("rename", "library_root"): str(work)}
+    settings.update(extra)
+    return make_env(bin_, tmp_path, settings=settings)
+
+
+def test_convert_step_is_off_by_default_and_runs_after_the_save():
+    catalogue = rs.build_catalogue(lambda: [])
+    step = next(s for s in catalogue if s.key == "convert_library")
+    assert step.position == "after_save" and step.default_enabled is False
+    keys = [s.key for s in catalogue]
+    assert keys.index("convert_library") < keys.index("rename")
+
+
+def test_convert_step_dry_run_changes_nothing(work, bin_, tmp_path, monkeypatch):
+    from core import conversion_plan as cp
+    from core import conversion_run as cr
+
+    path = work / "Show S01E01.avi"
+    path.write_bytes(b"x" * 10)
+    old = __import__("time").time() - 3600
+    os.utime(path, (old, old))
+    info = cp.MediaInfo(str(path), 10, 100.0, [cp.StreamInfo(0, "video", "mpeg4", width=640, height=480), cp.StreamInfo(1, "audio", "mp3")])
+    real = cr.process_file
+    monkeypatch.setattr(rs.conversion_run, "process_file", lambda run, p, conv, **kw: real(run, p, conv, probe=lambda q: info, **kw))
+    env = make_env(bin_, tmp_path, settings={("safety", "dry_run"): "1", ("safety", "recent_minutes"): "0"})
+    ctx = rs.VideoCtx.__new__(rs.VideoCtx)
+    ctx.env, ctx.start_mtime, ctx.skip_reason, ctx.original = env, old, "", str(path)
+    ctx.video = type("V", (), {"path": path, "metadata": type("M", (), {"content_type": rs.ContentType.TV})()})()
+    ctx.bg = lambda fn, *a, **k: fn(*a, **k)
+    result = rs.ConvertStep().execute(ctx)
+    assert "dry run" in (result.note or "")
+    assert os.listdir(work) == ["Show S01E01.avi"]

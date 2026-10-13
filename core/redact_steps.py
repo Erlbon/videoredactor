@@ -67,6 +67,7 @@ from redactor_common.core.rename_pattern import render_filename, unique_path, ze
 from redactor_common.core.trash import move_to_trash
 
 from core import imdb_import, imdb_local, opensubtitles_client, tmdb_client, tvdb_client
+from core import conversion_plan, conversion_run, library_safety
 from core.config import get_setting, set_setting
 from core.ffmpeg_backend import _run, remux_to_mp4, verify_remux
 from core.file_check import RepairError, build_repaired_copy, quick_check
@@ -174,6 +175,10 @@ class VideoCtx:
         self.work = VideoFile(path=Path(self.original), metadata=copy.deepcopy(video.metadata))
         self.work.check = video.check
         self.work.stamp_stale = video.stamp_stale
+        try:
+            self.start_mtime: float | None = os.path.getmtime(self.original)  # before Redact's own save touches it
+        except OSError:
+            self.start_mtime = None
         self.current = self.original  # the newest content: the original, or a scratch copy
         self.content_changed = False
         self.scratches: list[str] = []
@@ -1300,6 +1305,68 @@ class MoveIntoFoldersStep(PatternStep):
         return _with_note(StepResult.applied(text), "; ".join(problems))
 
 
+# --- step 9: convert to MP4/MKV and ingest subtitles (after the save) --------------------
+
+
+class ConvertStep(VideoStep):
+    key = "convert_library"
+    label = "Convert to MP4/MKV and ingest subtitles"
+    description = (
+        "Leaves the finished file ready for a media server: a legacy container (AVI, WMV, MOV...) becomes MP4 or "
+        "MKV by stream copy (only video no container can hold is re-encoded); series episodes over the bitrate "
+        "limits are re-encoded and scaled to 720p; external .srt files beside the video are muxed in (an MP4 "
+        "becomes an MKV) and removed afterwards. Every result is verified before the swap and the original goes "
+        "to the Recycle Bin or the quarantine folder (or is deleted, if you turned that on). Disc images are "
+        "left alone. All limits are in Preferences > Conversion; Preferences > Library safety starts in dry-run, "
+        "which lists what would happen and changes nothing. Off by default."
+    )
+    position = "after_save"
+    run_when_unchanged = True
+    default_enabled = False
+
+    def execute(self, ctx: VideoCtx) -> StepResult:
+        setting = ctx.env.setting
+        safety = library_safety.get_safety_settings(setting)
+        conv = conversion_plan.get_conversion_settings(setting)
+        path = str(ctx.video.path)
+        quarantine = safety.quarantine_root
+        log = None
+        if quarantine:
+            log_folder = safety.undo_log_folder or os.path.join(quarantine, "_undo logs")
+            log = library_safety.UndoLog(os.path.join(log_folder, f"undo {library_safety.stamp_now()[:10]}.tsv"))
+        run = library_safety.SafeRun(
+            library_root=setting("rename", "library_root", "").strip(), quarantine_root=quarantine, log=log,
+            dry_run=safety.dry_run, recent_minutes=safety.recent_minutes, trash=ctx.env.trash,
+            delete_after_conversion=safety.delete_after_conversion,
+            tolerance_seconds=safety.duration_tolerance_seconds, tolerance_fraction=safety.duration_tolerance_fraction,
+        )
+        if ctx.start_mtime is not None and os.path.normcase(path) == os.path.normcase(ctx.original):
+            run.known_mtime[path] = ctx.start_mtime  # Redact's own save must not make the file look "in use"
+        is_series = ctx.video.metadata.content_type != ContentType.MOVIE
+        try:
+            outcome = ctx.bg(conversion_run.process_file, run, path, conv, is_series=is_series)
+        except library_safety.SafetyError as exc:
+            return StepResult.failed(f"not converted, the file is untouched: {exc}")
+        skipped = [a for a in run.actions if a.verb == "skip"]
+        if not outcome.converted:
+            note = skipped[0].detail if skipped else outcome.message
+            return StepResult.nothing(note=note)
+        if safety.dry_run:
+            return StepResult.nothing(note="dry run, nothing changed: " + "; ".join(str(a) for a in run.actions))
+        # The tags the app had written are carried by ffmpeg only where the container allows; write them again.
+        keep = copy.deepcopy(ctx.video.metadata)
+        ctx.video.path = Path(outcome.final_path)
+        ctx.video.metadata = keep
+        ctx.video.save_error = ""
+        ctx.bg(ctx.video.save)
+        problem = ctx.video.save_error
+        ctx.bg(ctx.video.load)
+        ctx.video.dirty = False
+        done = [f"{a.verb}: {os.path.basename(a.path)}" for a in run.actions if a.done]
+        result = StepResult.applied(f"converted to {os.path.basename(outcome.final_path)} ({'; '.join(done)})")
+        return _with_note(result, f"converted, but the tags could not be rewritten: {problem}" if problem else "")
+
+
 # --- catalogue and recipe ----------------------------------------------------------------
 
 
@@ -1322,6 +1389,7 @@ def build_catalogue(
         LookupStep(),
         SubtitlesStep(),
         RemuxStep(),
+        ConvertStep(),
         RenameStep(default_enabled=bool(latest_file_pattern(env.pattern_history())), env=env, sample=sample),
         MoveIntoFoldersStep(env=env, sample=sample),
     ]

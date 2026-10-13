@@ -312,8 +312,20 @@ def _mp4_subtitle_ok(codec: str) -> bool:
     return codec in TEXT_SUBTITLES
 
 
+@dataclass
+class AddedSub:
+    """An external subtitle (a UTF-8 .srt file) to mux in as a new track."""
+
+    path: str
+    language: str = "und"
+    title: str = ""
+    default: bool = False
+    hearing_impaired: bool = False
+
+
 def build_ffmpeg_args(
     info: MediaInfo, plan: Plan, src: str, out: str, settings: ConversionSettings | None = None, *, cuda: bool = True,
+    added: list[AddedSub] | None = None,
 ) -> list[str]:
     """The ffmpeg argument LIST (never a shell string). Streams are mapped explicitly: cover art is not video,
     data/timecode tracks are dropped (-dn), audio and kept subtitles are copied. For an MP4 target text
@@ -325,7 +337,12 @@ def build_ffmpeg_args(
     if scaling and cuda:
         args += ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
     args += ["-fflags", "+genpts", "-i", src]
+    added = added or []
+    for extra in added:
+        args += ["-i", extra.path]
     mp4 = plan.container == ".mp4"
+    if added and mp4:
+        raise ValueError("external subtitles go into an MKV, not an MP4")
 
     for v in info.of("video"):
         args += ["-map", f"0:{v.index}"]
@@ -334,6 +351,8 @@ def build_ffmpeg_args(
     kept_subs = [t for t in info.of("subtitle") if not mp4 or _mp4_subtitle_ok(t.codec)]
     for t in kept_subs:
         args += ["-map", f"0:{t.index}"]
+    for n, _extra in enumerate(added, start=1):
+        args += ["-map", f"{n}:0"]
     args += ["-dn"]
 
     if plan.video == V_COPY:
@@ -349,8 +368,16 @@ def build_ffmpeg_args(
         args += ["-c:a", "aac", "-b:a", s.fallback_audio_bitrate]
     else:
         args += ["-c:a", "copy"]
-    if kept_subs:
+    if kept_subs or added:
         args += ["-c:s", "mov_text" if mp4 else "copy"]
+    first = len(kept_subs)
+    for n, extra in enumerate(added):
+        position = first + n
+        args += [f"-metadata:s:s:{position}", f"language={extra.language}"]
+        if extra.title:
+            args += [f"-metadata:s:s:{position}", f"title={extra.title}"]
+        flags = [f for f, on in (("default", extra.default), ("hearing_impaired", extra.hearing_impaired)) if on]
+        args += [f"-disposition:s:{position}", "+".join(flags) if flags else "0"]
     args += [out]
     return args
 

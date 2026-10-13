@@ -17,12 +17,14 @@ Verification (before the swap):
 from __future__ import annotations
 
 import os
+import tempfile
 from dataclasses import dataclass
 from typing import Callable
 
 from core import conversion_plan as cp
 from core.ffmpeg_backend import _run_ffmpeg, probe_media
-from core.library_safety import KIND_REMUXED, KIND_RESIZED, SafeRun
+from core import subtitle_ingest as si
+from core.library_safety import KIND_CLEANUP, KIND_REMUXED, KIND_RESIZED, SafeRun
 
 DURATION_TOLERANCE = 1.5
 STALE_HEADER_TOLERANCE = 60.0
@@ -100,13 +102,15 @@ def convert_file(
     info: cp.MediaInfo,
     settings: cp.ConversionSettings,
     *,
-    added_subtitles: int = 0,
+    added: list[cp.AddedSub] | None = None,
     cancel_event=None,
     runner: Callable = _run_ffmpeg,
     probe: Callable[[str], cp.MediaInfo | None] = probe_media,
 ) -> ConversionOutcome:
     """Convert `source` per `plan` through `run` (dry-run, recent-file guard, verified swap, Recycle Bin /
     quarantine). `runner`/`probe` are injectable for tests."""
+    added = added or []
+    added_subtitles = len(added)
     if plan.skip_reason or not plan.container:
         return ConversionOutcome(False, message=plan.skip_reason or "nothing to do")
     final = os.path.splitext(source)[0] + plan.container
@@ -119,7 +123,7 @@ def convert_file(
         for cuda in attempts:
             if os.path.lexists(temp):
                 os.remove(temp)
-            args = cp.build_ffmpeg_args(info, plan, src, temp, settings, cuda=cuda)
+            args = cp.build_ffmpeg_args(info, plan, src, temp, settings, cuda=cuda, added=added)
             code, stderr = runner(args, cancel_event=cancel_event, timeout=CONVERT_TIMEOUT_SECONDS)
             if code == 0:
                 return True, ""
@@ -138,3 +142,63 @@ def convert_file(
         detail = run.actions[-1].detail if run.actions else "not converted"
         return ConversionOutcome(False, message=detail)
     return ConversionOutcome(True, final_path=final, message=run.actions[-1].detail)
+
+
+def embedded_subtitle_texts(info: cp.MediaInfo, source: str) -> list[str]:
+    """The text of each embedded text subtitle (ffmpeg -> SubRip on stdout), for the duplicate check."""
+    from core.ffmpeg_backend import _run  # noqa: PLC0415
+
+    texts = []
+    for track in info.of("subtitle"):
+        if track.codec not in cp.TEXT_SUBTITLES:
+            continue
+        result = _run(["ffmpeg", "-v", "error", "-i", source, "-map", f"0:{track.index}", "-f", "srt", "-"], timeout=300)
+        if result is not None and result.returncode == 0 and result.stdout:
+            texts.append(result.stdout)
+    return texts
+
+
+def process_file(
+    run: SafeRun,
+    source: str,
+    settings: cp.ConversionSettings,
+    *,
+    is_series: bool = True,
+    probe: Callable[[str], cp.MediaInfo | None] = probe_media,
+    embedded_texts: Callable[[cp.MediaInfo, str], list[str]] = embedded_subtitle_texts,
+    reader=None,
+    **convert_kwargs,
+) -> ConversionOutcome:
+    """The whole job for one file: probe, find and prepare the external .srt files, plan, convert (verified swap),
+    then remove the ingested .srt files. A file with nothing to do returns converted=False with the reason."""
+    info = probe(source)
+    if info is None:
+        return ConversionOutcome(False, message="couldn't read the file (ffprobe failed)")
+    externals = [] if info.ext in cp.DISC_EXTENSIONS else si.find_external_subs(source)
+    for ext_sub in externals:
+        si.load(ext_sub, reader=reader)
+    chosen = si.prepare(
+        externals, video_had_subtitles=bool(info.of("subtitle")), whitelist=si.language_whitelist(settings.subtitle_languages),
+    )
+    if chosen and info.of("subtitle"):
+        embedded = embedded_texts(info, source)
+        chosen = [s for s in chosen if not si.duplicate_of_embedded(s.text, embedded)]
+    plan = cp.plan_conversion(info, settings, is_series=is_series, extra_subtitles=len(chosen))
+    if plan.needs_review:
+        return ConversionOutcome(False, message=plan.needs_review)
+    if not plan.does_something:
+        return ConversionOutcome(False, message=plan.skip_reason or "nothing to do")
+    with tempfile.TemporaryDirectory(prefix="videoredactor-subs-") as folder:
+        added = []
+        for n, s in enumerate(chosen):
+            path = os.path.join(folder, f"{n:02d}.srt")
+            if not run.dry_run:
+                with open(path, "w", encoding="utf-8", newline="") as f:
+                    f.write(s.text)
+            added.append(cp.AddedSub(path, s.language, s.title, s.default, s.hearing_impaired))
+        outcome = convert_file(run, source, plan, info, settings, added=added, probe=probe, **convert_kwargs)
+    if outcome.converted:
+        # Only the files that went into the video are removed; a skipped duplicate stays where it is.
+        for s in chosen:
+            run.dispose(s.path, KIND_CLEANUP, "subtitle ingested into the video")
+    return outcome

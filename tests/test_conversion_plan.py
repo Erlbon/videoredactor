@@ -158,3 +158,21 @@ def test_conversion_settings_roundtrip_defaults_and_damage():
     store[("conversion", "disc_images")] = "bogus"
     back = cp.get_conversion_settings(get)
     assert back.nvenc_cq == 30 and back.disc_images == cp.DISC_LEAVE
+
+
+def test_ffmpeg_args_added_subtitles():
+    m = info(".mkv", size=300 * MB, h=480, w=640, subs=("subrip",))
+    plan = cp.Plan(container=".mkv", reasons=["x"])
+    added = [
+        cp.AddedSub("C:/t/en.srt", "eng", "", default=False),
+        cp.AddedSub("C:/t/en2.srt", "eng", "(SDH)", hearing_impaired=True),
+    ]
+    a = cp.build_ffmpeg_args(m, plan, "in.mkv", "out.mkv", added=added)
+    assert a.count("-i") == 3 and "1:0" in a and "2:0" in a
+    assert a.index("-i") < a.index("1:0")
+    assert "-metadata:s:s:1" in a and "language=eng" in a and "title=(SDH)" in a  # position after the kept one
+    assert a[a.index("-disposition:s:2") + 1] == "hearing_impaired" and a[a.index("-disposition:s:1") + 1] == "0"
+    assert a[a.index("-c:s") + 1] == "copy"
+    import pytest
+    with pytest.raises(ValueError):
+        cp.build_ffmpeg_args(m, cp.Plan(container=".mp4", reasons=["x"]), "in", "out.mp4", added=added)

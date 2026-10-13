@@ -284,6 +284,7 @@ class SafeRun:
     day: date = field(default_factory=date.today)
     clock: Callable[[], float] = time.time
     trash: Callable[[str], None] | None = None  # Recycle Bin mover when no quarantine folder is set
+    known_mtime: dict[str, float] = field(default_factory=dict)  # path -> modified time to trust instead of the disk's
     probe: Callable[[str], tuple[dict[str, int], float | None] | None] | None = None  # ffmpeg_backend._stream_summary
     actions: list[Action] = field(default_factory=list)
 
@@ -294,7 +295,10 @@ class SafeRun:
 
     def is_recent(self, path: str) -> bool:
         try:
-            return self.clock() - os.path.getmtime(path) < self.recent_minutes * 60
+            modified = self.known_mtime.get(path)
+            if modified is None:
+                modified = os.path.getmtime(path)
+            return self.clock() - modified < self.recent_minutes * 60
         except OSError:
             return True  # can't tell: leave it alone
 
@@ -334,6 +338,21 @@ class SafeRun:
             self.log.moved(dest, path)
         action.done = True
         return dest
+
+    def dispose(self, path: str, kind: str, reason: str) -> bool:
+        """A file that has served its purpose (an external subtitle now inside the video): deleted when
+        delete_after_conversion is on, else quarantined / Recycle Bin like any replaced file."""
+        if not self.delete_after_conversion:
+            return self.quarantine(path, kind, reason) is not None
+        busy = self.busy_reason(path)
+        if busy:
+            self._note("skip", path, "left alone", busy)
+            return False
+        action = self._note("delete", path, "deleted (delete-after-conversion is on)", reason)
+        if not self.dry_run:
+            os.remove(path)
+            action.done = True
+        return True
 
     def rename(self, src: str, dst: str, reason: str) -> bool:
         """Renames/moves without ever overwriting."""

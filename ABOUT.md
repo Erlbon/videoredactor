@@ -213,8 +213,8 @@ Guesses below the confidence threshold are listed under "needs review" and not a
 | `--trash-dir FOLDER` | Move originals into this folder (created if needed) instead of the Recycle Bin, for a machine or a task that has none. |
 | `--list-steps` | Show the steps and whether the recipe has each on, then stop (no `PATH` needed). |
 
-Steps: `check_repair`, `filename_tags`, `path_tags`, `lookup`, `subtitles`, `remux_mkv_to_mp4`, `rename`,
-`move_into_folders`. Without `--recipe` the recipe saved in the app is used (the defaults if none was saved). A
+Steps: `check_repair`, `filename_tags`, `path_tags`, `lookup`, `subtitles`, `remux_mkv_to_mp4`, `convert_library`,
+`rename`, `move_into_folders`. Without `--recipe` the recipe saved in the app is used (the defaults if none was saved). A
 repair is only automatic when a lossless remux fully fixes the file; a damaged file is reported and left alone.
 Exit code 1 if any file failed; files that need review are not failures. Rename and Move run last, after the
 file is saved, and also on a file that had nothing to save. A `--recipe` file that is not valid JSON or not a
