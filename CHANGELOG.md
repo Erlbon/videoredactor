@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-14#01 -- Check File on the IMDb database no longer freezes the window
+
+- The "Check File" button in the IMDb database dialog now runs the check off the GUI thread under a progress dialog (redactor_common 2026-10-14-01); before, opening a big database file could freeze the window.
+- Requires redactor_common 2026-10-14-01.
+
 ## 2026-10-13#12 -- Redact no longer freezes the window on a slow file
 
 - Redact now runs each file on a worker thread (redactor_common 2026-10-13-06): the window keeps painting and Cancel stays clickable while a big save, a conversion, an ffmpeg call or a lookup is running, and Cancel stops a running encode at once. Before, the window could freeze for the whole length of one slow file and the Cancel click was only seen between files.
