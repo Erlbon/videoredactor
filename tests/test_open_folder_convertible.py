@@ -64,3 +64,21 @@ def test_declining_converts_nothing_and_no_prompt_on_the_launch_restore(window, 
     assert calls == []
     monkeypatch.setattr(QMessageBox, "exec", lambda self: pytest.fail("no prompt when restoring the last folder at launch"))
     window._load_folder(folder, recursive=True, status_suffix=" (restored from last session)")
+
+
+def test_include_subfolders_is_the_shared_checkbox_remembered_in_the_ini(window, monkeypatch, tmp_path):
+    import gui.main_window as mw
+
+    assert mw._load_include_subfolders() is True  # on by default
+    mw._save_include_subfolders(False)
+    assert mw._load_include_subfolders() is False
+    # Open Folder asks no question and follows the setting
+    seen = {}
+    monkeypatch.setattr(window, "_load_folder", lambda folder, recursive, status_suffix="": seen.update(recursive=recursive))
+    monkeypatch.setattr("gui.main_window.QFileDialog.getExistingDirectory", lambda *a, **k: str(tmp_path))
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: pytest.fail("no subfolder question any more"))
+    window._on_open_folder()
+    assert seen["recursive"] is False
+    mw._save_include_subfolders(True)
+    window._on_open_folder()
+    assert seen["recursive"] is True

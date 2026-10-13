@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-13#07 -- Shared Include Subfolders item; folder scans show progress
+
+- **File > Include Subfolders** is now redactor_common's shared menu item (on by default, remembered in the settings file) and replaces the "Include Subfolders?" question Open Folder asked whenever a folder had subfolders. It also decides what Refresh List and the folder restored at launch look at. Before, subfolders were off unless you answered Yes each time.
+- The folder walks (Open Folder, the "other video formats" check, Refresh List) run in the background under a progress dialog, so a big or networked library no longer looks frozen.
+- Requires redactor_common 2026-10-13-02.
+
 ## 2026-10-13#06 -- Open Folder offers to convert other video formats
 
 - After Open Folder (with its subfolders, if you chose to include them), the app now says when the folder also holds video files in other formats (AVI, WMV, MOV, FLV, MPG, WebM, OGM, 3GP, ASF, DivX, RM...) and offers to convert them to MP4/MKV beside the originals, with the full list under "Show Details". Before, a folder of AVI files loaded "0 files" without a word. Disc images (`.vob`) and `.ts` are not announced, the app's own temp files never are, and nothing is asked when the last folder is restored at launch.

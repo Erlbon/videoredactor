@@ -31,7 +31,7 @@ def test_headings_are_the_skeleton_in_order(window):
 def test_file_menu_group_order(window):
     shape = ["-" if a.isSeparator() else a.text().replace("&", "") for a in _menus(window)["File"].actions()]
     assert shape == [
-        "Open Files…", "Open Folder…", "Import and Convert…", "-",
+        "Open Files…", "Open Folder…", "Include Subfolders", "Import and Convert…", "-",
         "Save All", "-",
         "Rename File…", "Undo Last Rename", "Rename / Export / Move…", "-",
         "Export Settings…", "Import Settings…", "-",

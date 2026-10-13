@@ -78,7 +78,8 @@ from core.app_paths import base_dir
 from redactor_common.gui.rename_pattern_dialog import RenamePatternDialog
 from redactor_common.gui.search_replace_dialog import FILENAME_FIELD_KEY, SearchReplaceDialog
 from redactor_common.gui.move_runner import run_planned_moves
-from redactor_common.gui.progress import ProgressReporter, run_with_progress
+from redactor_common.gui.folder_options import attach_include_subfolders, include_subfolders_slot
+from redactor_common.gui.progress import ProgressReporter, run_busy, run_with_progress
 from redactor_common.gui.redact_dialog import RecipeEditorDialog, RedactResultsDialog
 from redactor_common.gui.redact_dialog import run_redact as run_redact_dialog
 from redactor_common.gui.colors import (
@@ -275,6 +276,15 @@ class _TranscodeWorker(QThread):
             except Exception as exc:  # noqa: BLE001 -- reported per file
                 ok, message = False, str(exc) or type(exc).__name__
             self.file_finished.emit(i, ok, message)
+
+
+def _load_include_subfolders() -> bool:
+    """File > Include Subfolders: ON unless turned off (the shared setting every Redactor app has)."""
+    return get_setting("general", "include_subfolders", "1") != "0"
+
+
+def _save_include_subfolders(on: bool) -> None:
+    set_setting("general", "include_subfolders", "1" if on else "0")
 
 
 def _claim_output(output: Path, claimed: set[str]) -> bool:
@@ -476,6 +486,7 @@ class MainWindow(QMainWindow):
             file=_tidy(_drop_keys(standard_file_items(
                 open_files=self._on_open_files,
                 open_folder=self._on_open_folder,
+                include_subfolders=include_subfolders_slot(),
                 import_and_convert=self._on_import_and_convert,
                 # One Save: it saves EVERY changed file (Ctrl+S and
                 # Ctrl+Shift+A). A save-selected-only entry is gone: it was
@@ -572,6 +583,9 @@ class MainWindow(QMainWindow):
         # as self.<x>_action attributes directly.
         self.open_files_action = registry["open_files"]
         self.open_folder_action = registry["open_folder"]
+        attach_include_subfolders(
+            registry["include_subfolders"], load=_load_include_subfolders, save=_save_include_subfolders,
+        )
         self.save_all_action = registry["save_all"]
         self.rename_file_action = registry["rename_file"]
         self.remove_from_list_action = registry["remove_from_list"]
@@ -1077,21 +1091,8 @@ class MainWindow(QMainWindow):
         folder_path = Path(folder)
         set_setting("general", "last_folder", str(folder_path))
 
-        recursive = False
-        if has_subfolders(folder_path):
-            # Only asked when there's actually something to ask about --
-            # prompting on every folder open, including ones with no
-            # subfolders at all, would just be a pointless extra click.
-            reply = QMessageBox.question(
-                self, "Include Subfolders?",
-                f"\"{folder_path.name}\" contains subfolders. "
-                "Include video files from subfolders too?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,  # default: match the epub tool's non-recursive default
-            )
-            recursive = reply == QMessageBox.StandardButton.Yes
-
-        self._load_folder(folder_path, recursive=recursive)
+        # File > Include Subfolders (redactor_common's shared item) decides; no question is asked any more.
+        self._load_folder(folder_path, recursive=_load_include_subfolders())
 
     def _load_folder(self, folder_path: Path, recursive: bool, status_suffix: str = "") -> None:
         """Shared loading routine -- discovers files, shows the
@@ -1105,7 +1106,7 @@ class MainWindow(QMainWindow):
         caller to duplicate the whole message-assembly logic below.
         """
         ignored: list[Path] = []
-        paths = discover_video_files(folder_path, recursive=recursive, ignored=ignored)
+        paths = run_busy(self, "Looking for video files...", discover_video_files, folder_path, recursive=recursive, ignored=ignored)
 
         # Replaces self.video_files wholesale -- shared by both Open Folder
         # and the startup restore below, so this one check covers both call
@@ -1153,7 +1154,7 @@ class MainWindow(QMainWindow):
     def _offer_import_of_convertible(self, folder_path: Path, recursive: bool, loaded: int) -> None:
         """Open Folder loads only MP4/MKV. Say what else Import & Convert could bring in from the folder (and its
         subfolders, if included), and offer to convert it."""
-        others = discover_convertible_files(folder_path, recursive=recursive)
+        others = run_busy(self, "Looking for other video formats...", discover_convertible_files, folder_path, recursive=recursive)
         if not others:
             return
         kinds = ", ".join(sorted({p.suffix.lstrip(".").upper() for p in others}))
@@ -1196,9 +1197,11 @@ class MainWindow(QMainWindow):
             return
 
         existing_paths = [str(vf.path) for vf in self.video_files]
-        new_paths = find_new_files_in_loaded_folders(
+        recursive = _load_include_subfolders()
+        new_paths = run_busy(
+            self, "Looking for new files...", find_new_files_in_loaded_folders,
             existing_paths,
-            lambda folder: [str(p) for p in discover_video_files(Path(folder), recursive=False)],
+            lambda folder: [str(p) for p in discover_video_files(Path(folder), recursive=recursive)],
         )
         # Files that are gone from disk are dropped; only present ones are shown.
         present_paths = [p for p in existing_paths if os.path.exists(p)]
@@ -1250,11 +1253,7 @@ class MainWindow(QMainWindow):
         an error dialog interrupting the very first thing the user
         sees when opening the app.
 
-        Deliberately non-recursive with no subfolder prompt, even if
-        the folder has subfolders and was originally loaded
-        recursively -- asking a modal question immediately on launch,
-        before the user has gotten oriented, would be jarring; a
-        recursive re-load is one manual Open Folder away if wanted.
+        Follows File > Include Subfolders like a manual Open Folder (no question is asked on launch).
         """
         last_folder = get_setting("general", "last_folder", "")
         if not last_folder:
@@ -1262,7 +1261,7 @@ class MainWindow(QMainWindow):
         folder_path = Path(last_folder)
         if not folder_path.is_dir():
             return
-        self._load_folder(folder_path, recursive=False, status_suffix=" (restored from last session)")
+        self._load_folder(folder_path, recursive=_load_include_subfolders(), status_suffix=" (restored from last session)")
 
     # --- Table rendering ---------------------------------------------------
 
