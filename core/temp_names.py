@@ -9,6 +9,8 @@ listed. The patterns mirror the names the app writes:
 
 - ``<stem>.repairing<ext>``   core/file_check.repair_path (Check Files > Repair)
 - ``<stem>.partial<ext>``     core/ffmpeg_backend.partial_path (remux/convert)
+- ``<stem>.part<ext>`` / ``<stem>.resize<ext>``
+                              core/library_safety.temp_name (conversion in progress)
 - ``<stem>.redact-orig<ext>`` / ``<stem>.redact-orig<N><ext>``
                               redactor_common commit_in_place backup
 - ``.<stem>.redact-<8 hex><ext>``
@@ -25,6 +27,7 @@ import re
 # user name that merely contains the word ("My.Partial.Cut.mkv") is not hit.
 _TEMP_NAME_PATTERNS = (
     re.compile(r"^.+\.(?:repairing|partial)\.[^.]+$", re.IGNORECASE),
+    re.compile(r"^.+\.(?:part|resize)\.[^.]+$", re.IGNORECASE),  # core/library_safety temp names
     re.compile(r"^.+\.redact-orig\d*\.[^.]+$", re.IGNORECASE),
     re.compile(r"^\..+\.redact-[0-9a-f]{8}\.[^.]+$", re.IGNORECASE),
 )

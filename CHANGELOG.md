@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-10-13#01 -- Library safety layer (foundation for the clean-up rules)
+
+- New `core/library_safety.py`: the hard rules every library-cleaning operation will run through. Replaced or superseded files are MOVED to a quarantine folder that mirrors their library-relative path, in a dated subfolder per kind (`remuxed originals`, `duplicates`, `defective`, `cleanup`, `resized originals` + date); nothing is deleted and a quarantine never overwrites.
+- Every change is written to a UTF-8 TSV undo log (`new_path<TAB>old_path`, `path<TAB>CREATED`), line by line as it happens, so undoing in reverse order works (`undo_log()` moves moved files back and puts created files in an `undone` folder, never deleting).
+- A conversion writes to `<name>.part` / `<name>.resize` beside the source, is verified with ffprobe (video present, same number of audio and subtitle tracks, duration within tolerance either way) and only then swapped in; a failed check deletes only the temp file. Dry-run lists every action with its reason and touches nothing; a file modified in the last 10 minutes is never touched.
+- Setting `delete_after_conversion` (off by default, Preferences > Library safety): when on, a VERIFIED conversion deletes its original instead of quarantining it (not undoable). A failed verification still keeps the original. Everything else is quarantine-only.
+- Preferences > Library safety (and `videoredactor_settings.ini` `[safety]`): quarantine folder, undo-log folder, dry run (on by default), recent-file minutes, duration tolerance. The quarantine folder is empty until chosen, and nothing that replaces a file runs without one.
+- `ffmpeg_command()` builds argument lists with `-v error -y` and `-ss` before `-i`; `.part` / `.resize` temp names are ignored by folder scans.
+- Not wired into Redact yet: the concrete clean-up rules (containers, codecs, bitrate, subtitles, names, junk) come next and will use this layer.
+
 ## 2026-10-11#01 -- Import & Convert takes OGM files
 
 - File > Import & Convert now accepts `.ogm` (old DivX/Xvid rips with Vorbis audio and text subtitles). An OGM is repackaged to an `.mkv` without re-encoding: fast, lossless, and the subtitles and extra audio tracks are kept (an MP4 would have forced an audio re-encode and dropped the subtitles). Need MP4 afterwards? Run Media > Convert to MP4 on the MKV as a second pass.

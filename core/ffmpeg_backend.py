@@ -381,6 +381,16 @@ def transcode_to_mp4(
         _remove_quietly(temp)  # no-op after a successful rename
 
 
+def ffmpeg_command(input_path: str, *extra: str, seek: Optional[float] = None) -> list[str]:
+    """An ffmpeg argument LIST (never a shell string: ffmpeg.exe can't open an MSYS-style "/f/Video/..."
+    path) with "-v error -y" and, for a fast seek, "-ss" BEFORE "-i". `extra` follows the input (maps,
+    codecs, output). run through _run()/_run_ffmpeg(), which give stdin=DEVNULL."""
+    args = ["ffmpeg", "-v", "error", "-y"]
+    if seek is not None:
+        args += ["-ss", str(seek)]
+    return [*args, "-i", input_path, *extra]
+
+
 def probe_technical_info(path: str) -> dict:
     """Extract read-only technical fields (resolution, codecs, bitrate,
     duration, frame rate, container) via ffprobe -- format-agnostic, so
