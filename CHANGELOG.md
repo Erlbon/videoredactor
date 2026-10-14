@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-14#08 -- Media > Preview: a read-only player window
+
+- New: Media > Preview... (Ctrl+Shift+P, also in the file list's right-click menu) opens the selected video in its own player window: play/pause, seek, volume, and pickers for the audio track and the subtitle track. It needs exactly one file selected and says so in the status bar otherwise. The preview only reads the file; it never writes to it.
+- The player is redactor_common's shared `media_preview` window. Requires redactor_common 2026-10-14-07.
+
 ## 2026-10-14#07 -- One season & episode picker, one search dialog, the conversion worker on redactor_common
 
 - Internal clean-up, no change in what the dialogs show or do. The TMDB, TheTVDB and IMDb (Local Database) season & episode pickers were the same dialog written three times; they are now one shared dialog (`gui/episode_picker_dialog.py`) with a small source for each (TMDB still fetches each season when it is picked, TheTVDB still loads the whole episode list once, IMDb still reads the local database). The three pickers went from 467 to 353 lines.

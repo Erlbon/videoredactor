@@ -56,7 +56,7 @@ def test_other_menus_hold_what_the_spec_says(window):
         "Subtitles (OpenSubtitles)…",
     ]
     assert _labels(menus["Media"]) == [
-        "Remux to MP4…", "Convert to MP4 (H.264)…", "Convert to MP4/MKV (Rules)…", "Check Files…", "Find Duplicates…",
+        "Preview…", "Remux to MP4…", "Convert to MP4 (H.264)…", "Convert to MP4/MKV (Rules)…", "Check Files…", "Find Duplicates…",
     ]
     assert _labels(menus["Tools"]) == [
         "Preferences…", "API Keys…", "External Tools…", "IMDb Database…", "Columns…", "Genres…", "Languages…",
@@ -287,7 +287,7 @@ def test_context_menu_follows_the_skeleton(window, monkeypatch):
         return out
 
     assert shape(seen["single"]) == [
-        "-", "Rename File…", "-", "Look Up", "Organize", "-", "Redact", "-", "Remove from List",
+        "-", "Rename File…", "-", "Preview…", "-", "Look Up", "Organize", "-", "Redact", "-", "Remove from List",
     ]
     assert shape(seen["multi"]) == ["-", "Look Up", "Organize", "-", "Redact", "-", "Remove from List"]
     organize = next(i for i in seen["single"] if isinstance(i, mw.Submenu) and i.text == "Organize")

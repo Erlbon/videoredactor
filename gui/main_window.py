@@ -539,6 +539,9 @@ class MainWindow(QMainWindow):
                 # Only the heavy video-specific operations: what acts on the
                 # container/streams rather than on tags.
                 AppMenu(labels.MENU_MEDIA, [
+                    # Read-only player in its own window (audio/subtitle track pickers). Ctrl+Shift+P: free.
+                    MenuAction("preview", "&Preview…", self._on_preview_selected, shortcut="Ctrl+Shift+P"),
+                    Separator(),
                     # Ctrl+Shift+M (M for MP4): Ctrl+R is Refresh List in the whole family.
                     MenuAction("remux", "&Remux to MP4…", self._on_remux_selected, shortcut="Ctrl+Shift+M"),
                     MenuAction("convert_to_mp4", "Con&vert to MP4 (H.264)…", self._on_convert_to_mp4,
@@ -1498,6 +1501,8 @@ class MainWindow(QMainWindow):
             # Every lookup from the Metadata menu, so none needs a trip to
             # the menu bar (no shortcuts here: they already live on the
             # menu's own actions).
+            if len(files) == 1 and not files[0].load_error:
+                items.extend([self.actions_by_key["preview"], Separator()])
             items.append(Submenu("Look Up", self._look_up_entries("ctx_", with_shortcuts=False)))
             items.append(Submenu("Organize", [
                 self.actions_by_key["rename_export_move"],
@@ -1512,6 +1517,18 @@ class MainWindow(QMainWindow):
             get_path=lambda vf: vf.path,
             extra_items=extra_items,
         )
+
+    def _on_preview_selected(self) -> None:
+        """Media > Preview...: opens the shared read-only player window for the one selected file."""
+        files = self._selected_video_files()
+        if len(files) != 1:
+            self.status_bar.showMessage("Preview needs exactly one file selected")
+            return
+        if files[0].load_error:
+            self.status_bar.showMessage(f"Can't preview {files[0].path.name}: it failed to load")
+            return
+        from redactor_common.gui.media_preview import show_media_preview
+        show_media_preview(self, str(files[0].path), video=True)
 
     def _on_cell_double_clicked(self, row: int, col: int) -> None:
         if not (0 <= col < len(self._column_order)) or self._column_order[col] != "filename":
