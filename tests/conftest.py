@@ -26,6 +26,19 @@ def _isolated_rename_log(monkeypatch, tmp_path):
     monkeypatch.setattr(main_window, "_rename_log", lambda: log)
 
 
+@pytest.fixture(autouse=True)
+def journal(tmp_path):
+    """The Tools > History journal (core/history.py) lives next to the settings -- the project folder when
+    running from source. Every test gets its own in tmp_path instead (and can inspect it as `journal`). History
+    is opt-in: it stays off (nothing written) unless a test turns it on with history.set_history_enabled(True)."""
+    from core import history
+
+    j = history.GatedJournal(str(tmp_path / "journal" / "videoredactor_journal.jsonl"))
+    history.set_journal(j)
+    yield j
+    history.set_journal(None)
+
+
 class FakeKeyring:
     """In-memory stand-in for the OS credential store (keyring's API)."""
 

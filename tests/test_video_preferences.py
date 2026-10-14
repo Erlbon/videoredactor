@@ -34,7 +34,7 @@ def test_every_storage_key_is_one_the_settings_bundle_already_exports():
 
 def test_pages_and_defaults():
     dlg = VideoPreferencesDialog()
-    assert dlg.page_titles() == ["Filenames", "Transcode", "Duplicates", "Tools / Paths", "Conversion", "Library safety"]
+    assert dlg.page_titles() == ["Filenames", "Transcode", "Duplicates", "Tools / Paths", "Conversion", "Library safety", "History"]
     assert dlg.value("zero_pad_width") == 2 and dlg.value("crf") == 23
     assert dlg.value("audio_bitrate") == "128k" and dlg.value("threads") == 0
     assert dlg.value("duplicate_threshold") == 6

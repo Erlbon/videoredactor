@@ -48,7 +48,7 @@ from core.redact_steps import (
     RedactEnv, VideoCtx, build_catalogue, dry_run_line, finalize_file, load_recipe, make_safe_run,
     original_fate_text, pin_patterns, recipe_is_saved, save_recipe,
 )
-from core import conversion_plan, conversion_run, library_safety
+from core import conversion_plan, conversion_run, history, library_safety
 from core.ffmpeg_backend import (
     IMPORTABLE_EXTENSIONS, kill_running_ffmpeg, remux_to_mkv, remux_to_mp4,
     transcode_to_mp4, verify_remux,
@@ -82,6 +82,7 @@ from redactor_common.gui.search_replace_dialog import FILENAME_FIELD_KEY, Search
 from redactor_common.gui.move_runner import run_planned_moves
 from redactor_common.gui.folder_options import attach_include_subfolders, include_subfolders_slot
 from redactor_common.gui.progress import ProgressReporter, run_busy, run_with_progress
+from redactor_common.gui.history_dialog import HistoryDialog
 from redactor_common.gui.redact_dialog import RecipeEditorDialog, RedactResultsDialog
 from redactor_common.gui.redact_dialog import run_redact as run_redact_dialog
 from redactor_common.gui.colors import (
@@ -220,6 +221,13 @@ def _error_details(lines: list[str]) -> str:
     batch of hundreds of files used to produce a message box taller
     than the screen, with its OK button out of reach."""
     return f"{len(lines)} file(s):\n\n{summarize_errors(lines)}"
+
+
+def _journal_problem_note() -> str:
+    """A Tools > History journal problem not shown yet, as a status-bar suffix ("" when none): a journal
+    failure never fails a save, it is surfaced once here."""
+    problem = history.take_problem()
+    return f" -- {problem}" if problem else ""
 
 
 class _TranscodeWorker(QThread):
@@ -555,6 +563,7 @@ class MainWindow(QMainWindow):
                 columns=self._on_open_column_visibility,
                 genres=self._on_open_genres,
                 languages=self._on_open_languages,
+                history=self._on_open_history,
             )),
             help=standard_help_items(
                 APP_NAME, self._on_show_changelog, self._on_show_credits, self._on_show_about,
@@ -808,6 +817,58 @@ class MainWindow(QMainWindow):
         if hidden != before:
             set_setting("table", "hidden_columns", ",".join(sorted(hidden)))
             self._on_column_visibility_changed_via_settings()
+
+    def _on_open_history(self) -> None:
+        """Tools > History...: the operations journal (every tag change this app made, with the old values)
+        in redactor_common's HistoryDialog. A restore runs on a worker thread (the dialog's run_busy), so the
+        wrapper only records which files it wrote; once the dialog is closed, those that are loaded here are
+        re-read from disk on the GUI thread and their rows refreshed."""
+        # Opt-in (off by default): with nothing recorded yet, offer to turn it on first.
+        enabled = history.history_enabled()
+        if not enabled and not history.journal_exists():
+            answer = QMessageBox.question(
+                self, "History",
+                "History is off. Turn it on? From then on, tag changes this program saves are recorded here. "
+                "Nothing has been recorded so far.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            history.set_history_enabled(True)
+            enabled = True
+        restored: list[str] = []
+
+        def apply_restore(path: str, values: dict[str, str]) -> str:
+            problem = history.apply_restore(path, values)
+            if not problem:
+                restored.append(path)
+            return problem
+
+        title = "History" if enabled else "History (recording is off)"
+        HistoryDialog(history.get_journal(), apply_restore, self, title).exec()
+        if restored:
+            self._reload_restored(restored)
+
+    def _reload_restored(self, paths: list[str]) -> None:
+        """Re-reads the loaded files among `paths` (written by a History restore) under a progress dialog and
+        refreshes the rows. An unsaved edit on such a file is dropped: the file on disk changed under it."""
+        wanted = {os.path.normcase(os.path.abspath(p)) for p in paths}
+        stale = [vf for vf in self.video_files if os.path.normcase(os.path.abspath(str(vf.path))) in wanted]
+        if not stale:
+            return
+
+        def step(vf: VideoFile, _index: int) -> None:
+            vf.load()
+            vf.dirty = False
+            vf.save_error = ""
+            vf._thumbnail_path = None
+
+        run_with_progress(
+            self, stale, step, "Re-reading restored files...", threshold=1, cancellable=False,
+            label_for=lambda vf: f"Reading {vf.path.name}",
+        )
+        self._clear_undo()  # its snapshots predate the restore, like Refresh List
+        self._after_batch_edit(f"Re-read {len(stale)} restored file(s)")
 
     def _on_open_languages(self) -> None:
         """Add/Remove Languages (Tools menu) -- refreshes the bulk-
@@ -1682,13 +1743,14 @@ class MainWindow(QMainWindow):
         not_attempted = len(files) - succeeded - len(failed)
         cancel_note = f", cancelled -- {not_attempted} file(s) not yet attempted" if cancelled else ""
 
+        journal_note = _journal_problem_note()
         if failed:
-            msg = f"Saved {succeeded} file(s), {len(failed)} failed{skip_note}{cancel_note}"
+            msg = f"Saved {succeeded} file(s), {len(failed)} failed{skip_note}{cancel_note}{journal_note}"
             self.status_bar.showMessage(msg)
             details = _error_details([f"{vf.path.name}: {vf.save_error}" for vf in failed])
             QMessageBox.warning(self, "Some files failed to save", details)
         else:
-            self.status_bar.showMessage(f"Saved {succeeded} file(s){skip_note}{cancel_note}")
+            self.status_bar.showMessage(f"Saved {succeeded} file(s){skip_note}{cancel_note}{journal_note}")
 
     def _count_dirty(self) -> int:
         return sum(1 for vf in self.video_files if vf.dirty)
@@ -2335,7 +2397,7 @@ class MainWindow(QMainWindow):
         finally:
             self._active_cancel = None
         self._clear_undo()
-        self._after_batch_edit("Redact finished")
+        self._after_batch_edit("Redact finished" + _journal_problem_note())
         if report is not None:
             RedactResultsDialog(
                 report, self, title="Redact results",

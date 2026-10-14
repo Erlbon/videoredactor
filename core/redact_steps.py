@@ -62,12 +62,13 @@ from redactor_common.core.pipeline import (
     commit_in_place,
     effective_option_source,
 )
+from redactor_common.core.journal import KIND_REDACT
 from redactor_common.core.local_db import year_gap
 from redactor_common.core.rename_pattern import render_filename, unique_path, zero_pad_numeric_value
 from redactor_common.core.trash import move_to_trash
 
 from core import imdb_import, imdb_local, opensubtitles_client, tmdb_client, tvdb_client
-from core import conversion_plan, conversion_run, library_safety
+from core import conversion_plan, conversion_run, history, library_safety
 from core.config import get_setting, set_setting
 from core.ffmpeg_backend import _run, remux_to_mp4, verify_remux
 from core.file_check import RepairError, build_repaired_copy, quick_check
@@ -184,6 +185,10 @@ class VideoCtx:
         self.work = VideoFile(path=Path(self.original), metadata=copy.deepcopy(video.metadata))
         self.work.check = video.check
         self.work.stamp_stale = video.stamp_stale
+        # The ORIGINAL file's tags as text, for the one Tools > History entry this file's save records (the
+        # working copy's own save onto the scratch file is not journaled). A file Redact may touch has no
+        # unsaved edits, so its metadata is what is on disk when it was never loaded with a baseline.
+        self.baseline = video.baseline if video.baseline is not None else history.fields_text(video.metadata)
         try:
             self.start_mtime: float | None = os.path.getmtime(self.original)  # before Redact's own save touches it
         except OSError:
@@ -258,7 +263,7 @@ class VideoCtx:
         # compares every field (and the scan stamp) with what it meant to write.
         work.path = Path(scratch)
         work.save_error = ""
-        self.bg(work.save)
+        self.bg(work.save, journal=False)
         if work.save_error:
             self.save_failed = True
             return StepResult.failed(f"NOT SAVED, the original is untouched: {work.save_error}")
@@ -267,11 +272,18 @@ class VideoCtx:
             self.verify_problem = self.bg(verify_remux, self.original, path)
             return not self.verify_problem
 
+        # Tools > History: one "redact" entry per file, old values from the original, new from the working
+        # copy; announced before the commit, finished after. Never fails the save (core.history).
+        entry = history.journal_begin(
+            final, KIND_REDACT, self.baseline, history.fields_text(work.metadata),
+            note="" if final == self.original else f"was {os.path.basename(self.original)}",
+        )
         try:
             result = self.bg(commit_in_place, self.original, scratch, self.env.trash or move_to_trash, verify)
         except CommitError as exc:
             self.save_failed = True
             detail = f"{exc}" + (f" ({self.verify_problem})" if self.verify_problem else "")
+            history.journal_finish(entry, False, detail)
             return StepResult.failed(f"NOT SAVED, the original is untouched: {detail}")
         self.saved = True
 
@@ -286,6 +298,7 @@ class VideoCtx:
                     f"saved, but couldn't rename it to {os.path.basename(final)} ({exc}); "
                     f"it is an {ext.lstrip('.').upper()} file still named {os.path.basename(self.original)}"
                 )
+        history.journal_finish(entry, True, rename_problem)
         if final_path != self.original:
             live.path = Path(final_path)
         live.dirty = False
@@ -1449,7 +1462,9 @@ class ConvertStep(VideoStep):
         ctx.video.path = Path(outcome.final_path)
         ctx.video.metadata = keep
         ctx.video.save_error = ""
-        ctx.bg(ctx.video.save)
+        # Not journaled in Tools > History: the tags are carried over unchanged, the original is in the Recycle
+        # Bin / quarantine.
+        ctx.bg(ctx.video.save, journal=False)
         problem = ctx.video.save_error
         ctx.bg(ctx.video.load)
         ctx.video.dirty = False

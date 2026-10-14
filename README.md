@@ -35,7 +35,7 @@ More detail, the command line, and the licences of the data sources: [ABOUT.md](
 | View | Show Metadata Panel; Zoom In / Out / Reset (Ctrl++, Ctrl+-, Ctrl+0); Refresh List (F5, Ctrl+R); Command Palette (Ctrl+K) |
 | Metadata | Parse Filename (Ctrl+I); Look Up: TMDB (Movie) (Ctrl+M), TMDB (TV Show) (Ctrl+T), TheTVDB (TV Show) (Ctrl+Shift+T), IMDb (Local Database), Subtitles (OpenSubtitles) (Ctrl+Shift+L); Number Episodes |
 | Media | Remux to MP4 (Ctrl+Shift+M), Convert to MP4 (H.264) (Ctrl+Shift+C), Convert to MP4/MKV (Rules); Check Files, Find Duplicates |
-| Tools | Preferences (Ctrl+,); API Keys, External Tools, IMDb Database; Columns, Genres, Languages |
+| Tools | Preferences (Ctrl+,); API Keys, External Tools, IMDb Database; Columns, Genres, Languages; History |
 | Help | Changelog, Credits, About |
 
 Open Folder loads MP4 and MKV files (`.mp4`, `.m4v`, `.mkv`). When the folder also holds other video formats it
@@ -65,6 +65,17 @@ in place and its original goes to the Recycle Bin.
 Rename and Move run last, after the save. When the convert step is on, every Redact run asks "Dry run the
 conversion step" in its confirm question (ticked by default: the report then lists what would happen and nothing
 is converted). On the command line, `redact --convert-dry-run` does the same; without it the conversion is real.
+
+## Change history (Tools > History)
+
+Opt-in, off by default: turn it on in Tools > Preferences > History (or say Yes when Tools > History asks), and
+switch it off there again; "Delete History..." removes what was recorded. While it is on, every tag change the
+app makes to a file (Save, Save All, Redact, a Restore, and the command line's `set`, which follows the same
+setting) is recorded with the old and new text of each changed field in `videoredactor_journal.jsonl`, next to
+`videoredactor_settings.ini`. Tools > History lists them, newest first, and "Restore Old Values..." writes the old
+values back with the app's own save (write, re-read, compare), so an unwanted save can be undone after the app was
+closed. Covers and other images are not kept; a file replaced by a conversion is in the Recycle Bin or quarantine
+folder instead. The newest 50,000 changes from the last 90 days are kept.
 
 ## Preferences (Tools > Preferences)
 

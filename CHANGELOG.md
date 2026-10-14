@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-10-14#03 -- Tools > History: an opt-in history of tag changes that can be undone later
+
+- Opt-in, off by default: nothing is recorded (no file is created) until you turn it on with the new Tools > Preferences > History checkbox "Keep a history of tag changes" (applied on OK / Apply, Cancel changes nothing), or by answering Yes when Tools > History asks "History is off. Turn it on?". The page says what is kept, how much and where, and has a "Delete History..." button (asks first). With history off but an old journal there, Tools > History opens it as "History (recording is off)". The command line follows the same setting.
+- New Tools > History…: while history is on, every tag change the app makes to a file (Save, Save All, Redact, a Restore from the history, and the command line's `set`) is recorded with the old and new text of each changed field, in `videoredactor_journal.jsonl` next to `videoredactor_settings.ini`. "Restore Old Values…" writes the old values back through the app's own save (write, re-read, compare), so an unwanted save can be undone after the app was closed. Restored files that are loaded are re-read and their rows refreshed when the dialog closes.
+- A save with no real change, and a save that only records a Check Files result, record nothing. A failed save is recorded as failed. Covers and other images are not kept (only that a cover changed). The newest 50,000 changes from the last 90 days are kept.
+- Redact records one entry per file (old values from the original, new from the result). Not recorded: the tag re-write after a conversion (the Redact convert step, the conversion rules), because the tags are carried over unchanged and the original is in the Recycle Bin or quarantine folder.
+- A problem writing the history never blocks or fails a save: it is shown once in the status bar (on the command line, on stderr).
+- Requires redactor_common 2026-10-14-03.
+
 ## 2026-10-14#02 -- Redact asks the conversion dry run per run; one summary after Convert to MP4 (H.264)
 
 - Edit > Redact: when the recipe's "Convert to MP4/MKV and ingest subtitles" step is on, the confirm question (now also shown for a selection, and the "Redact all files?" one) has "Dry run the conversion step (list what would happen, change nothing)", ticked by default. The choice holds for that run only.

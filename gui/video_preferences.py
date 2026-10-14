@@ -12,8 +12,9 @@ this app's settings.
                verification tolerance
   Tools / Paths  ffmpeg / MKVToolNix locations, IMDb database and dataset files
                (a self-saving page, like the Locate External Tools dialog)
+  History      the opt-in switch for Tools > History (off by default) and Delete History
 
-Conversion and Library safety are written on OK / Apply and dropped on Cancel,
+Conversion, Library safety and History are written on OK / Apply and dropped on Cancel,
 like the shared pages (VideoPreferencesDialog.apply saves them); only Tools /
 Paths still saves as you type.
 
@@ -30,7 +31,7 @@ from PyQt6.QtWidgets import (
 )
 from redactor_common.gui.preferences_dialog import PreferencesDialog
 
-from core import conversion_plan, imdb_settings, library_safety
+from core import conversion_plan, history, imdb_settings, library_safety
 from core.preferences_backend import KEY_AUDIO_BITRATE, bitrate_ok, build_sections, make_backend
 from gui.tool_settings_dialog import ToolPathsWidget
 
@@ -169,6 +170,73 @@ class SafetyPage(QWidget):
         ))
 
 
+HISTORY_CHECKBOX = "Keep a history of tag changes (lets you undo a Save or Redact later)"
+
+
+def history_help_text(path: str) -> str:
+    return (
+        "What is kept: the old and new text of every tag field a Save, Save All, Redact or the command line "
+        "changes; never covers or other images. How much: the last 90 days, at most 50,000 changes. "
+        f"Where: {path}. Tools > History shows it and can write old values back. You can switch it off again "
+        "at any time; what was recorded stays until you delete it."
+    )
+
+
+class HistoryPage(QWidget):
+    """Tools > History's recording switch (core/history.py, opt-in, off by default) and Delete history. The
+    switch is written by save() on OK / Apply, like the Library safety page; Delete history acts at once, after
+    a confirmation."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        self.enabled = QCheckBox(HISTORY_CHECKBOX)
+        self.enabled.setChecked(history.history_enabled())
+        layout.addWidget(self.enabled)
+        self.help = QLabel(history_help_text(history.journal_path()))
+        self.help.setWordWrap(True)
+        self.help.setStyleSheet("color: gray;")
+        layout.addWidget(self.help)
+        row = QHBoxLayout()
+        self.delete_button = QPushButton("Delete History...")
+        self.delete_button.clicked.connect(self.delete_history)
+        row.addWidget(self.delete_button)
+        self.status = QLabel("")
+        row.addWidget(self.status, 1)
+        layout.addLayout(row)
+        layout.addStretch(1)
+        self._refresh_delete()
+
+    def _refresh_delete(self) -> None:
+        self.delete_button.setEnabled(history.journal_exists())
+
+    def delete_history(self) -> bool:
+        """Asks, then removes the journal file. Returns whether it was deleted."""
+        if not history.journal_exists():
+            self._refresh_delete()
+            return False
+        answer = QMessageBox.question(
+            self, "Delete History",
+            "Delete the whole history of tag changes? Old values recorded so far can no longer be restored.\n\n"
+            f"{history.journal_path()}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return False
+        problem = history.delete_history()
+        if problem:
+            QMessageBox.warning(self, "Delete History", f"The history could not be deleted: {problem}")
+            return False
+        self.status.setText("History deleted.")
+        self._refresh_delete()
+        return True
+
+    def save(self) -> None:
+        """Writes the switch (the dialog's OK / Apply)."""
+        if self.enabled.isChecked() != history.history_enabled():
+            history.set_history_enabled(self.enabled.isChecked())
+
+
 _DISC_LABELS = {
     conversion_plan.DISC_LEAVE: "Leave alone (never touched)",
     conversion_plan.DISC_LIST: "Leave alone, but list them for review",
@@ -300,9 +368,10 @@ class VideoPreferencesDialog(PreferencesDialog):
                 ("Tools / Paths", build_paths_page),
                 ("Conversion", deferred_page(ConversionPage)),
                 ("Library safety", deferred_page(SafetyPage)),
+                ("History", deferred_page(HistoryPage)),
             ],
         )
-        self.conversion_page, self.safety_page = deferred
+        self.conversion_page, self.safety_page, self.history_page = deferred
 
     def bitrate_problem(self) -> str:
         """A plain-language problem with the typed bitrate, or "" when fine."""
@@ -328,6 +397,7 @@ class VideoPreferencesDialog(PreferencesDialog):
         super().apply()
         self.conversion_page.save()
         self.safety_page.save()
+        self.history_page.save()
 
     def accept(self) -> None:
         if self._bitrate_blocks():

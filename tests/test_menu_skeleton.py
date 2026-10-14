@@ -60,6 +60,7 @@ def test_other_menus_hold_what_the_spec_says(window):
     ]
     assert _labels(menus["Tools"]) == [
         "Preferences…", "API Keys…", "External Tools…", "IMDb Database…", "Columns…", "Genres…", "Languages…",
+        "History…",
     ]
     assert _labels(menus["Help"]) == ["Changelog…", "Credits…", "About " + mw.APP_NAME]
 
@@ -96,7 +97,8 @@ HANDLERS = {
     "convert_to_mp4": "_on_convert_to_mp4", "check_files": "_on_check_files",
     "find_duplicates": "_on_find_duplicates", "api_keys": "_on_add_external_apis",
     "external_tools": "_on_locate_tools", "imdb_settings": "_on_open_imdb_settings", "columns": "_on_open_column_visibility",
-    "genres": "_on_open_genres", "languages": "_on_open_languages", "lookup_tvdb": "_on_import_tvdb",
+    "genres": "_on_open_genres", "languages": "_on_open_languages", "history": "_on_open_history",
+    "lookup_tvdb": "_on_import_tvdb",
     "lookup_subtitles": "_on_import_subtitles", "lookup_imdb_local": "_on_import_imdb_local",
     "import_convert": "_on_import_and_convert",
     "number_episodes": "_on_number_episodes", "refresh_list": "_refresh_list",

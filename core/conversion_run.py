@@ -194,6 +194,8 @@ def write_tags(final_path: str, metadata) -> str:
     try:
         vf = VideoFile(path=Path(final_path), metadata=copy.deepcopy(metadata))
         vf.save_error = ""
+        # Not journaled in Tools > History: this VideoFile was never loaded, so it has no baseline (the tags are
+        # carried over unchanged and the original is in the Recycle Bin / quarantine).
         vf.save()
         return vf.save_error
     except Exception as exc:  # noqa: BLE001 -- a tag problem must not hide that the conversion itself worked

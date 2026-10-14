@@ -50,6 +50,18 @@ into files one at a time.
   convention Plex/Jellyfin/Kodi already expect.
 - **Thumbnail preview** — pulls a real frame from the video so you can
   see what you're tagging without opening a player.
+- **Change history** (Tools > History…) — opt-in, off by default: turn it
+  on in Tools > Preferences > History (or answer Yes when Tools > History
+  asks) and off again there, where "Delete History…" removes what was
+  recorded. While it is on, every tag change the app makes to a file
+  (Save, Save All, Redact, a Restore, the command line's `set`, which
+  follows the same setting: off = nothing recorded) is recorded with the old and new value of each changed field in
+  `videoredactor_journal.jsonl`, next to `videoredactor_settings.ini`.
+  "Restore Old Values…" writes the old values back, so an unwanted save
+  can be undone even after the app was closed. Covers and other images
+  are not kept there; a file replaced by a conversion is in the Recycle
+  Bin or the quarantine folder instead. The newest 50,000 changes from the
+  last 90 days are kept.
 
 ## Library safety and conversion
 
@@ -151,7 +163,9 @@ folder or wildcard finds them). Exit code 1 if a file could not be read.
 Sets or empties tag fields and saves each video in place. Only the tags are written, the video is not
 re-encoded, and the save is read back and compared with what was meant to be written (a save that did not stick
 is reported as `failed`). Fields and values are checked before any file is touched; a bad one stops the command
-with exit code 2.
+with exit code 2. When the change history is on (Tools > Preferences > History, the same setting the window
+uses), each change is recorded there and can be restored in Tools > History; when it is off (the default) the
+command line records nothing either. The same holds for `redact`.
 
 | Option | Meaning |
 | --- | --- |

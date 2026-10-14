@@ -18,6 +18,9 @@ import tempfile
 from redactor_common.core.save_errors import describe_save_error
 from redactor_common.core.scan_stamp import ScanStamp, make_stamp, parse_stamp
 
+from redactor_common.core.journal import KIND_SAVE
+
+from core import history
 from core.video_metadata import VideoMetadata, EDITABLE_FIELDS, ContentType
 from core.mp4_backend import read_mp4_metadata, write_mp4_metadata
 from core.mkv_backend import read_mkv_metadata, write_mkv_metadata
@@ -60,6 +63,11 @@ class VideoFile:
     # so a repair right after a scan isn't refused for "unsaved changes".
     # Any other assignment to `dirty` clears it (see __setattr__).
     stamp_only_dirty: bool = field(default=False, repr=False, compare=False)
+    # The editable fields as text (core.history.fields_text) as they are ON DISK: taken by load() and after
+    # every successful save. A save journals the difference between this and the metadata it writes (the
+    # Tools > History journal). None for a VideoFile that was never loaded (a Redact working copy, the tag
+    # re-write after a conversion): its saves are not journaled.
+    baseline: Optional[dict] = field(default=None, repr=False, compare=False)
 
     def __setattr__(self, name, value):
         if name == "dirty":
@@ -101,6 +109,7 @@ class VideoFile:
             )
             return
 
+        self.baseline = None
         try:
             if self.is_mkv:
                 self.metadata = read_mkv_metadata(str(self.path))
@@ -116,6 +125,7 @@ class VideoFile:
         except Exception as e:  # backend-specific parse failures, etc.
             self.load_error = f"Could not read metadata: {e}"
             return
+        self.baseline = history.fields_text(self.metadata)
 
         # Technical fields (resolution, codecs, duration, frame rate,
         # container) via ffprobe -- format-agnostic, so this runs the
@@ -199,9 +209,11 @@ class VideoFile:
         except OSError:
             return None
 
-    def save(self) -> None:
+    def save(self, journal: bool = True) -> None:
         """Write self.metadata back to disk, then read it back and
-        verify the write actually took effect.
+        verify the write actually took effect. `journal=False` (Redact's
+        scratch-copy save, Restore) records nothing in Tools > History:
+        those callers journal the change themselves.
 
         Same proactive tool-check as load() -- checks MKVToolNix
         availability before attempting an MKV write rather than letting
@@ -238,6 +250,21 @@ class VideoFile:
             )
             return
 
+        # The Tools > History journal: announced before the write, finished after (a crash in between leaves
+        # it "not confirmed"). Only a file loaded from disk has a baseline; no real change records nothing, and
+        # neither does a save that only writes a Check Files stamp (fields_text leaves the stamp out).
+        # Journal problems never fail the save (core.history swallows and reports them once).
+        new_text = history.fields_text(self.metadata)
+        entry = history.journal_begin(self.path, KIND_SAVE, self.baseline, new_text) if (
+            journal and self.baseline is not None
+        ) else None
+        self._write_and_verify()
+        history.journal_finish(entry, not self.save_error, self.save_error)
+        if not self.save_error:
+            self.baseline = new_text
+
+    def _write_and_verify(self) -> None:
+        """save()'s write + read-back verification; sets save_error / dirty."""
         write_diagnostic = ""
         try:
             if self.is_mkv:
