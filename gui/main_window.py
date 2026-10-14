@@ -539,8 +539,8 @@ class MainWindow(QMainWindow):
                 # Only the heavy video-specific operations: what acts on the
                 # container/streams rather than on tags.
                 AppMenu(labels.MENU_MEDIA, [
-                    # Read-only player in its own window (audio/subtitle track pickers). Ctrl+Shift+P: free.
-                    MenuAction("preview", "&Preview…", self._on_preview_selected, shortcut="Ctrl+Shift+P"),
+                    # Plays the file in its own player window (audio/subtitle track pickers). Ctrl+Shift+P: free.
+                    MenuAction("play", "&Play", self._on_play_selected, shortcut="Ctrl+Shift+P"),
                     Separator(),
                     # Ctrl+Shift+M (M for MP4): Ctrl+R is Refresh List in the whole family.
                     MenuAction("remux", "&Remux to MP4…", self._on_remux_selected, shortcut="Ctrl+Shift+M"),
@@ -626,6 +626,9 @@ class MainWindow(QMainWindow):
 
         toolbar.addAction(self.open_files_action)
         toolbar.addAction(self.open_folder_action)
+        toolbar.addSeparator()
+        # Plays the selected file (same action as Media > Play).
+        toolbar.addAction(self.actions_by_key["play"])
         toolbar.addSeparator()
 
         toolbar.addAction(self.apply_action)
@@ -1502,7 +1505,7 @@ class MainWindow(QMainWindow):
             # the menu bar (no shortcuts here: they already live on the
             # menu's own actions).
             if len(files) == 1 and not files[0].load_error:
-                items.extend([self.actions_by_key["preview"], Separator()])
+                items.extend([self.actions_by_key["play"], Separator()])
             items.append(Submenu("Look Up", self._look_up_entries("ctx_", with_shortcuts=False)))
             items.append(Submenu("Organize", [
                 self.actions_by_key["rename_export_move"],
@@ -1518,17 +1521,18 @@ class MainWindow(QMainWindow):
             extra_items=extra_items,
         )
 
-    def _on_preview_selected(self) -> None:
-        """Media > Preview...: opens the shared read-only player window for the one selected file."""
+    def _on_play_selected(self) -> None:
+        """Media > Play (and the toolbar Play button): opens the shared player window for the one selected
+        file and starts playing at once. Read-only: the file is never written."""
         files = self._selected_video_files()
         if len(files) != 1:
-            self.status_bar.showMessage("Preview needs exactly one file selected")
+            self.status_bar.showMessage("Play needs exactly one file selected")
             return
         if files[0].load_error:
-            self.status_bar.showMessage(f"Can't preview {files[0].path.name}: it failed to load")
+            self.status_bar.showMessage(f"Can't play {files[0].path.name}: it failed to load")
             return
         from redactor_common.gui.media_preview import show_media_preview
-        show_media_preview(self, str(files[0].path), video=True)
+        show_media_preview(self, files[0].path, video=True, autoplay=True)
 
     def _on_cell_double_clicked(self, row: int, col: int) -> None:
         if not (0 <= col < len(self._column_order)) or self._column_order[col] != "filename":

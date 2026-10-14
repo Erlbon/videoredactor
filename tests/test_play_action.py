@@ -1,4 +1,4 @@
-"""Media > Preview...: wiring only. QMediaPlayer is never created here (it crashes the pytest process at exit
+"""Media > Play: wiring only. QMediaPlayer is never created here (it crashes the pytest process at exit
 about one run in three); show_media_preview is replaced by a recorder."""
 
 import os
@@ -21,18 +21,18 @@ def _select(window, rows):
         )
 
 
-def test_preview_action_exists_with_safe_shortcut(window):
-    action = window.actions_by_key["preview"]
+def test_play_action_exists_with_safe_shortcut(window):
+    action = window.actions_by_key["play"]
     assert action.shortcut() == QKeySequence("Ctrl+Shift+P")
     assert "Alt" not in action.shortcut().toString()
 
 
-def test_one_selected_file_opens_the_preview(window, monkeypatch):
+def test_one_selected_file_plays(window, monkeypatch):
     calls = []
-    monkeypatch.setattr(media_preview, "show_media_preview", lambda parent, path, video=False: calls.append((path, video)))
+    monkeypatch.setattr(media_preview, "show_media_preview", lambda parent, path, video=False, autoplay=False: calls.append((path, video, autoplay)))
     _select(window, [0])
-    window.actions_by_key["preview"].trigger()
-    assert calls == [(str(window.video_files[0].path), True)]
+    window.actions_by_key["play"].trigger()
+    assert calls == [(window.video_files[0].path, True, True)]
 
 
 def test_zero_or_several_selected_files_only_say_so(window, monkeypatch):
@@ -41,6 +41,6 @@ def test_zero_or_several_selected_files_only_say_so(window, monkeypatch):
     for rows in ([], [0, 1]):
         _select(window, rows)
         window.status_bar.clearMessage()
-        window.actions_by_key["preview"].trigger()
+        window.actions_by_key["play"].trigger()
         assert "exactly one file" in window.status_bar.currentMessage()
     assert calls == []

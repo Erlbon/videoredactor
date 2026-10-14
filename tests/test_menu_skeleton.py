@@ -56,7 +56,7 @@ def test_other_menus_hold_what_the_spec_says(window):
         "Subtitles (OpenSubtitles)…",
     ]
     assert _labels(menus["Media"]) == [
-        "Preview…", "Remux to MP4…", "Convert to MP4 (H.264)…", "Convert to MP4/MKV (Rules)…", "Check Files…", "Find Duplicates…",
+        "Play", "Remux to MP4…", "Convert to MP4 (H.264)…", "Convert to MP4/MKV (Rules)…", "Check Files…", "Find Duplicates…",
     ]
     assert _labels(menus["Tools"]) == [
         "Preferences…", "API Keys…", "External Tools…", "IMDb Database…", "Columns…", "Genres…", "Languages…",
@@ -135,7 +135,7 @@ def test_toolbar_reuses_the_menu_actions_in_order(window):
     toolbar = window.findChildren(QToolBar)[0]
     acts = [a for a in toolbar.actions() if not a.isSeparator()]
     reg = window.actions_by_key
-    assert acts[:7] == [reg["open_files"], reg["open_folder"], reg["apply"], reg["save_all"],
+    assert acts[:8] == [reg["open_files"], reg["open_folder"], reg["play"], reg["apply"], reg["save_all"],
                         reg["redact"], reg["undo"], reg["redo"]]
     assert "save" not in reg  # one Save button: Save All
     assert window.zoom.zoom_out_action in acts and window.zoom.zoom_in_action in acts
@@ -287,7 +287,7 @@ def test_context_menu_follows_the_skeleton(window, monkeypatch):
         return out
 
     assert shape(seen["single"]) == [
-        "-", "Rename File…", "-", "Preview…", "-", "Look Up", "Organize", "-", "Redact", "-", "Remove from List",
+        "-", "Rename File…", "-", "Play", "-", "Look Up", "Organize", "-", "Redact", "-", "Remove from List",
     ]
     assert shape(seen["multi"]) == ["-", "Look Up", "Organize", "-", "Redact", "-", "Remove from List"]
     organize = next(i for i in seen["single"] if isinstance(i, mw.Submenu) and i.text == "Organize")

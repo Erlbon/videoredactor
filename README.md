@@ -34,7 +34,7 @@ More detail, the command line, and the licences of the data sources: [ABOUT.md](
 | Edit | Undo (Ctrl+Z), Redo (Ctrl+Y); Apply to N Selected (Ctrl+Return); Redact (Ctrl+Shift+E), Edit Redact Recipe; Search and Replace (Ctrl+H), Change Case, Auto-Number |
 | View | Show Metadata Panel; Zoom In / Out / Reset (Ctrl++, Ctrl+-, Ctrl+0); Refresh List (F5, Ctrl+R); Command Palette (Ctrl+K) |
 | Metadata | Parse Filename (Ctrl+I); Look Up: TMDB (Movie) (Ctrl+M), TMDB (TV Show) (Ctrl+T), TheTVDB (TV Show) (Ctrl+Shift+T), IMDb (Local Database), Subtitles (OpenSubtitles) (Ctrl+Shift+L); Number Episodes |
-| Media | Remux to MP4 (Ctrl+Shift+M), Convert to MP4 (H.264) (Ctrl+Shift+C), Convert to MP4/MKV (Rules); Check Files, Find Duplicates |
+| Media | Play (Ctrl+Shift+P, also a toolbar button), Remux to MP4 (Ctrl+Shift+M), Convert to MP4 (H.264) (Ctrl+Shift+C), Convert to MP4/MKV (Rules); Check Files, Find Duplicates |
 | Tools | Preferences (Ctrl+,); API Keys, External Tools, IMDb Database; Columns, Genres, Languages; History |
 | Help | Changelog, Credits, About |
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-14#09 -- Play: a Play button and Media > Play that start playing at once
+
+- Changed: "Preview" is now Play. Media > Play (Ctrl+Shift+P), the file list's right-click entry Play, and a new Play button on the main toolbar open the selected video in the player window and start playing immediately. Exactly one file must be selected; otherwise the status bar says so and nothing opens. Double-clicking a row does what it did before.
+- Fixed: a "Scanning..." progress box could stay on screen for good after work that took about 0.3 s or more (redactor_common 2026-10-14-08).
+- Fixed: a crash when starting the player (redactor_common accepts the file as a Path as well as text).
+- Requires redactor_common 2026-10-14-09.
+
 ## 2026-10-14#08 -- Media > Preview: a read-only player window
 
 - New: Media > Preview... (Ctrl+Shift+P, also in the file list's right-click menu) opens the selected video in its own player window: play/pause, seek, volume, and pickers for the audio track and the subtitle track. It needs exactly one file selected and says so in the status bar otherwise. The preview only reads the file; it never writes to it.
