@@ -13,7 +13,7 @@ columns are visible AND which fields TagPanel shows -- "no filter" means
 
 from __future__ import annotations
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 import copy
 import json
 import os
@@ -25,7 +25,7 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QComboBox, QLabel, QFileDialog,
     QStatusBar, QMessageBox, QToolBar, QCheckBox,
 )
-from PyQt6.QtCore import Qt, QThread, QEventLoop, QItemSelection, QItemSelectionModel, QSize, pyqtSignal
+from PyQt6.QtCore import Qt, QItemSelection, QItemSelectionModel, QSize
 from PyQt6.QtGui import QColor, QImage, QKeySequence, QIcon
 
 from core.video_file import (
@@ -81,7 +81,8 @@ from redactor_common.gui.rename_pattern_dialog import RenamePatternDialog
 from redactor_common.gui.search_replace_dialog import FILENAME_FIELD_KEY, SearchReplaceDialog
 from redactor_common.gui.move_runner import run_planned_moves
 from redactor_common.gui.folder_options import attach_include_subfolders, include_subfolders_slot
-from redactor_common.gui.progress import ProgressReporter, run_busy, run_with_progress
+from redactor_common.gui.progress import run_busy, run_with_progress
+from redactor_common.gui.work_progress import run_work_with_progress
 from redactor_common.gui.convert_offer import YES as CONVERT_YES, offer_conversion
 from redactor_common.gui.history_dialog import HistoryDialog
 from redactor_common.gui.redact_dialog import RecipeEditorDialog, RedactResultsDialog
@@ -237,64 +238,49 @@ def _journal_problem_note() -> str:
     return f" -- {problem}" if problem else ""
 
 
-class _TranscodeWorker(QThread):
-    """Runs a batch of transcode_to_mp4() (or, with remux=True,
-    remux_to_mp4()) calls off the GUI thread.
+def _run_transcode_batch(
+    jobs: list[tuple[Path, Path]], settings, cancel_event: threading.Event,
+    remux: bool = False, mkv: bool = False,
+    on_started: Optional[Callable[[int, str], None]] = None,
+) -> dict[int, tuple[bool, str]]:
+    """Runs a batch of transcode_to_mp4() (or, with remux=True, remux_to_mp4(); with mkv=True,
+    remux_to_mkv()) calls and returns {job index: (ok, message)}; a job not started because
+    `cancel_event` was set first is missing from the result. Runs on a worker thread
+    (_run_transcode_jobs): no widgets here.
 
-    A real H.264/AAC re-encode can take minutes per file, and even a
-    stream-copy remux of a large file on a slow disk takes long enough
-    to freeze the whole window -- so both run here. Emits progress per
-    file rather than returning everything at once, so the caller's
-    QProgressDialog can update between files; `cancel_event` is checked
-    both between files here and (via the ffmpeg backend) mid-file, so
-    Cancel actually stops a long run instead of only skipping ones not
-    yet started.
+    `cancel_event` is checked between files here and (via the ffmpeg backend) mid-file, so Cancel
+    stops a long encode instead of only skipping the files not yet started; the backend removes
+    the partial output.
 
-    file_finished's message: for a transcode, ffmpeg's stderr; for a
-    remux that succeeded, verify_remux()'s verdict ("" = every track
-    made it, anything else = what's missing) -- on failure, the error.
+    The message: for a transcode, ffmpeg's stderr; for a remux that succeeded, verify_remux()'s
+    verdict ("" = every track made it, anything else = what's missing) -- on failure, the error.
     """
-
-    file_started = pyqtSignal(int, str)       # index, input filename
-    file_finished = pyqtSignal(int, bool, str)  # index, success, stderr/message
-
-    def __init__(
-        self, jobs: list[tuple[Path, Path]], settings, parent=None,
-        remux: bool = False, mkv: bool = False,
-    ):
-        super().__init__(parent)
-        self._jobs = jobs
-        self._settings = settings
-        self._remux = remux
-        self._mkv = mkv  # stream copy into MKV (remux_to_mkv) instead of an MP4 job
-        self.cancel_event = threading.Event()
-
-    def run(self) -> None:
-        for i, (input_path, output_path) in enumerate(self._jobs):
-            if self.cancel_event.is_set():
-                break
-            self.file_started.emit(i, input_path.name)
-            # A PermissionError, a vanished file... must not kill the
-            # thread: the remaining jobs would then look "cancelled".
-            try:
-                if self._remux or self._mkv:
-                    remux = remux_to_mkv if self._mkv else remux_to_mp4
-                    ok, message = remux(
-                        str(input_path), str(output_path), cancel_event=self.cancel_event,
-                    )
-                    if ok:
-                        message = verify_remux(str(input_path), str(output_path))
-                else:
-                    ok, message = transcode_to_mp4(
-                        str(input_path), str(output_path),
-                        crf=self._settings.crf,
-                        audio_bitrate=self._settings.audio_bitrate,
-                        threads=self._settings.threads or None,
-                        cancel_event=self.cancel_event,
-                    )
-            except Exception as exc:  # noqa: BLE001 -- reported per file
-                ok, message = False, str(exc) or type(exc).__name__
-            self.file_finished.emit(i, ok, message)
+    results: dict[int, tuple[bool, str]] = {}
+    for i, (input_path, output_path) in enumerate(jobs):
+        if cancel_event.is_set():
+            break
+        if on_started is not None:
+            on_started(i, input_path.name)
+        # A PermissionError, a vanished file... must not end the batch:
+        # the remaining jobs would then look "cancelled".
+        try:
+            if remux or mkv:
+                remux_fn = remux_to_mkv if mkv else remux_to_mp4
+                ok, message = remux_fn(str(input_path), str(output_path), cancel_event=cancel_event)
+                if ok:
+                    message = verify_remux(str(input_path), str(output_path))
+            else:
+                ok, message = transcode_to_mp4(
+                    str(input_path), str(output_path),
+                    crf=settings.crf,
+                    audio_bitrate=settings.audio_bitrate,
+                    threads=settings.threads or None,
+                    cancel_event=cancel_event,
+                )
+        except Exception as exc:  # noqa: BLE001 -- reported per file
+            ok, message = False, str(exc) or type(exc).__name__
+        results[i] = (ok, message)
+    return results
 
 
 def _load_include_subfolders() -> bool:
@@ -2614,43 +2600,29 @@ class MainWindow(QMainWindow):
         self, jobs: list[tuple[Path, Path]], settings, title: str,
         remux: bool = False, mkv: bool = False,
     ) -> dict[int, tuple[bool, str]]:
-        """Runs `jobs` on a _TranscodeWorker thread behind the shared
-        progress dialog (fixed width, elided per-file label) and returns
-        {job index: (ok, message)} -- an index missing from the result
+        """Runs `jobs` (_run_transcode_batch) on a worker thread under the shared
+        counted progress dialog (redactor_common's run_work_with_progress) and
+        returns {job index: (ok, message)} -- an index missing from the result
         never started because the batch was cancelled first. Shared by
-        Convert to MP4 and Import & Convert, which each hand-rolled an
-        identical copy of this before.
+        Convert to MP4 and Remux.
 
-        threshold=1: even a single encode takes minutes, so the dialog
-        (and its Cancel button) always shows."""
-        worker = _TranscodeWorker(jobs, settings, parent=self, remux=remux, mkv=mkv)
-        remux = remux or mkv  # label wording only from here on
-        results: dict[int, tuple[bool, str]] = {}
-        with ProgressReporter(self, len(jobs), "Starting...", threshold=1, title=title) as reporter:
+        The dialog's Cancel sets progress.cancelled, a threading.Event that is
+        handed to ffmpeg as its cancel_event, so a running encode is killed
+        (and its partial output removed) mid-file, not only between files."""
+        verb = "Remuxing" if remux or mkv else "Converting"
+
+        def work(progress) -> dict[int, tuple[bool, str]]:
             def on_started(i: int, name: str) -> None:
-                verb = "Remuxing" if remux else "Converting"
-                reporter.set_label(f"{verb} {name}... ({i + 1}/{len(jobs)})")
-                reporter.set_value(i, pump=False)
+                progress.set_label(f"{verb} {name}... ({i + 1}/{len(jobs)})")
+                progress.set_value(i)
 
-            def on_finished(i: int, ok: bool, message: str) -> None:
-                results[i] = (ok, message)
+            results = _run_transcode_batch(
+                jobs, settings, progress.cancelled, remux=remux, mkv=mkv, on_started=on_started,
+            )
+            progress.set_value(len(jobs))
+            return results
 
-            def on_cancel() -> None:
-                worker.cancel_event.set()
-                reporter.set_label("Cancelling (finishing current file)...")
-
-            worker.file_started.connect(on_started)
-            worker.file_finished.connect(on_finished)
-            reporter.connect_cancel(on_cancel)
-
-            # The dialog's modality pumps clicks/paint events, but not
-            # "wait for this thread to finish" -- a local event loop tied
-            # to the worker's `finished` signal blocks here without
-            # freezing the UI (the encode itself runs on the worker).
-            wait_loop = QEventLoop()
-            worker.finished.connect(wait_loop.quit)
-            worker.start()
-            wait_loop.exec()
+        results, _cancelled = run_work_with_progress(self, len(jobs), "Starting...", work, title=title)
         return results
 
     def _on_convert_to_mp4(self) -> None:
@@ -2665,7 +2637,7 @@ class MainWindow(QMainWindow):
         the wrong default, even though remux's equivalent prompt is safe
         (a remux loses nothing).
 
-        Runs off the GUI thread via _TranscodeWorker + the shared progress dialog
+        Runs off the GUI thread via _run_transcode_jobs + the shared progress dialog
         with a working Cancel button -- a real encode takes real time,
         unlike remux's near-instant stream copy.
         """

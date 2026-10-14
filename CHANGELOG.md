@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-14#07 -- One season & episode picker, one search dialog, the conversion worker on redactor_common
+
+- Internal clean-up, no change in what the dialogs show or do. The TMDB, TheTVDB and IMDb (Local Database) season & episode pickers were the same dialog written three times; they are now one shared dialog (`gui/episode_picker_dialog.py`) with a small source for each (TMDB still fetches each season when it is picked, TheTVDB still loads the whole episode list once, IMDb still reads the local database). The three pickers went from 467 to 353 lines.
+- The TheTVDB search dialog is now the shared search dialog with a TheTVDB source (TV only, no Year box, as before): 127 lines became 40.
+- Media > Convert to MP4 (H.264) and Remux to MP4 run on redactor_common's counted progress dialog (`run_work_with_progress`) instead of the app's own worker thread (`_TranscodeWorker` removed, 28 lines less in the main window). Cancel still stops the running ffmpeg within about half a second and leaves no partial file. Small visible differences: the progress dialog appears after a moment instead of at once, and while cancelling it reads "Cancelling... (finishing the file in progress)".
+
 ## 2026-10-14#06 -- Last local workarounds for redactor_common replaced by its own options
 
 - Tools > IMDb Database: in the build question the "replaced only when the new one is complete" note is back where it was before #05, after the notes about missing files and before the licence reminder. The free-space line stays at the foot of the build box, now placed through the shared dialog's manual placement instead of being moved by hand.

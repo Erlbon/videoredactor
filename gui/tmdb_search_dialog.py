@@ -32,11 +32,12 @@ Candidate = Union[MovieCandidate, TVCandidate]
 
 @dataclass
 class SearchSource:
-    """Another place to search with this same dialog (the local IMDb database):
-    `movies(query, year=None)` and `tv(query, year=None)` return MovieCandidate /
-    TVCandidate (or subclasses); `errors` are the exception types that mean "the
-    search failed"; `note` is shown above the results; `switchable` adds a
-    Film / TV show chooser (the dialog's `mode` then follows it)."""
+    """Another place to search with this same dialog (the local IMDb database,
+    TheTVDB): `movies(query, year=None)` and `tv(query, year=None)` return
+    MovieCandidate / TVCandidate-like objects (`name`/`title`, `year`, `overview`);
+    `errors` are the exception types that mean "the search failed"; `note` is
+    shown above the results; `switchable` adds a Film / TV show chooser (the
+    dialog's `mode` then follows it); `year_box` False leaves out the Year box."""
 
     name: str
     movies: Callable
@@ -44,6 +45,7 @@ class SearchSource:
     errors: tuple = ()
     note: str = ""
     switchable: bool = False
+    year_box: bool = True
 
 
 class TMDBSearchDialog(QDialog):
@@ -93,7 +95,7 @@ class TMDBSearchDialog(QDialog):
         # dedicated `year` param) -- TV search has no equivalent field
         # here, so this box only shows up in movie mode.
         self.year_edit: Optional[QLineEdit] = None
-        if mode == "movie" or source is not None:
+        if mode == "movie" or (source is not None and source.year_box):
             self.year_edit = QLineEdit(initial_year)
             self.year_edit.setPlaceholderText("Year")
             self.year_edit.setMaximumWidth(70)

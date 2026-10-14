@@ -159,12 +159,11 @@ def test_a_failed_transcode_removes_its_partial_output(tmp_path):
 
 
 def test_worker_survives_a_job_that_raises():
+    import threading
+
     import gui.main_window as mw
 
     jobs = [(Path("a.mkv"), Path("a.mp4")), (Path("b.mkv"), Path("b.mp4"))]
-    worker = mw._TranscodeWorker(jobs, None, remux=True)
-    finished = []
-    worker.file_finished.connect(lambda i, ok, msg: finished.append((i, ok, msg)))
 
     def fake_remux(src, dst, cancel_event=None):
         if src == "a.mkv":
@@ -172,8 +171,8 @@ def test_worker_survives_a_job_that_raises():
         return True, ""
 
     with mock.patch.object(mw, "remux_to_mp4", fake_remux), mock.patch.object(mw, "verify_remux", lambda s, d: ""):
-        worker.run()
-    assert finished == [(0, False, "denied"), (1, True, "")]
+        finished = mw._run_transcode_batch(jobs, None, threading.Event(), remux=True)
+    assert finished == {0: (False, "denied"), 1: (True, "")}
 
 
 def test_claim_output_refuses_a_duplicate_destination_in_one_batch(tmp_path):
