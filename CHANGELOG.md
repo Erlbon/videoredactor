@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-14#06 -- Last local workarounds for redactor_common replaced by its own options
+
+- Tools > IMDb Database: in the build question the "replaced only when the new one is complete" note is back where it was before #05, after the notes about missing files and before the licence reminder. The free-space line stays at the foot of the build box, now placed through the shared dialog's manual placement instead of being moved by hand.
+- Command line: the app's own leftover temp files are skipped by redactor_common's `expand_paths` itself; a file named in full is still processed.
+- The API Keys dialog's "No Secure Storage Available" question reads "Save them ..." for the plural "API keys" (fixed in redactor_common).
+- Requires redactor_common 2026-10-14-06.
+
 ## 2026-10-14#05 -- Shared code from redactor_common instead of the app's own copies; conversion temp files renamed
 
 - Fix: a conversion in progress now writes `<name>.redact-part.<ext>` / `<name>.redact-resize.<ext>` (was `.part` / `.resize`). The old bare markers made Open Folder, Refresh List and the command line skip a real file such as `Kill.Bill.Part.mkv` as if it were a leftover temp file; such files are listed again. A leftover `.part` file from an interrupted conversion with an older version is now listed like any other video (delete it by hand).

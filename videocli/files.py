@@ -6,7 +6,6 @@ Finding and loading the video files a command works on, and the app's own log, r
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from core.video_file import SUPPORTED_EXTENSIONS, VideoFile
@@ -26,14 +25,9 @@ def add_path_arguments(parser) -> None:
 def collect(paths: list[str], out: Output, recurse: bool = True) -> list[str]:
     """The video files the arguments name (the app's own leftover temp files are not listed). An argument that
     matches nothing is an error; if that leaves no files at all the command ends with a usage error."""
-    files, missing = expand_paths(paths, EXTENSIONS, recursive=recurse)
     # The app's own leftover temp files are left out of what a folder or wildcard finds; a file named in full is
-    # taken as the user meant it.
-    named = {os.path.normcase(os.path.abspath(p)) for p in paths if os.path.isfile(p)}
-    files = [
-        f for f in files
-        if os.path.normcase(os.path.abspath(f)) in named or not is_app_temp_name(os.path.basename(f))
-    ]
+    # taken as the user meant it (expand_paths keeps named files whatever `skip` says).
+    files, missing = expand_paths(paths, EXTENSIONS, recursive=recurse, skip=is_app_temp_name)
     for argument in missing:
         out.error(f"nothing found for {argument}")
     if not files:

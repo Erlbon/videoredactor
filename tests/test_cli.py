@@ -12,7 +12,7 @@ import pytest
 from core import config
 from core.filename_pattern import field_text
 from core.video_file import VideoFile
-from redactor_common.cli import CliError
+from redactor_common.cli import CliError, Output
 from videocli import cmd_files, cmd_redact
 from videocli import files as cli_files
 from videocli.main import main
@@ -424,6 +424,23 @@ def test_an_explicitly_named_temp_style_file_is_kept(media, tmp_path, capsys):
     assert code == 0 and document["files"] == 1
     with pytest.raises(CliError, match="no video files"):
         main(["info", str(tmp_path)])  # found through a folder, it is the app's own leftover and is left out
+
+
+def test_collect_lets_the_shared_expand_paths_skip_temp_names(media, tmp_path, monkeypatch):
+    from redactor_common.core.temp_names import is_app_temp_name
+    seen = {}
+    real = cli_files.expand_paths
+
+    def spy(*args, **kwargs):
+        seen.update(kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(cli_files, "expand_paths", spy)
+    shutil.copyfile(media / "good.mp4", tmp_path / "keep.mp4")
+    shutil.copyfile(media / "good.mp4", tmp_path / ".keep.redact-abcd1234.mp4")
+    found = cli_files.collect([str(tmp_path / "*.mp4")], Output(json_mode=True))
+    assert seen.get("skip") is is_app_temp_name
+    assert [os.path.basename(f) for f in found] == ["keep.mp4"]
 
 
 def test_rename_defaults_come_from_the_saved_settings(video, tmp_path, capsys):

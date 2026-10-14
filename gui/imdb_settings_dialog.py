@@ -108,6 +108,7 @@ class ImdbSettingsDialog(LocalDatabaseSettingsDialog):
             browse_for_destination=True,
             show_status=True,
             free_space_warning=(FREE_SPACE_WARNING_BYTES, FREE_SPACE_WARNING_TEXT),
+            space_label_placement="manual",  # placed at the foot of the build box below
         )
         self.setMinimumWidth(680)
         options = imdb_settings.load_options()
@@ -179,8 +180,7 @@ class ImdbSettingsDialog(LocalDatabaseSettingsDialog):
         layout.addWidget(self.aka_original)
         self._sync_aka_boxes()
 
-        # The free-space note stays at the foot of the build box, where it was.
-        self.layout().removeWidget(self.space_label)
+        # The free-space note sits at the foot of the build box, where it always was.
         layout.addWidget(self.space_label)
         # Licence first, then (the shared status line and) the build box, above the Check File / Build row.
         self.layout().insertWidget(0, self.licence_label)
@@ -272,6 +272,8 @@ class ImdbSettingsDialog(LocalDatabaseSettingsDialog):
             confirm=(
                 "Build {name} from the IMDb dataset file(s)?\n\nIt reads the whole files, which can take "
                 f"tens of minutes, and needs a few GB of free disk space while it runs.\n\nKeeping: {options.describe()}."
-                f"{extra}\n\nReminder: {LICENCE_NOTICE}\n\n{ATTRIBUTION}"
+                # {replacing}: the shared "replaced only when complete" note, after the notes and before the
+                # licence reminder as it always was (nothing when there is no database yet).
+                f"{extra}{{replacing}}\n\nReminder: {LICENCE_NOTICE}\n\n{ATTRIBUTION}"
             ),
         )

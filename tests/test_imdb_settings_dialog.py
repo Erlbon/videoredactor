@@ -95,6 +95,37 @@ def test_build_runs_and_shows_status(tmp_path, monkeypatch):
     assert imdb_settings.load_sources()["basics"] == files["basics"]  # remembered even before Save
 
 
+def test_rebuild_question_puts_the_replacing_note_before_the_licence_reminder(tmp_path, monkeypatch):
+    files = make_dataset(tmp_path / "dump")
+    dest = tmp_path / "imdb.db"
+    dest.write_bytes(b"old")
+    asked = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: asked.append(a[2]) or QMessageBox.StandardButton.No)
+    dialog = dlg.ImdbSettingsDialog()
+    try:
+        dialog.path_edit.setText(str(dest))
+        for kind, path in files.items():
+            dialog.source_edits[kind].setText(path)
+        assert dialog._build_database() is None
+    finally:
+        dialog.close()
+    text = asked[-1]
+    note = "The existing database is replaced only when the new one is complete."
+    assert "{replacing}" not in text and text.count(note) == 1
+    assert text.index(note) < text.index("Reminder:")
+    assert text.rstrip().endswith(ATTRIBUTION)
+
+
+def test_free_space_line_is_placed_by_the_app_not_the_shared_dialog():
+    dialog = dlg.ImdbSettingsDialog()
+    try:
+        assert dialog.layout().indexOf(dialog.space_label) == -1  # never added to the dialog's own layout
+        box_layout = dialog.space_label.parent().layout()
+        assert box_layout.itemAt(box_layout.count() - 1).widget() is dialog.space_label  # foot of the build box
+    finally:
+        dialog.close()
+
+
 def test_build_without_basics_or_with_votes_but_no_ratings_asks_first(tmp_path, monkeypatch):
     told = []
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: told.append(a[2]))

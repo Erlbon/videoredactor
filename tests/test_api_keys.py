@@ -130,6 +130,9 @@ def test_dialog_asks_the_shared_question(app, monkeypatch):
     dlg.save_button.click()
     from redactor_common.gui.secret_prompts import fallback_question
     assert asked == [fallback_question("API keys")]
+    # "API keys" is plural: the shared question (redactor_common 2026-10-14-06) says "them", never "it".
+    assert "Save them in an unencrypted file" in asked[0] and "read them" in asked[0]
+    assert "Save it " not in asked[0] and "read it." not in asked[0]
 
 
 def test_dialog_fallback_write_failure_is_shown_not_raised(app, monkeypatch, tmp_path):
