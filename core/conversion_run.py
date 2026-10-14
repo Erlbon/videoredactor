@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Callable
 
 from core import conversion_plan as cp
+from core import encoder_detect, history
 from core.ffmpeg_backend import _run_ffmpeg, probe_media
 from core import subtitle_ingest as si
 from core.library_safety import KIND_CLEANUP, KIND_REMUXED, KIND_RESIZED, SafeRun
@@ -117,9 +118,13 @@ def convert_file(
     cancel_event=None,
     runner: Callable = _run_ffmpeg,
     probe: Callable[[str], cp.MediaInfo | None] = probe_media,
+    resolve_encoder: Callable[[cp.ConversionSettings], str] = encoder_detect.resolve_encoder,
 ) -> ConversionOutcome:
     """Convert `source` per `plan` through `run` (dry-run, recent-file guard, verified swap, Recycle Bin /
-    quarantine). `runner`/`probe` are injectable for tests."""
+    quarantine). `runner`/`probe`/`resolve_encoder` are injectable for tests. A bitrate re-encode uses the
+    encoder settings.encoder resolves to (core/encoder_detect.py: "auto" = hevc_nvenc only when it works on
+    this computer, else libx265); the GPU decode/scale attempt (then the software-scale retry) only with
+    settings.hw_decode on and nvenc."""
     added = added or []
     added_subtitles = len(added)
     if plan.skip_reason or not plan.container:
@@ -128,13 +133,18 @@ def convert_file(
     kind = KIND_RESIZED if plan.video in (cp.V_NVENC, cp.V_NVENC_SCALE) else KIND_REMUXED
     marker = "resize" if kind == KIND_RESIZED else "part"
 
+    encoder = None
+    if plan.video in (cp.V_NVENC, cp.V_NVENC_SCALE) and not run.dry_run:
+        encoder = resolve_encoder(settings)
+    gpu = plan.scales and settings.hw_decode and encoder == cp.ENCODER_NVENC
+
     def build(src: str, temp: str) -> tuple[bool, str]:
-        attempts = [True, False] if plan.scales else [True]  # CUDA scaling, then the software scale fallback
+        attempts = [True, False] if gpu else [False]  # CUDA decode + scaling, then the software scale retry
         message = ""
         for cuda in attempts:
             if os.path.lexists(temp):
                 os.remove(temp)
-            args = cp.build_ffmpeg_args(info, plan, src, temp, settings, cuda=cuda, added=added)
+            args = cp.build_ffmpeg_args(info, plan, src, temp, settings, cuda=cuda, added=added, encoder=encoder)
             code, stderr = runner(args, cancel_event=cancel_event, timeout=CONVERT_TIMEOUT_SECONDS)
             if code == 0:
                 return True, ""
@@ -155,6 +165,9 @@ def convert_file(
     if not ok:
         detail = run.actions[-1].detail if run.actions else "not converted"
         return ConversionOutcome(False, message=detail)
+    if not run.dry_run and os.path.normcase(os.path.abspath(final)) != os.path.normcase(os.path.abspath(source)):
+        # The swap succeeded and the file has a new name (extension): its Tools > History entries follow it.
+        history.record_move(source, final)
     return ConversionOutcome(True, final_path=final, message=run.actions[-1].detail)
 
 

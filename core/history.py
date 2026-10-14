@@ -16,6 +16,7 @@ What this module adds to the shared journal:
   apply_restore(...)   the History dialog's writer: old values back onto the file with the app's own save path
   journal_begin/finish wrappers that never raise: a journal problem must never block or fail a save; it is
                        reported once (stderr, and take_problem() for the window's status bar)
+  record_moves(pairs)  entries follow a renamed, moved or converted file (the RenameLog on_move hook)
 
 Qt-free. apply_restore runs on a worker thread (the dialog's run_busy).
 """
@@ -26,7 +27,7 @@ import os
 import sys
 import threading
 from pathlib import Path
-from typing import Mapping, Optional
+from typing import Iterable, Mapping, Optional
 
 from redactor_common.core.journal import Journal, default_journal_path, diff_fields
 
@@ -72,6 +73,10 @@ class GatedJournal(Journal):
         if history_enabled():
             super().mark_restored(entry_id, restore_id)
 
+    def record_moves(self, pairs):
+        if history_enabled():
+            super().record_moves(pairs)
+
     # finish() needs no gate: it ignores the None id begin() returns while off, and an id begun while on
     # must still be finished.
 
@@ -94,14 +99,17 @@ def journal_exists() -> bool:
     return os.path.isfile(get_journal().path)
 
 
-def delete_history() -> str:
-    """Removes the journal file (and a leftover prune temp file). Returns "" or the problem."""
+def delete_history(trash=None) -> str:
+    """Moves the journal file (and a leftover prune temp file) to the Recycle Bin (`trash`, injectable for
+    tests). Returns "" or the problem."""
+    if trash is None:
+        from redactor_common.core.trash import move_to_trash as trash  # noqa: PLC0415
     path = get_journal().path
     try:
         for candidate in (path, path + ".tmp"):
             if os.path.exists(candidate):
-                os.remove(candidate)
-    except OSError as exc:
+                trash(candidate)
+    except Exception as exc:  # noqa: BLE001 -- TrashError or OSError: reported, not raised
         return str(exc)
     return ""
 
@@ -171,6 +179,26 @@ def journal_finish(entry_id: Optional[str], ok: bool, error: str = "") -> None:
         get_journal().finish(entry_id, ok, error)
     except Exception as exc:  # noqa: BLE001
         _report(exc)
+
+
+def record_moves(pairs: Iterable[tuple[object, object]]) -> None:
+    """The file at each `old` is now at `new` (a rename, a move, or a conversion that changed the name or
+    extension): its journal entries follow it. The hook every RenameLog of this app gets as `on_move`, and what
+    the command line, Redact (without a rename log) and the conversions call themselves. Does nothing while
+    history is off; never raises (a journal problem is reported once, like a save's)."""
+    if not history_enabled():
+        return
+    try:
+        cleaned = [(os.fspath(old), os.fspath(new)) for old, new in pairs]
+        if cleaned:
+            get_journal().record_moves(cleaned)
+    except Exception as exc:  # noqa: BLE001 -- bookkeeping must never fail the rename that already happened
+        _report(exc)
+
+
+def record_move(old_path, new_path) -> None:
+    """record_moves() for one file."""
+    record_moves([(old_path, new_path)])
 
 
 # --- restore ------------------------------------------------------------------------------------

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-10-14#04 -- History follows renamed and converted files; no NVIDIA card needed for the conversion rules
+
+- Tools > History: a file's history now follows it when it is renamed or moved (File > Rename File, Rename / Export / Move, Undo Last Rename, Redact's rename and move steps, the command line's `rename` and `move`) or converted to a new name or extension (the conversion rules, Import and Convert, the Open Folder offer, the Redact convert step, and Remux to MP4 when its original goes to the Recycle Bin). Convert to MP4 (H.264) keeps the original, so the history stays with the original. With history off nothing is written.
+- Redact records its history entry at the path where the save happened; a failed rename to a new extension no longer leaves the entry under the planned name.
+- Preferences > History is now a regular page of the shared dialog; its "Delete History..." button asks first and moves the history file to the Recycle Bin (it used to delete it outright).
+- Export / Import Settings carries the history on/off switch. Importing a bundle with history on turns recording on; a bundle without it leaves the current setting alone.
+- Media > Remux to MP4: one question before the run (with "Move each original MKV to the Recycle Bin when its MP4 kept every track", off by default) and one summary after it, with failures, kept originals and Recycle Bin problems under Show Details, instead of up to three warning boxes.
+- The conversion rules no longer assume an NVIDIA card. New in Preferences > Conversion: "Encoder for the re-encodes" (Automatic by default: hevc_nvenc only when ffmpeg lists it and a one-second test encode works, checked once per run of the app; otherwise libx265 in software), "libx265 quality (CRF)" (default 27, about NVENC cq 30), and "Use the NVIDIA GPU to decode and scale" (off by default; `-hwaccel cuda` and `scale_cuda` only with the NVIDIA encoder, with the software-scale retry). With it off, scaling is the software `scale=-2:720`. Before, every series re-encode tried CUDA and hevc_nvenc and failed on a computer without an NVIDIA card (the original was kept, but nothing converted).
+- Requires redactor_common 2026-10-14-04.
+
 ## 2026-10-14#03 -- Tools > History: an opt-in history of tag changes that can be undone later
 
 - Opt-in, off by default: nothing is recorded (no file is created) until you turn it on with the new Tools > Preferences > History checkbox "Keep a history of tag changes" (applied on OK / Apply, Cancel changes nothing), or by answering Yes when Tools > History asks "History is off. Turn it on?". The page says what is kept, how much and where, and has a "Delete History..." button (asks first). With history off but an old journal there, Tools > History opens it as "History (recording is off)". The command line follows the same setting.

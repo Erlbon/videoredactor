@@ -199,7 +199,7 @@ def window(monkeypatch, tmp_path):
     w.close()
 
 
-def _remux_window(window, monkeypatch, tmp_path, verdict, names=("m.mkv",)):
+def _remux_window(window, monkeypatch, tmp_path, verdict, names=("m.mkv",), recycle=True, run=None, trash=None):
     import gui.main_window as mw
 
     files = []
@@ -215,11 +215,16 @@ def _remux_window(window, monkeypatch, tmp_path, verdict, names=("m.mkv",)):
 
     def fake_run(jobs, settings, title, remux=False):
         seen["remux"] = remux
+        if run is not None:
+            return run(jobs, settings, title, remux)
         return {i: (True, verdict) for i in range(len(jobs))}
 
     monkeypatch.setattr(window, "_run_transcode_jobs", fake_run)
     asked = []
-    monkeypatch.setattr(window, "_confirm_delete_originals", lambda verified: asked.append(list(verified)) or True)
+    monkeypatch.setattr(window, "_confirm_remux", lambda jobs: asked.append(list(jobs)) or recycle)
+    summaries = []
+    monkeypatch.setattr(window, "_remux_summary", lambda summary, lines, warn: summaries.append((summary, lines, warn)))
+    seen["summaries"] = summaries
     loads = []
     real_progress = mw.run_with_progress
     monkeypatch.setattr(
@@ -229,8 +234,12 @@ def _remux_window(window, monkeypatch, tmp_path, verdict, names=("m.mkv",)):
     )
     seen["progress"] = loads
     trashed = []
-    monkeypatch.setattr(mw, "move_to_trash", lambda p: trashed.append(p))
-    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
+    monkeypatch.setattr(mw, "move_to_trash", trash or (lambda p: trashed.append(p)))
+    boxes = []
+    for name in ("warning", "information", "question", "critical"):
+        monkeypatch.setattr(QMessageBox, name, lambda *a, n=name, **k: boxes.append(n))
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: boxes.append("exec"))
+    seen["boxes"] = boxes
     window._on_remux_selected()
     return seen, asked, trashed, files[0].path
 
@@ -241,14 +250,72 @@ def test_remux_verified_original_goes_to_the_recycle_bin_not_unlinked(window, mo
     assert trashed == [str(src)] and src.exists()  # (the fake trash doesn't remove it)
 
 
-def test_remux_that_lost_a_track_keeps_the_original_and_does_not_offer_deletion(window, monkeypatch, tmp_path):
+def test_remux_that_lost_a_track_keeps_the_original(window, monkeypatch, tmp_path):
     _seen, asked, trashed, _src = _remux_window(window, monkeypatch, tmp_path, verdict="1 audio track(s) missing")
-    assert asked == [] and trashed == []
+    assert len(asked) == 1 and trashed == []  # recycling was chosen, but this result does not qualify
+
+
+def test_remux_unticked_recycle_keeps_every_original(window, monkeypatch, tmp_path):
+    _seen, asked, trashed, _src = _remux_window(window, monkeypatch, tmp_path, verdict="", recycle=False)
+    assert len(asked) == 1 and trashed == []
+
+
+def test_remux_cancelled_at_the_confirmation_does_nothing(window, monkeypatch, tmp_path):
+    seen, asked, trashed, _src = _remux_window(window, monkeypatch, tmp_path, verdict="", recycle=None)
+    assert len(asked) == 1 and "remux" not in seen and trashed == [] and seen["summaries"] == []
 
 
 def test_remux_batch_asks_once_and_reloads_under_a_progress_dialog(window, monkeypatch, tmp_path):
     seen, asked, trashed, _src = _remux_window(window, monkeypatch, tmp_path, verdict="", names=("a.mkv", "b.mkv", "c.mkv"))
-    assert len(asked) == 1 and len(asked[0]) == 3  # ONE question for the batch, not one per file
+    assert len(asked) == 1 and len(asked[0]) == 3  # ONE question for the batch, BEFORE it, not one per file
     assert len(trashed) == 3
     reads = [entry for entry in seen["progress"] if entry[0].startswith("Reading")]
     assert reads == [("Reading the remuxed files...", 3, False)]  # the reload is under progress, not cancellable
+
+
+def test_remux_ends_with_one_summary_holding_every_problem(window, monkeypatch, tmp_path):
+    """Failures, kept originals and Recycle Bin problems used to be up to three separate warning boxes."""
+    import gui.main_window as mw
+
+    def results(jobs, settings, title, remux=False):
+        return {0: (False, "ffmpeg exploded"), 1: (True, "1 audio track(s) missing"), 2: (True, "")}
+
+    def refuse(path):
+        raise mw.TrashError("Recycle Bin unavailable")
+
+    seen, asked, _trashed, _src = _remux_window(
+        window, monkeypatch, tmp_path, verdict="", names=("a.mkv", "b.mkv", "c.mkv"), run=results, trash=refuse,
+    )
+    assert len(asked) == 1
+    assert seen["boxes"] == []  # no other box at all: no per-file or per-kind warnings
+    [(summary, lines, warn)] = seen["summaries"]
+    assert warn and "1 failed" in summary and "1 original(s) kept" in summary
+    text = "\n".join(lines)
+    assert "FAILED a.mkv: ffmpeg exploded" in text
+    assert "ORIGINAL KEPT b.mkv" in text and "audio track" in text
+    assert "NOT RECYCLED c.mkv: Recycle Bin unavailable" in text
+
+
+def test_remux_summary_is_one_box_with_the_details(window, monkeypatch):
+    shown = []
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: shown.append((self.text(), self.detailedText(), self.icon())))
+    window._remux_summary("Remuxed 1 file(s), 1 failed", ["FAILED x.mkv: boom", "REMUXED y.mkv -> y.mp4"], warn=True)
+    [(text, details, icon)] = shown
+    assert text == "Remuxed 1 file(s), 1 failed." and "FAILED x.mkv: boom" in details
+    assert icon == QMessageBox.Icon.Warning
+
+
+def test_remux_confirmation_has_the_recycle_checkbox_off_by_default(window, monkeypatch):
+    seen = {}
+
+    def fake_exec(box):
+        seen["checked"] = box.checkBox().isChecked()
+        seen["details"] = box.detailedText()
+        box.checkBox().setChecked(True)
+        return QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(QMessageBox, "exec", fake_exec)
+    assert window._confirm_remux([(Path("a.mkv"), Path("a.mp4"))]) is True
+    assert seen["checked"] is False and "a.mkv -> a.mp4" in seen["details"]
+    monkeypatch.setattr(QMessageBox, "exec", lambda box: QMessageBox.StandardButton.Cancel)
+    assert window._confirm_remux([(Path("a.mkv"), Path("a.mp4"))]) is None

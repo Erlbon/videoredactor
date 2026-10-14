@@ -219,6 +219,20 @@ def _imdb_options_codec():
     return read, coerce
 
 
+def _history_codec():
+    """[history] enabled, read the way core/history.history_enabled() reads it ("true"/"1"/... = on, anything
+    else or missing = off) and written the way set_history_enabled() writes it."""
+    def read(raw: str) -> bool:
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+    def coerce(value: Any) -> str:
+        if not isinstance(value, bool):
+            raise ValueError("expected true or false")
+        return "true" if value else "false"
+
+    return read, coerce
+
+
 def _bitrate_ok(text: str) -> bool:
     return re.fullmatch(r"\d{1,4}[kKmM]?", text) is not None
 
@@ -269,6 +283,11 @@ SECTIONS: dict[str, tuple[str, bool, list[Key]]] = {
         _key("audio_bitrate", "transcode", "audio_bitrate", _str_codec(DEFAULT_AUDIO_BITRATE, _bitrate_ok)),
         _key("threads", "transcode", "threads", _int_codec(DEFAULT_THREADS, 0, 256)),
         _key("duplicate_threshold", "duplicates", "threshold", _int_codec(HAMMING_THRESHOLD, 0, 32)),
+    ]),
+    # Opt-in recording: a bundle exported with history ON turns it on here when imported (the label says so,
+    # it is what the import dialog shows); a bundle without this key leaves the current value alone.
+    "history": ("Tools > History on/off (importing a bundle with it on turns recording on)", True, [
+        _key("enabled", "history", "enabled", _history_codec()),
     ]),
     "imdb_options": ("IMDb database build options", True, [
         _key("options", "imdb", "options", _imdb_options_codec()),

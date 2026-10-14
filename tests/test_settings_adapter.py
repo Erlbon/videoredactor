@@ -186,6 +186,38 @@ def test_a_section_is_saved_in_one_atomic_write(ini, monkeypatch):
     assert len(saved) == 1
 
 
+def test_history_switch_round_trips_through_a_bundle(ini):
+    from core import history
+
+    adapter = VideoSettingsAdapter()
+    assert "history" in sb.default_selection(adapter)  # portable: exported by default
+    assert "turns recording on" in dict((s.key, s.label) for s in adapter.sections())["history"]
+    assert adapter.read_section("history") == {"enabled": False}  # off by default
+    history.set_history_enabled(True)
+    text = sb.dump_bundle(sb.build_bundle(adapter, {"history"}))
+    assert json.loads(text)["sections"]["history"]["items"] == {"enabled": True}
+    history.set_history_enabled(False)
+    result = sb.apply_bundle(adapter, sb.parse_bundle(text, APP_SLUG), {"history"})
+    assert not result.failed and history.history_enabled() is True  # importing "on" turns recording on
+    adapter.write_section("history", {"enabled": False})
+    assert history.history_enabled() is False
+    with pytest.raises(ValueError):
+        adapter.write_section("history", {"enabled": "yes"})
+    assert history.history_enabled() is False
+
+
+def test_a_bundle_without_the_history_key_leaves_it_alone(ini):
+    from core import history
+
+    adapter = VideoSettingsAdapter()
+    history.set_history_enabled(True)
+    adapter.write_section("history", {})
+    assert history.history_enabled() is True
+    old = sb.Bundle(app=APP_SLUG, sections={"media": sb.BundleSection("x", {"crf": 20})})  # an older export
+    sb.apply_bundle(adapter, old, {s.key for s in adapter.sections()})
+    assert history.history_enabled() is True and config.get_setting("transcode", "crf") == "20"
+
+
 def test_bundle_header_names_the_app_and_version(ini):
     from core.version import APP_VERSION
 

@@ -197,10 +197,16 @@ FILENAME_PLACEHOLDERS = [(field, FIELD_LABELS.get(field, field)) for field in ED
 
 
 
+def _rename_log_at(path: str) -> RenameLog:
+    """A RenameLog whose renames, moves and undos are passed on to Tools > History (history.record_moves:
+    a file's journal entries follow it; a no-op while history is off)."""
+    return RenameLog(path, on_move=history.record_moves)
+
+
 def _rename_log() -> RenameLog:
     """The persistent log behind File > Undo Last Rename (redactor_common's
     core/rename_log.py), next to this app's settings."""
-    return RenameLog(os.path.join(str(base_dir()), "videoredactor_rename_log.json"))
+    return _rename_log_at(os.path.join(str(base_dir()), "videoredactor_rename_log.json"))
 
 def _field_text(vf: VideoFile, field_name: str) -> str:
     """A metadata field as the plain string the shared dialogs work on."""
@@ -2427,11 +2433,13 @@ class MainWindow(QMainWindow):
     def _on_remux_selected(self) -> None:
         """Remux selected MKV files to MP4 (batch-capable, -c copy so
         it's lossless -- no re-encode), on a worker thread with a
-        progress dialog and Cancel. The new MP4s are read back under a
-        progress dialog and added as rows; then ONE question offers to
-        move the originals of the verified results (every track kept,
-        verify_remux) to the Recycle Bin. A result that lost something is
-        added but its original is always kept.
+        progress dialog and Cancel. ONE confirmation before the run (its
+        checkbox: move the originals of the verified results -- every track
+        kept, verify_remux -- to the Recycle Bin), ONE summary after it with
+        every per-file detail under Show Details; no box per file. The new
+        MP4s are read back under a progress dialog and added as rows. A
+        result that lost something is added but its original is always kept.
+        A recycled original's Tools > History entries follow its MP4.
         """
         selected = self._selected_video_files()
         mkv_files = [vf for vf in selected if vf.is_mkv]
@@ -2461,6 +2469,13 @@ class MainWindow(QMainWindow):
             jobs.append((vf.path, output_path))
             job_files.append(vf)
 
+        recycle = False
+        if jobs:
+            # ONE confirmation before the run (with the Recycle Bin choice), ONE summary after it, no modal per file.
+            choice = self._confirm_remux(jobs)
+            if choice is None:
+                return
+            recycle = choice
         results = (
             self._run_transcode_jobs(jobs, None, "Remuxing to MP4", remux=True) if jobs else {}
         )
@@ -2497,15 +2512,18 @@ class MainWindow(QMainWindow):
         # Each new MP4 is read (ffprobe + tags) under a progress dialog, not frozen on the GUI thread.
         new_files = self._load_results([out for _vf, out in succeeded], "Reading the remuxed files...")
 
-        # ONE question for the whole batch (it used to ask per file inside the loop).
-        if verified and self._confirm_delete_originals(verified):
+        # The Recycle Bin choice was made in the confirmation before the run; only verified results qualify.
+        if verified and recycle:
             def trash_one(item: tuple[VideoFile, Path], _index: int) -> None:
-                vf = item[0]
+                vf, output = item
                 try:
                     move_to_trash(str(vf.path))
                     removed_originals.append(vf)
                 except (TrashError, OSError) as e:
                     deletion_failures.append((vf, str(e)))
+                    return
+                # The MKV is gone and the MP4 is its successor: its Tools > History entries follow it.
+                history.record_move(vf.path, output)
 
             run_with_progress(
                 self, verified, trash_one, "Moving originals to the Recycle Bin...", threshold=3,
@@ -2531,38 +2549,56 @@ class MainWindow(QMainWindow):
         if non_mkv_count:
             parts.append(f"{non_mkv_count} non-MKV selection(s) ignored")
         if deletion_failures:
-            parts.append(f"{len(deletion_failures)} original(s) could not be deleted")
-        self.status_bar.showMessage(", ".join(parts))
+            parts.append(f"{len(deletion_failures)} original(s) could not be moved to the Recycle Bin")
+        summary = ", ".join(parts)
+        self.status_bar.showMessage(summary)
 
-        if failed:
-            details = _error_details([f"{vf.path.name}: {err}" for vf, err in failed])
-            QMessageBox.warning(self, "Some files failed to remux", details)
-        if unverified:
-            details = _error_details([f"{vf.path.name}: {err}" for vf, err in unverified])
-            QMessageBox.warning(
-                self, "Originals kept",
-                "These MP4s don't hold everything the MKV did, so the originals were kept:\n\n" + details,
-            )
-        if deletion_failures:
-            details = _error_details([f"{vf.path.name}: {err}" for vf, err in deletion_failures])
-            QMessageBox.warning(self, "Some originals could not be deleted", details)
+        # ONE end-of-run summary: failures, kept originals and every other note under Show Details.
+        removed_ids = {id(vf) for vf in removed_originals}
+        lines = [f"FAILED {vf.path.name}: {err}" for vf, err in failed]
+        lines += [f"ORIGINAL KEPT {vf.path.name}: the MP4 does not hold everything the MKV did ({err})"
+                  for vf, err in unverified]
+        lines += [f"NOT RECYCLED {vf.path.name}: {err}" for vf, err in deletion_failures]
+        lines += [f"SKIPPED {vf.path.name}: {vf.path.with_suffix('.mp4').name} already exists" for vf in skipped_existing]
+        lines += [
+            f"REMUXED {vf.path.name} -> {out.name}" + ("; the original is in the Recycle Bin" if id(vf) in removed_ids else "")
+            for vf, out in succeeded if not any(vf is u for u, _e in unverified)
+        ]
+        self._remux_summary(summary, lines, warn=bool(failed or unverified or deletion_failures))
 
-    def _confirm_delete_originals(self, verified: list[tuple[VideoFile, Path]]) -> bool:
-        """One question after the whole remux batch: move the originals of the verified results (every
-        track kept) to the Recycle Bin? The files are listed under Show Details. Esc / No keeps them all."""
+    def _confirm_remux(self, jobs: list[tuple[Path, Path]]) -> Optional[bool]:
+        """The ONE question before a remux batch, with the Recycle Bin choice as a checkbox (off by default):
+        a result that kept every track (verify_remux) then sends its original MKV to the Recycle Bin; one that
+        lost something always keeps it. Returns None on Cancel, else whether to recycle."""
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Question)
-        box.setWindowTitle("Recycle the Original MKVs?")
+        box.setWindowTitle("Remux to MP4")
         box.setText(
-            f"{len(verified)} file(s) were remuxed to MP4 with every track kept.\n\n"
-            f"Move the {len(verified)} original MKV file(s) to the Recycle Bin?"
+            f"Remux {len(jobs)} MKV file(s) to MP4? A stream copy: nothing is re-encoded, and each MP4 is checked "
+            "for every audio and subtitle track afterwards. The MP4s are added to the list."
         )
-        shown = [f"{vf.path.name} -> {out.name}" for vf, out in verified[:200]]
-        more = f"\n... and {len(verified) - len(shown)} more" if len(verified) > len(shown) else ""
+        shown = [f"{src.name} -> {out.name}" for src, out in jobs[:200]]
+        more = f"\n... and {len(jobs) - len(shown)} more" if len(jobs) > len(shown) else ""
         box.setDetailedText("\n".join(shown) + more)
-        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        box.setDefaultButton(QMessageBox.StandardButton.No)
-        return box.exec() == QMessageBox.StandardButton.Yes
+        check = QCheckBox("Move each original MKV to the Recycle Bin when its MP4 kept every track")
+        check.setChecked(False)
+        box.setCheckBox(check)
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(QMessageBox.StandardButton.Yes)
+        if box.exec() != QMessageBox.StandardButton.Yes:
+            return None
+        return check.isChecked()
+
+    def _remux_summary(self, summary: str, lines: list[str], warn: bool) -> None:
+        """The one end-of-run box of Media > Remux to MP4, the details under Show Details."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning if warn else QMessageBox.Icon.Information)
+        box.setWindowTitle("Remux to MP4")
+        box.setText(summary + ".")
+        if lines:
+            box.setDetailedText("\n".join(lines))
+        box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        box.exec()
 
     def _load_results(self, paths: list[Path], label: str) -> list[VideoFile]:
         """Reads freshly written files (ffprobe + tags, VideoFile.load) under a progress dialog -- a batch of

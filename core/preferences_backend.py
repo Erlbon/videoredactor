@@ -14,6 +14,7 @@ way in, it never moves them:
   auto_number_padding  [auto_numbering] padding
   crf / audio_bitrate / threads   [transcode]
   duplicate_threshold  [duplicates] threshold
+  history_enabled      [history] enabled (Tools > History, opt-in; core/history.py)
 
 There is no default-language setting in this app (a video's language is read
 from its own tracks), so the shared language section is not offered.
@@ -29,12 +30,13 @@ from redactor_common.core.preferences import (
     KEY_ZERO_PAD_NUMBERS,
     KEY_ZERO_PAD_WIDTH,
     CallbackBackend,
+    PrefAction,
     PrefSection,
     PrefSpec,
     filenames_section,
 )
 
-from core import config
+from core import config, history
 from core.transcode_settings import DEFAULT_AUDIO_BITRATE, DEFAULT_CRF, DEFAULT_THREADS
 from core.video_duplicates import HAMMING_THRESHOLD
 
@@ -42,6 +44,7 @@ KEY_CRF = "crf"
 KEY_AUDIO_BITRATE = "audio_bitrate"
 KEY_THREADS = "threads"
 KEY_DUPLICATE_THRESHOLD = "duplicate_threshold"
+KEY_HISTORY_ENABLED = "history_enabled"
 
 # preference key -> (ini section, ini key)
 INI_LOCATIONS: dict[str, tuple[str, str]] = {
@@ -53,6 +56,7 @@ INI_LOCATIONS: dict[str, tuple[str, str]] = {
     KEY_AUDIO_BITRATE: ("transcode", "audio_bitrate"),
     KEY_THREADS: ("transcode", "threads"),
     KEY_DUPLICATE_THRESHOLD: ("duplicates", "threshold"),
+    KEY_HISTORY_ENABLED: (history.SETTINGS_SECTION, history.SETTINGS_KEY),
 }
 
 _BITRATE = re.compile(r"\d{1,4}[kKmM]?")
@@ -63,7 +67,31 @@ def bitrate_ok(text: str) -> bool:
     return _BITRATE.fullmatch(text) is not None
 
 
-def build_sections() -> list[PrefSection]:
+HISTORY_CHECKBOX = "Keep a history of tag changes (lets you undo a Save or Redact later)"
+
+
+def history_help_text(path: str) -> str:
+    return (
+        "What is kept: the old and new text of every tag field a Save, Save All, Redact or the command line "
+        "changes; never covers or other images. A renamed, moved or converted file takes its history with it. "
+        "How much: the last 90 days, at most 50,000 changes. "
+        f"Where: {path}. Tools > History shows it and can write old values back. You can switch it off again "
+        "at any time; what was recorded stays until you delete it. Off by default."
+    )
+
+
+def history_section(actions: tuple[PrefAction, ...] = ()) -> PrefSection:
+    """Preferences > History: the opt-in switch ([history] enabled, off by default) and, from the dialog, the
+    Delete History... action button."""
+    return PrefSection("history", "History", (
+        PrefSpec(KEY_HISTORY_ENABLED, HISTORY_CHECKBOX, "bool", False,
+                 help="Off by default: while it is off nothing is written."),
+    ), history_help_text(history.journal_path()), actions=actions)
+
+
+def build_sections(history_actions: tuple[PrefAction, ...] = ()) -> list[PrefSection]:
+    """The shared dialog's pages. `history_actions`: the History page's buttons (the dialog passes its Qt
+    Delete History... callback; this module stays Qt-free)."""
     return [
         filenames_section(),
         PrefSection("transcode", "Transcode", (
@@ -87,6 +115,7 @@ def build_sections() -> list[PrefSection]:
                           "more, with more false matches.",
                      minimum=0, maximum=32),
         ), "Used by Media > Find Duplicates as its starting value."),
+        history_section(history_actions),
     ]
 
 

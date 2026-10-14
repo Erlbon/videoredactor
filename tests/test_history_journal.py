@@ -170,14 +170,23 @@ def test_off_redact_and_cli_set_write_nothing(clip, tmp_path, journal, capsys):
     assert not os.path.exists(journal.path)
 
 
-def test_delete_history_removes_the_file(tmp_path, journal, monkeypatch):
+def test_delete_history_recycles_the_file(tmp_path, journal, monkeypatch):
     _fake_written(monkeypatch)
     history.set_history_enabled(True)
     _changed(tmp_path).save()
     assert history.journal_exists()
-    assert history.delete_history() == ""
+    binned = Bin(tmp_path / "bin")
+    assert history.delete_history(trash=binned) == ""
     assert not history.journal_exists() and journal.entries() == []
-    assert history.delete_history() == ""  # nothing there: fine
+    assert (tmp_path / "bin" / os.path.basename(journal.path)).exists()  # in the "Recycle Bin", not unlinked
+    assert history.delete_history(trash=binned) == ""  # nothing there: fine
+
+    _changed(tmp_path, "b.mp4").save()
+
+    def refuse(path):
+        raise OSError("no Recycle Bin on this drive")
+
+    assert "Recycle Bin" in history.delete_history(trash=refuse) and history.journal_exists()
 
 
 # --- J2/J3/J6: plain save, real MP4 -------------------------------------------------------------
@@ -483,38 +492,65 @@ def _prefs():
 
 
 def test_preferences_checkbox_is_off_round_trips_and_cancel_changes_nothing():
+    from core.preferences_backend import KEY_HISTORY_ENABLED, build_sections
     from gui.video_preferences import HISTORY_CHECKBOX
 
+    [section] = [s for s in build_sections() if s.key == "history"]
+    [spec] = section.specs
+    assert spec.label == HISTORY_CHECKBOX and spec.default is False
+    assert history.journal_path() in section.description and "90 days" in section.description
+    assert "covers" in section.description and "takes its history with it" in section.description
+
     dialog = _prefs()
-    page = dialog.history_page
-    assert page.enabled.text() == HISTORY_CHECKBOX and page.enabled.isChecked() is False
-    assert history.journal_path() in page.help.text() and "90 days" in page.help.text()
-    assert "covers" in page.help.text()
-    page.enabled.setChecked(True)
+    assert "History" in dialog.page_titles()
+    assert dialog.value(KEY_HISTORY_ENABLED) is False
+    dialog.set_value(KEY_HISTORY_ENABLED, True)
     dialog.reject()  # Cancel
     assert history.history_enabled() is False
 
     dialog = _prefs()
-    dialog.history_page.enabled.setChecked(True)
+    dialog.set_value(KEY_HISTORY_ENABLED, True)
     dialog.apply()
     assert history.history_enabled() is True
     dialog = _prefs()
-    assert dialog.history_page.enabled.isChecked() is True
-    dialog.history_page.enabled.setChecked(False)
+    assert dialog.value(KEY_HISTORY_ENABLED) is True
+    dialog.set_value(KEY_HISTORY_ENABLED, False)
     dialog.apply()
     assert history.history_enabled() is False
 
 
-def test_preferences_delete_history_asks_and_removes_the_file(monkeypatch, tmp_path, journal):
+def _delete_button(dialog):
+    from gui.video_preferences import DELETE_HISTORY_LABEL
+
+    [button] = [b for b in dialog.action_buttons if b.text() == DELETE_HISTORY_LABEL]
+    return button
+
+
+def test_preferences_delete_history_is_a_pref_action_that_asks_and_recycles(monkeypatch, tmp_path, journal):
+    import redactor_common.core.trash as trash_module
+
     import gui.video_preferences as vp
 
     _fake_written(monkeypatch)
     history.set_history_enabled(True)
     _changed(tmp_path).save()
-    page = _prefs().history_page
-    assert page.delete_button.isEnabled()
+    recycled = []
+    monkeypatch.setattr(trash_module, "move_to_trash", lambda p: (recycled.append(p), os.remove(p)))
+    infos = []
+    monkeypatch.setattr(vp.QMessageBox, "information", lambda *a, **k: infos.append(a[2]))
+    dialog = _prefs()
+    button = _delete_button(dialog)
+    assert button.text() == "Delete History..."
     monkeypatch.setattr(vp.QMessageBox, "question", lambda *a, **k: vp.QMessageBox.StandardButton.Cancel)
-    assert page.delete_history() is False and history.journal_exists()
-    monkeypatch.setattr(vp.QMessageBox, "question", lambda *a, **k: vp.QMessageBox.StandardButton.Yes)
-    assert page.delete_history() is True and not history.journal_exists()
-    assert not page.delete_button.isEnabled()
+    button.click()
+    assert history.journal_exists() and recycled == []
+    asked = []
+    monkeypatch.setattr(
+        vp.QMessageBox, "question", lambda *a, **k: (asked.append(a[2]), vp.QMessageBox.StandardButton.Yes)[1],
+    )
+    button.click()
+    assert not history.journal_exists() and recycled == [journal.path]
+    assert "Recycle Bin" in asked[0] and "Recycle Bin" in infos[-1]
+    button.click()  # nothing left: says so, asks nothing
+    assert len(asked) == 1 and "no history" in infos[-1]
+    assert history.history_enabled() is True  # deleting does not switch recording off

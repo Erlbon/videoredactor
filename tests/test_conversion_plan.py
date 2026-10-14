@@ -116,16 +116,62 @@ def test_external_subtitles_turn_an_mp4_into_mkv():
     assert p.container == ".mkv" and p.does_something
 
 
+NVENC_GPU = cp.ConversionSettings(encoder="nvenc", hw_decode=True)
+
+
 def test_ffmpeg_args_nvenc_scale_cuda_and_fallback():
     m = info(size=2 * GB)
     p = cp.plan_conversion(m)
-    a = cp.build_ffmpeg_args(m, p, "in.mkv", "out.mkv")
+    a = cp.build_ffmpeg_args(m, p, "in.mkv", "out.mkv", NVENC_GPU)
     assert a[:4] == ["ffmpeg", "-v", "error", "-y"] and a[a.index("-hwaccel") + 1] == "cuda"
     assert "scale_cuda=-2:720" in a and a[a.index("-cq") + 1] == "30"
+    assert a[a.index("-c:v") + 1] == "hevc_nvenc"
     assert a[a.index("-c:a") + 1] == "copy" and "-dn" in a and a[-1] == "out.mkv"
-    soft = cp.build_ffmpeg_args(m, p, "in.mkv", "out.mkv", cuda=False)
-    assert "-hwaccel" not in soft and "scale=-2:720" in soft
+    soft = cp.build_ffmpeg_args(m, p, "in.mkv", "out.mkv", NVENC_GPU, cuda=False)
+    assert "-hwaccel" not in soft and "scale=-2:720" in soft and soft[soft.index("-c:v") + 1] == "hevc_nvenc"
     assert a.index("-fflags") < a.index("-i")
+
+
+def test_the_encoder_defaults_are_auto_software_decode_and_crf_27():
+    s = cp.ConversionSettings()
+    assert s.encoder == "auto" and s.hw_decode is False and s.x265_crf == 27
+    assert cp.ENCODERS == ("auto", "nvenc", "x265")
+
+
+def test_hw_decode_off_means_no_hwaccel_even_with_nvenc():
+    m = info(size=2 * GB)
+    p = cp.plan_conversion(m)
+    a = cp.build_ffmpeg_args(m, p, "in.mkv", "out.mkv", cp.ConversionSettings(encoder="nvenc"))
+    assert "-hwaccel" not in a and "scale_cuda=-2:720" not in a and "scale=-2:720" in a
+    assert a[a.index("-c:v") + 1] == "hevc_nvenc"
+
+
+def test_hw_decode_on_with_x265_still_has_no_cuda_flags():
+    m = info(size=2 * GB)
+    p = cp.plan_conversion(m)
+    a = cp.build_ffmpeg_args(m, p, "in.mkv", "out.mkv", cp.ConversionSettings(hw_decode=True), encoder="x265")
+    assert "-hwaccel" not in a and "scale=-2:720" in a
+
+
+def test_x265_args_for_the_series_reencodes():
+    m = info(size=2 * GB, subs=("subrip",))
+    p = cp.plan_conversion(m)
+    a = cp.build_ffmpeg_args(m, p, "in.mkv", "out.mkv", cp.ConversionSettings(x265_crf=25), encoder="x265")
+    i = a.index("-c:v")
+    assert a[i:i + 8] == ["-c:v", "libx265", "-preset", "medium", "-crf", "25", "-tag:v", "hvc1"]
+    assert "hevc_nvenc" not in a and "-cq" not in a and "scale=-2:720" in a
+    assert a[a.index("-c:a") + 1] == "copy" and a[a.index("-c:s:0") + 1] == "copy"  # audio, subtitles copied
+    # an unresolved "auto" builds the encoder that needs no particular hardware
+    assert cp.build_ffmpeg_args(m, p, "in.mkv", "out.mkv")[i + 1] == "libx265"
+
+
+def test_the_unplayable_codec_fallback_is_unchanged():
+    m = info(".rmvb", size=300 * MB, h=480, w=640, vcodec="rv40")
+    p = cp.plan_conversion(m)
+    for encoder in ("nvenc", "x265"):
+        a = cp.build_ffmpeg_args(m, p, "in.rmvb", "out.mp4", NVENC_GPU, encoder=encoder)
+        assert a[a.index("-c:v") + 1: a.index("-c:v") + 5] == ["libx265", "-crf", "23", "-tag:v"]
+        assert "-hwaccel" not in a and "-preset" not in a
 
 
 def test_ffmpeg_args_map_streams_explicitly_and_drop_bitmap_subs_in_mp4():
@@ -158,6 +204,14 @@ def test_conversion_settings_roundtrip_defaults_and_damage():
     store[("conversion", "disc_images")] = "bogus"
     back = cp.get_conversion_settings(get)
     assert back.nvenc_cq == 30 and back.disc_images == cp.DISC_LEAVE
+    gpu = cp.ConversionSettings(encoder="nvenc", hw_decode=True, x265_crf=24)
+    cp.set_conversion_settings(gpu, put)
+    assert store[("conversion", "encoder")] == "nvenc" and store[("conversion", "hw_decode")] == "1"
+    assert cp.get_conversion_settings(get) == gpu
+    store[("conversion", "encoder")] = "quantum"
+    store[("conversion", "x265_crf")] = "99"
+    back = cp.get_conversion_settings(get)
+    assert back.encoder == "auto" and back.x265_crf == 27 and back.hw_decode is True
 
 
 def test_ffmpeg_args_added_subtitles():

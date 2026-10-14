@@ -12,9 +12,10 @@ this app's settings.
                verification tolerance
   Tools / Paths  ffmpeg / MKVToolNix locations, IMDb database and dataset files
                (a self-saving page, like the Locate External Tools dialog)
-  History      the opt-in switch for Tools > History (off by default) and Delete History
+  History      the opt-in switch for Tools > History (off by default) and the Delete History... button
+               (a shared PrefSection with a PrefAction; the button acts at once, after asking)
 
-Conversion, Library safety and History are written on OK / Apply and dropped on Cancel,
+Conversion and Library safety are written on OK / Apply and dropped on Cancel,
 like the shared pages (VideoPreferencesDialog.apply saves them); only Tools /
 Paths still saves as you type.
 
@@ -29,10 +30,14 @@ from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
     QMessageBox, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
+from redactor_common.core.preferences import PrefAction
 from redactor_common.gui.preferences_dialog import PreferencesDialog
 
 from core import conversion_plan, history, imdb_settings, library_safety
-from core.preferences_backend import KEY_AUDIO_BITRATE, bitrate_ok, build_sections, make_backend
+from core.preferences_backend import (  # noqa: F401 -- HISTORY_CHECKBOX / history_help_text re-exported
+    HISTORY_CHECKBOX, KEY_AUDIO_BITRATE, KEY_HISTORY_ENABLED, bitrate_ok, build_sections, history_help_text,
+    make_backend,
+)
 from gui.tool_settings_dialog import ToolPathsWidget
 
 # Display names of the dataset files, in the order imdb_settings.SOURCE_KEYS lists them.
@@ -170,71 +175,30 @@ class SafetyPage(QWidget):
         ))
 
 
-HISTORY_CHECKBOX = "Keep a history of tag changes (lets you undo a Save or Redact later)"
+DELETE_HISTORY_LABEL = "Delete History..."
+DELETE_HISTORY_HELP = "Moves the history file to the Recycle Bin after asking. Recording stays as it is set above."
 
 
-def history_help_text(path: str) -> str:
-    return (
-        "What is kept: the old and new text of every tag field a Save, Save All, Redact or the command line "
-        "changes; never covers or other images. How much: the last 90 days, at most 50,000 changes. "
-        f"Where: {path}. Tools > History shows it and can write old values back. You can switch it off again "
-        "at any time; what was recorded stays until you delete it."
+def delete_history_action(parent: QWidget) -> bool:
+    """Preferences > History's Delete History... button (a PrefAction): asks, then moves the journal file to the
+    Recycle Bin. Acts at once (not on OK / Apply). Returns whether it was deleted."""
+    if not history.journal_exists():
+        QMessageBox.information(parent, "Delete History", "There is no history to delete.")
+        return False
+    answer = QMessageBox.question(
+        parent, "Delete History",
+        "Move the whole history of tag changes to the Recycle Bin? Old values recorded so far can then no "
+        f"longer be restored from Tools > History.\n\n{history.journal_path()}",
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
     )
-
-
-class HistoryPage(QWidget):
-    """Tools > History's recording switch (core/history.py, opt-in, off by default) and Delete history. The
-    switch is written by save() on OK / Apply, like the Library safety page; Delete history acts at once, after
-    a confirmation."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        layout = QVBoxLayout(self)
-        self.enabled = QCheckBox(HISTORY_CHECKBOX)
-        self.enabled.setChecked(history.history_enabled())
-        layout.addWidget(self.enabled)
-        self.help = QLabel(history_help_text(history.journal_path()))
-        self.help.setWordWrap(True)
-        self.help.setStyleSheet("color: gray;")
-        layout.addWidget(self.help)
-        row = QHBoxLayout()
-        self.delete_button = QPushButton("Delete History...")
-        self.delete_button.clicked.connect(self.delete_history)
-        row.addWidget(self.delete_button)
-        self.status = QLabel("")
-        row.addWidget(self.status, 1)
-        layout.addLayout(row)
-        layout.addStretch(1)
-        self._refresh_delete()
-
-    def _refresh_delete(self) -> None:
-        self.delete_button.setEnabled(history.journal_exists())
-
-    def delete_history(self) -> bool:
-        """Asks, then removes the journal file. Returns whether it was deleted."""
-        if not history.journal_exists():
-            self._refresh_delete()
-            return False
-        answer = QMessageBox.question(
-            self, "Delete History",
-            "Delete the whole history of tag changes? Old values recorded so far can no longer be restored.\n\n"
-            f"{history.journal_path()}",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
-            return False
-        problem = history.delete_history()
-        if problem:
-            QMessageBox.warning(self, "Delete History", f"The history could not be deleted: {problem}")
-            return False
-        self.status.setText("History deleted.")
-        self._refresh_delete()
-        return True
-
-    def save(self) -> None:
-        """Writes the switch (the dialog's OK / Apply)."""
-        if self.enabled.isChecked() != history.history_enabled():
-            history.set_history_enabled(self.enabled.isChecked())
+    if answer != QMessageBox.StandardButton.Yes:
+        return False
+    problem = history.delete_history()
+    if problem:
+        QMessageBox.warning(parent, "Delete History", f"The history could not be deleted: {problem}")
+        return False
+    QMessageBox.information(parent, "Delete History", "The history is in the Recycle Bin.")
+    return True
 
 
 _DISC_LABELS = {
@@ -253,6 +217,20 @@ DISC_HELP = (
     "'list them' names each one in the report for a manual decision. Only the third choice converts anything "
     "(a single .vob, by stream copy to MKV)."
 )
+
+
+_ENCODER_LABELS = {
+    conversion_plan.ENCODER_AUTO: "Automatic: NVIDIA (hevc_nvenc) when it works here, else libx265",
+    conversion_plan.ENCODER_NVENC: "NVIDIA GPU (hevc_nvenc) always",
+    conversion_plan.ENCODER_X265: "Software (libx265) always",
+}
+ENCODER_HELP = (
+    "Default: Automatic. It uses the NVIDIA encoder only when ffmpeg lists it AND a one-second test encode works "
+    "(checked once per run of the app); otherwise libx265 on the CPU, which works on any computer but is slower."
+)
+X265_CRF_HELP = "Used when the encoder is libx265. Lower means better quality and a larger file. Default: 27 (about NVENC cq 30)."
+HW_DECODE_LABEL = "Use the NVIDIA GPU to decode and scale"
+HW_DECODE_HELP = "Faster, needs an NVIDIA card. Only used with the NVIDIA encoder; off by default (software scaling)."
 
 
 class ConversionPage(QWidget):
@@ -287,6 +265,18 @@ class ConversionPage(QWidget):
             self.cq.addItem(label, value)
         self.cq.setCurrentIndex(max(0, self.cq.findData(s.nvenc_cq)))
         form.addRow("hevc_nvenc quality (cq):", self.cq)
+        self.encoder = QComboBox()
+        for key in conversion_plan.ENCODERS:
+            self.encoder.addItem(_ENCODER_LABELS[key], key)
+        self.encoder.setCurrentIndex(max(0, self.encoder.findData(s.encoder)))
+        form.addRow("Encoder for the re-encodes:", self.encoder)
+        self.encoder_help = self._help(form, ENCODER_HELP)
+        self.x265_crf = self._spin(form, "libx265 quality (CRF):", 0, 51, s.x265_crf, "")
+        self.x265_crf_help = self._help(form, X265_CRF_HELP)
+        self.hw_decode = QCheckBox(HW_DECODE_LABEL)
+        self.hw_decode.setChecked(s.hw_decode)
+        form.addRow("", self.hw_decode)
+        self.hw_decode_help = self._help(form, HW_DECODE_HELP)
         self.ratio = self._dspin(form, "Keep the source unless the result is under:", s.output_max_ratio * 100, " % of it")
         self.many_subs = self._spin(form, "MKV when a file has at least:", 1, 99, s.many_subtitle_tracks, " subtitle tracks")
         self.many_subs_help = self._help(form, MANY_SUBS_HELP)
@@ -340,6 +330,9 @@ class ConversionPage(QWidget):
         current.reencode_video_mbps = self.reencode_mbps.value()
         current.reencode_video_mbps_small = self.reencode_small.value()
         current.nvenc_cq = int(self.cq.currentData())
+        current.encoder = self.encoder.currentData()
+        current.x265_crf = self.x265_crf.value()
+        current.hw_decode = self.hw_decode.isChecked()
         current.output_max_ratio = self.ratio.value() / 100
         current.many_subtitle_tracks = self.many_subs.value()
         current.disc_images = self.disc.currentData()
@@ -362,16 +355,16 @@ class VideoPreferencesDialog(PreferencesDialog):
                 return deferred[-1]
             return build
 
+        actions = (PrefAction(DELETE_HISTORY_LABEL, delete_history_action, DELETE_HISTORY_HELP),)
         super().__init__(
-            build_sections(), make_backend(), parent,
+            build_sections(history_actions=actions), make_backend(), parent,
             extra_pages=[
                 ("Tools / Paths", build_paths_page),
                 ("Conversion", deferred_page(ConversionPage)),
                 ("Library safety", deferred_page(SafetyPage)),
-                ("History", deferred_page(HistoryPage)),
             ],
         )
-        self.conversion_page, self.safety_page, self.history_page = deferred
+        self.conversion_page, self.safety_page = deferred
 
     def bitrate_problem(self) -> str:
         """A plain-language problem with the typed bitrate, or "" when fine."""
@@ -397,7 +390,6 @@ class VideoPreferencesDialog(PreferencesDialog):
         super().apply()
         self.conversion_page.save()
         self.safety_page.save()
-        self.history_page.save()
 
     def accept(self) -> None:
         if self._bitrate_blocks():

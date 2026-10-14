@@ -38,7 +38,10 @@ into files one at a time.
 
   Information courtesy of IMDb (https://www.imdb.com). Used with permission.
 - **Remux to MP4** for MKV files (fast, lossless container swap, not a
-  re-encode), with control over what happens to the original.
+  re-encode), with control over what happens to the original: one
+  question before the run (tick "Move each original MKV to the Recycle
+  Bin when its MP4 kept every track", off by default) and one summary
+  after it, every failure and kept original listed under Show Details.
 - **Convert to MP4 (H.264)** for a real H.264/AAC re-encode when a
   container swap alone won't do (it never deletes the original).
 - **Conversion rules** (Media > Convert to MP4/MKV (Rules), File > Import
@@ -52,8 +55,15 @@ into files one at a time.
   see what you're tagging without opening a player.
 - **Change history** (Tools > History…) — opt-in, off by default: turn it
   on in Tools > Preferences > History (or answer Yes when Tools > History
-  asks) and off again there, where "Delete History…" removes what was
-  recorded. While it is on, every tag change the app makes to a file
+  asks) and off again there, where "Delete History…" moves what was
+  recorded to the Recycle Bin (after asking). A file that is renamed,
+  moved (File > Rename File, Rename / Export / Move, Undo Last Rename,
+  Redact's rename and move steps, the command line's `rename` and `move`)
+  or converted to a new name or extension (Remux to MP4 with its original
+  recycled, the conversion rules, the Redact convert step) takes its
+  history with it. Convert to MP4 (H.264) keeps the original, so its
+  history stays with the original. Export / Import Settings carries the
+  on/off switch: importing a bundle with history on turns recording on. While it is on, every tag change the app makes to a file
   (Save, Save All, Redact, a Restore, the command line's `set`, which
   follows the same setting: off = nothing recorded) is recorded with the old and new value of each changed field in
   `videoredactor_journal.jsonl`, next to `videoredactor_settings.ini`.
@@ -67,8 +77,17 @@ into files one at a time.
 
 The conversion rules (Tools > Preferences > Conversion) decide what happens to a file: a legacy container (AVI,
 WMV, MOV, FLV, MPG, WebM, OGM, ...) becomes MP4 or MKV by stream copy; only video that no container can hold
-(RealVideo, Flash, odd WMV) is re-encoded; a series episode over the bitrate or size limits is re-encoded with
-hevc_nvenc and scaled to 720p when taller (movies only if you turn that on). A series episode is a file tagged TV,
+(RealVideo, Flash, odd WMV) is re-encoded; a series episode over the bitrate or size limits is re-encoded to HEVC
+and scaled to 720p when taller (movies only if you turn that on).
+
+The HEVC encoder ("Encoder for the re-encodes" in Preferences > Conversion) is no longer assumed to be NVIDIA's.
+"Automatic" (the default) uses hevc_nvenc only when ffmpeg lists it AND a one-second test encode with it works on
+this computer (checked once per run of the app, and again when the ffmpeg path changes); otherwise libx265 in
+software (`-preset medium -crf 27`, about the size and quality of NVENC cq 30; slower, but it works on any
+computer, and the 85 percent size check still protects the source). "NVIDIA GPU always" and "Software always"
+skip the check. "Use the NVIDIA GPU to decode and scale" (off by default) adds `-hwaccel cuda` and `scale_cuda`,
+only with the NVIDIA encoder, and falls back to software scaling if that fails; with it off scaling is the
+software `scale=-2:720`. A series episode is a file tagged TV,
 or an untagged file whose name reads as an episode (`S01E02`); movies, clips and other tagged files are not.
 External `.srt` files beside the video are muxed in (an MP4 then becomes an MKV) and removed afterwards. A file
 with 4 or more subtitle tracks (the default of "MKV when a file has at least") becomes an MKV, not an MP4. Disc

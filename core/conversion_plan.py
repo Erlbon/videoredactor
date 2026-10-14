@@ -10,8 +10,10 @@ Rules, in short (the numbers are settings, ConversionSettings):
               unless the disc-image policy says otherwise.
   codecs      sane codecs are copied, never re-encoded. Only video no container can hold (RealVideo, Flash,
               odd WMV) is re-encoded: libx265 CRF 23, AAC 160k.
-  bitrate     series episodes only (movies exempt unless apply_to_movies): too tall or too fat -> hevc_nvenc
-              scaled to 720p; 720p or less with too high a bitrate -> re-encoded without scaling.
+  bitrate     series episodes only (movies exempt unless apply_to_movies): too tall or too fat -> HEVC
+              scaled to 720p; 720p or less with too high a bitrate -> re-encoded without scaling. The encoder
+              (setting `encoder`): hevc_nvenc when a working NVIDIA encoder is found ("auto", the default),
+              else libx265 CRF 27 in software; GPU decode/scale only with `hw_decode` on.
   size        files under 400 MB are ignored; a bitrate-driven result must be under 85 percent of the source.
 """
 
@@ -162,6 +164,20 @@ class ConversionSettings:
     fallback_audio_bitrate: str = "160k"
     disc_images: str = DISC_LEAVE
     subtitle_languages: str = "all"  # "all", or ISO codes separated by commas
+    # The HEVC encoder for the bitrate re-encodes (series episodes too big or too fat): "auto" (hevc_nvenc when
+    # this computer has a working NVIDIA encoder, else libx265 in software; core/encoder_detect.py), "nvenc"
+    # (always hevc_nvenc) or "x265" (always libx265). NVIDIA used to be assumed, so nothing converted without one.
+    encoder: str = "auto"
+    # Decode and scale on the NVIDIA GPU (-hwaccel cuda + scale_cuda). Only with the encoder resolved to nvenc;
+    # off: software scale=-2:<height>, no -hwaccel.
+    hw_decode: bool = False
+    x265_crf: int = 27  # libx265 for the bitrate re-encodes: about the size/quality of NVENC cq 30
+
+
+ENCODER_AUTO = "auto"
+ENCODER_NVENC = "nvenc"
+ENCODER_X265 = "x265"
+ENCODERS = (ENCODER_AUTO, ENCODER_NVENC, ENCODER_X265)
 
 
 # --- output: what to do ------------------------------------------------------
@@ -343,16 +359,25 @@ class AddedSub:
 
 def build_ffmpeg_args(
     info: MediaInfo, plan: Plan, src: str, out: str, settings: ConversionSettings | None = None, *, cuda: bool = True,
-    added: list[AddedSub] | None = None,
+    added: list[AddedSub] | None = None, encoder: str | None = None,
 ) -> list[str]:
     """The ffmpeg argument LIST (never a shell string). Streams are mapped explicitly: cover art is not video,
     data/timecode tracks are dropped (-dn), audio and kept subtitles are copied. For an MP4 target text
     subtitles become mov_text and bitmap ones are dropped; for MKV they are copied, except MP4-only text codecs
-    (mov_text), which become SubRip (see mkv_subtitle_codec). `cuda` False = software scale fallback."""
+    (mov_text), which become SubRip (see mkv_subtitle_codec).
+
+    `encoder` is the RESOLVED encoder of a bitrate re-encode, "nvenc" or "x265" (conversion_run resolves
+    "auto" with core/encoder_detect.py); None takes settings.encoder, with an unresolved "auto" meaning x265
+    (the encoder that needs no particular hardware). GPU decoding and scaling (-hwaccel cuda, scale_cuda) only
+    when settings.hw_decode is on, the encoder is nvenc and `cuda` is True; `cuda` False = the software scale
+    retry."""
     s = settings or ConversionSettings()
+    if encoder is None:
+        encoder = s.encoder if s.encoder in (ENCODER_NVENC, ENCODER_X265) else ENCODER_X265
     args = ["ffmpeg", "-v", "error", "-y"]
     scaling = plan.scales
-    if scaling and cuda:
+    gpu = scaling and cuda and s.hw_decode and encoder == ENCODER_NVENC
+    if gpu:
         args += ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
     args += ["-fflags", "+genpts", "-i", src]
     added = added or []
@@ -377,11 +402,15 @@ def build_ffmpeg_args(
         args += ["-c:v", "copy"]
     elif plan.video == V_X265:
         args += ["-c:v", "libx265", "-crf", str(s.fallback_crf), "-tag:v", "hvc1"]
-    else:
+    elif encoder == ENCODER_NVENC:
         args += ["-c:v", "hevc_nvenc", "-preset", "p6", "-tune", "hq", "-rc", "vbr", "-cq", str(s.nvenc_cq),
                  "-b:v", "0", "-spatial-aq", "1", "-rc-lookahead", "32", "-tag:v", "hvc1"]
         if scaling:
-            args += ["-vf", f"scale_cuda=-2:{s.scale_height}" if cuda else f"scale=-2:{s.scale_height}"]
+            args += ["-vf", f"scale_cuda=-2:{s.scale_height}" if gpu else f"scale=-2:{s.scale_height}"]
+    else:  # libx265 in software: any computer
+        args += ["-c:v", "libx265", "-preset", "medium", "-crf", str(s.x265_crf), "-tag:v", "hvc1"]
+        if scaling:
+            args += ["-vf", f"scale=-2:{s.scale_height}"]
     if plan.audio_reencode or plan.video == V_X265:
         args += ["-c:a", "aac", "-b:a", s.fallback_audio_bitrate]
     else:
@@ -438,6 +467,10 @@ def get_conversion_settings(get=get_setting) -> ConversionSettings:
     result = ConversionSettings(**values)
     if result.disc_images not in DISC_POLICIES:
         result.disc_images = DISC_LEAVE
+    if result.encoder not in ENCODERS:
+        result.encoder = ENCODER_AUTO
+    if not 0 <= result.x265_crf <= 51:
+        result.x265_crf = defaults.x265_crf
     return result
 
 

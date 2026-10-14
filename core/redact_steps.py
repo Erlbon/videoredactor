@@ -273,10 +273,11 @@ class VideoCtx:
             return not self.verify_problem
 
         # Tools > History: one "redact" entry per file, old values from the original, new from the working
-        # copy; announced before the commit, finished after. Never fails the save (core.history).
+        # copy; announced before the commit, finished after. Never fails the save (core.history). It is
+        # recorded at the path where the save happens (the original's); a new extension's rename below is a
+        # move the entry follows only once it succeeded.
         entry = history.journal_begin(
-            final, KIND_REDACT, self.baseline, history.fields_text(work.metadata),
-            note="" if final == self.original else f"was {os.path.basename(self.original)}",
+            self.original, KIND_REDACT, self.baseline, history.fields_text(work.metadata),
         )
         try:
             result = self.bg(commit_in_place, self.original, scratch, self.env.trash or move_to_trash, verify)
@@ -293,6 +294,7 @@ class VideoCtx:
             try:
                 rename_no_clobber(self.original, final)
                 final_path = final
+                history.record_move(self.original, final)
             except OSError as exc:
                 rename_problem = (
                     f"saved, but couldn't rename it to {os.path.basename(final)} ({exc}); "
@@ -1227,6 +1229,17 @@ def empty_required_tokens(pattern: str, values: dict[str, str]) -> list[str]:
     return [t for t in re.findall(r"%(\w+)%", required) if t in values and not values[t].strip()]
 
 
+def _log_moves(ctx: "VideoCtx", label: str, pairs: list[tuple[str, str]], **kwargs: Any) -> None:
+    """Records a Redact rename/move: in the run's rename log (File > Undo Last Rename), whose on_move hook
+    passes it on to Tools > History; without a rename log (the command line) straight to Tools > History."""
+    if not pairs:
+        return
+    if ctx.env.rename_log is not None:
+        ctx.env.rename_log.record(label, pairs, **kwargs)
+    else:
+        history.record_moves(pairs)
+
+
 class RenameStep(PatternStep):
     key = "rename"
     label = "Rename by pattern"
@@ -1272,8 +1285,7 @@ class RenameStep(PatternStep):
                 pairs.append((old, new))
             except OSError as exc:
                 problems.append(f"{os.path.basename(old)} not renamed ({exc})")
-        if ctx.env.rename_log is not None:
-            ctx.env.rename_log.record("Redact: rename", pairs)
+        _log_moves(ctx, "Redact: rename", pairs)
         result = StepResult.applied(f"renamed to {os.path.basename(new_path)!r}" + (f" (+{len(pairs) - 1} sidecar file(s))" if len(pairs) > 1 else ""))
         return _with_note(result, "; ".join(problems))
 
@@ -1339,10 +1351,9 @@ class MoveIntoFoldersStep(PatternStep):
                 trashed.append((sidecar.old_path, done.new_path))
             if done.warning:
                 problems.append(done.warning)
-        if ctx.env.rename_log is not None and pairs:
-            ctx.env.rename_log.record(
-                "Redact: move into folders", pairs, created_dirs=created, trashed=trashed, root=planned.root
-            )
+        _log_moves(
+            ctx, "Redact: move into folders", pairs, created_dirs=created, trashed=trashed, root=planned.root,
+        )
         text = f"moved to {planned.relative_path()}"
         if sidecars:
             text += f" (+{len(sidecars)} sidecar file(s))"

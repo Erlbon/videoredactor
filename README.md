@@ -69,13 +69,16 @@ is converted). On the command line, `redact --convert-dry-run` does the same; wi
 ## Change history (Tools > History)
 
 Opt-in, off by default: turn it on in Tools > Preferences > History (or say Yes when Tools > History asks), and
-switch it off there again; "Delete History..." removes what was recorded. While it is on, every tag change the
+switch it off there again; "Delete History..." moves what was recorded to the Recycle Bin (after asking). While it is on, every tag change the
 app makes to a file (Save, Save All, Redact, a Restore, and the command line's `set`, which follows the same
 setting) is recorded with the old and new text of each changed field in `videoredactor_journal.jsonl`, next to
 `videoredactor_settings.ini`. Tools > History lists them, newest first, and "Restore Old Values..." writes the old
 values back with the app's own save (write, re-read, compare), so an unwanted save can be undone after the app was
 closed. Covers and other images are not kept; a file replaced by a conversion is in the Recycle Bin or quarantine
-folder instead. The newest 50,000 changes from the last 90 days are kept.
+folder instead. The newest 50,000 changes from the last 90 days are kept. A renamed, moved or converted file takes
+its history with it (Rename File, Rename / Export / Move, Undo Last Rename, Redact's rename and move steps, the
+command line's `rename` and `move`, Remux to MP4 when the original is recycled, the conversion rules). Export /
+Import Settings carries the on/off switch; importing a bundle with history on turns recording on.
 
 ## Preferences (Tools > Preferences)
 
@@ -84,8 +87,9 @@ folder instead. The newest 50,000 changes from the last 90 days are kept.
 | Filenames | ASCII-safe names, zero-padding of numbers, Auto-Number padding |
 | Transcode | CRF, audio bitrate and threads of Media > Convert to MP4 (H.264) only |
 | Duplicates | The starting sensitivity of Find Duplicates |
+| History | The opt-in switch of Tools > History (off by default) and Delete History... (to the Recycle Bin, after asking; acts at once) |
 | Tools / Paths | ffmpeg and MKVToolNix locations, the IMDb database and dataset files (saved as you type) |
-| Conversion | The conversion rules: bitrate and size limits for series episodes (and optionally movies), scaling, NVENC quality, the size ratio a re-encode must beat, when to use MKV (default: 4 or more subtitle tracks), disc images (default: left alone, never converted), subtitle languages to ingest |
+| Conversion | The conversion rules: bitrate and size limits for series episodes (and optionally movies), scaling, the HEVC encoder (Automatic: NVIDIA hevc_nvenc only when a test encode works here, else libx265 CRF 27 in software), NVENC quality, libx265 quality, NVIDIA GPU decode/scale (off by default), the size ratio a re-encode must beat, when to use MKV (default: 4 or more subtitle tracks), disc images (default: left alone, never converted), subtitle languages to ingest |
 | Library safety | Quarantine folder and undo log folder (optional; without one, replaced files go to the Recycle Bin), delete-after-conversion (off by default, cannot be undone), the recent-file guard, and the duration tolerance a conversion result must meet |
 
 Every page is written on OK or Apply and dropped on Cancel, except Tools / Paths.

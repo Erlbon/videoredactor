@@ -9,6 +9,7 @@ from core.library_safety import SafeRun
 
 GB = 1073741824
 S = cp.ConversionSettings()
+GPU = cp.ConversionSettings(encoder="nvenc", hw_decode=True)  # the NVIDIA path with GPU decode/scale
 
 
 def media(path, *, ext_size=2 * GB, dur=3000.0, h=1080, audio=1, subs=0, sub_codec="subrip", vdur=None, adur=None):
@@ -106,7 +107,7 @@ def test_convert_file_end_to_end_with_cuda_fallback(tmp_path):
 
     trashed = []
     run = SafeRun(library_root=str(lib), quarantine_root="", dry_run=False, trash=trashed.append, probe=probe)
-    out = cr.convert_file(run, src, plan, info, S, runner=runner, probe=probe)
+    out = cr.convert_file(run, src, plan, info, GPU, runner=runner, probe=probe)
     assert out.converted and out.final_path == src
     assert len(calls) == 2 and "-hwaccel" in calls[0] and "-hwaccel" not in calls[1]
     assert open(src, encoding="utf-8").read() == "B" * 500
@@ -127,7 +128,7 @@ def test_convert_file_keeps_source_when_result_is_too_big(tmp_path):
 
     probe = lambda p: media(p, ext_size=950, h=720) if ".resize" in p else info  # noqa: E731
     run = SafeRun(library_root=str(lib), quarantine_root="", dry_run=False, trash=lambda p: None, probe=probe)
-    out = cr.convert_file(run, src, scale_plan(), info, S, runner=runner, probe=probe)
+    out = cr.convert_file(run, src, scale_plan(), info, GPU, runner=runner, probe=probe)
     assert not out.converted and "of the source" in out.message
     assert open(src, encoding="utf-8").read() == "A" * 1000 and os.listdir(lib) == ["ep.mkv"]
 
