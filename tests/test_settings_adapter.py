@@ -13,6 +13,7 @@ import gui.main_window as mw  # noqa: E402
 from core import api_keys  # noqa: E402
 from core.redact_steps import RECIPE_KEY, RECIPE_SECTION  # noqa: E402
 from core.settings_adapter import APP_SLUG, SECTIONS, VideoSettingsAdapter  # noqa: E402
+from core.transcode_settings import DEFAULT_THREADS  # noqa: E402
 from redactor_common.core import secret_store  # noqa: E402
 from redactor_common.core import settings_bundle as sb  # noqa: E402
 from tests.test_batch_operations_and_undo import window  # noqa: E402,F401
@@ -165,6 +166,27 @@ def test_invalid_values_are_rejected_but_valid_ones_still_apply(ini):
     assert config.get_setting("rename", "ascii_only") == "1" and config.get_setting("rename", "zero_pad") == ""
     with pytest.raises(ValueError):
         adapter.write_section("redact", {"recipe": {"unrelated": 1}})
+
+
+def test_shared_coercers_keep_the_adapters_messages_and_rules(ini):
+    """The codecs are redactor_common.core.settings_coerce's wrapped in required(): same messages as before."""
+    adapter = VideoSettingsAdapter()
+    with pytest.raises(ValueError, match=r"crf \(expected a whole number from 0 to 51\)"):
+        adapter.write_section("media", {"crf": True})  # a bool is not a number
+    with pytest.raises(ValueError, match="expected a single-line text value"):
+        adapter.write_section("patterns", {"move_pattern": "a\nb"})
+    with pytest.raises(ValueError, match="expected true or false"):
+        adapter.write_section("defaults", {"zero_pad": 1})
+    with pytest.raises(ValueError, match="expected a list of text values"):
+        adapter.write_section("vocabulary", {"genres": ["Drama", 3]})
+    with pytest.raises(ValueError, match="expected a mapping of column name to width"):
+        adapter.write_section("columns", {"widths": [1, 2]})
+    adapter.write_section("vocabulary", {"genres": [" Drama ", "Drama", "", "Comedy"]})
+    assert adapter.read_section("vocabulary")["genres"] == ["Drama", "Comedy"]  # stripped, blanks and repeats dropped
+    adapter.write_section("columns", {"widths": {"title": 120, "year": 0, "genre": 9000, "x": True}})
+    assert adapter.read_section("columns")["widths"] == {"title": 120}
+    config.set_setting("transcode", "threads", "lots")
+    assert adapter.read_section("media")["threads"] == DEFAULT_THREADS
 
 
 def test_hidden_columns_always_keep_the_filename_column(ini):

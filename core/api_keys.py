@@ -14,7 +14,7 @@ user's stored key.
 """
 
 from __future__ import annotations
-from typing import Optional
+from typing import Callable, Optional
 
 from core.config import get_setting, set_setting, remove_setting
 from redactor_common.core import secret_store
@@ -45,16 +45,13 @@ def get_key(key_id: str) -> Optional[str]:
     return value or None
 
 
-def remember_unencrypted_fallback(allowed: bool) -> None:
-    """Persist the user's yes (never a silent no) and apply it now."""
-    secret_store.set_allow_unencrypted_fallback(allowed)
-    if allowed:
-        set_setting(_FALLBACK_SECTION, _FALLBACK_KEY, "1")
-
-
-def apply_fallback_preference() -> None:
-    secret_store.set_allow_unencrypted_fallback(
-        get_setting(_FALLBACK_SECTION, _FALLBACK_KEY, "") == "1"
+def apply_fallback_preference() -> Callable[[], None]:
+    """Re-apply the remembered consent (redactor_common's
+    bind_fallback_preference) and return the `remember` callable for
+    save_with_fallback_prompt(): it persists a yes (never a silent no)."""
+    return secret_store.bind_fallback_preference(
+        lambda: get_setting(_FALLBACK_SECTION, _FALLBACK_KEY, "") == "1",
+        lambda on: set_setting(_FALLBACK_SECTION, _FALLBACK_KEY, "1") if on else None,
     )
 
 

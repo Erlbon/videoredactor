@@ -87,6 +87,7 @@ def test_build_runs_and_shows_status(tmp_path, monkeypatch):
             dialog.source_edits[kind].setText(path)
         assert dialog._build_database() == dest
         assert os.path.isfile(dest)
+        assert dialog.path_edit.text() == dest
         assert "7 titles" in dialog.status_label.text()
         assert shown and "7 titles" in shown[-1]
     finally:
@@ -132,6 +133,7 @@ def test_check_file_status_for_a_foreign_database(tmp_path):
     dialog = dlg.ImdbSettingsDialog()
     try:
         dialog.path_edit.setText(dest)
+        dialog.refresh_status()  # the shared dialog waits for typing to pause; don't wait in a test
         assert "Built from title.basics.tsv.gz" in dialog.status_label.text()
         other = tmp_path / "other.db"
         import sqlite3
@@ -140,6 +142,7 @@ def test_check_file_status_for_a_foreign_database(tmp_path):
         con.commit()
         con.close()
         dialog.path_edit.setText(str(other))
+        dialog.refresh_status()
         assert dialog.status_label.text().startswith("Problem:")
     finally:
         dialog.close()
@@ -147,15 +150,19 @@ def test_check_file_status_for_a_foreign_database(tmp_path):
 
 def test_free_space_warning_appears_when_the_drive_is_nearly_full(monkeypatch, tmp_path):
     import collections
+    import shutil
     usage = collections.namedtuple("usage", "total used free")
-    monkeypatch.setattr(dlg.shutil, "disk_usage", lambda p: usage(100, 99, 1 << 28))
+    monkeypatch.setattr(shutil, "disk_usage", lambda p: usage(100, 99, 1 << 28))
     dialog = dlg.ImdbSettingsDialog()
     try:
         dialog.path_edit.setText(str(tmp_path / "imdb.db"))
         assert "may not be enough" in dialog.free_space_text()
+        dialog.refresh_status()
+        assert dialog.space_label.text() == dialog.free_space_text()
+        assert dialog.space_label.parent() is not dialog  # still at the foot of the build box
     finally:
         dialog.close()
-    monkeypatch.setattr(dlg.shutil, "disk_usage", lambda p: usage(100, 1, 50 << 30))
+    monkeypatch.setattr(shutil, "disk_usage", lambda p: usage(100, 1, 50 << 30))
     dialog = dlg.ImdbSettingsDialog()
     try:
         assert "may not be enough" not in dialog.free_space_text()

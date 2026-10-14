@@ -62,7 +62,7 @@ def test_a1_process_file_ingests_srt_into_an_mkv(tmp_path):
     def probe(path):
         out = info(".mkv", size=3, h=480, w=640, subs=("subrip",))
         out.path = path
-        return out if ".part" in path else media
+        return out if ".redact-part" in path else media
 
     trashed = []
     run = ls.SafeRun(library_root=str(lib), quarantine_root="", dry_run=False, trash=trashed.append, probe=probe)

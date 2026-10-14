@@ -8,7 +8,7 @@ import pytest
 
 from core import library_safety as ls
 from core.ffmpeg_backend import ffmpeg_command
-from core.temp_names import is_app_temp_name
+from redactor_common.core.temp_names import is_app_temp_name
 
 DAY = date(2026, 10, 13)
 GOOD = ({"video": 1, "audio": 2, "subtitle": 1}, 100.0)
@@ -210,8 +210,11 @@ def test_settings_roundtrip_and_defaults():
 
 
 def test_temp_names_recognised():
-    assert is_app_temp_name("a.part.mkv") and is_app_temp_name("a.resize.mp4")
+    assert is_app_temp_name("a.redact-part.mkv") and is_app_temp_name("a.redact-resize.mp4")
+    assert os.path.basename(ls.temp_name("a.mkv")) == "a.redact-part.mkv"
+    assert os.path.basename(ls.temp_name("a.mp4", ls.RESIZE_MARKER)) == "a.redact-resize.mp4"
     assert not is_app_temp_name("My.Partial.Cut.mkv") and not is_app_temp_name("Part.mkv")
+    assert not is_app_temp_name("Kill.Bill.Part.mkv") and not is_app_temp_name("a.resize.mp4")
 
 
 def test_ffmpeg_command_is_a_list_with_seek_before_input():

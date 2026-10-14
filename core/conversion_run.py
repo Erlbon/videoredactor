@@ -2,7 +2,7 @@
 core/conversion_run.py
 
 Runs a conversion plan (core/conversion_plan.py) for one file through the safety layer
-(core/library_safety.SafeRun): ffmpeg writes a ".part" next to the source, the result is verified against the
+(core/library_safety.SafeRun): ffmpeg writes a ".redact-part" next to the source, the result is verified against the
 rules below, and only then is it swapped in (original to the Recycle Bin / quarantine / deleted, per setting).
 
 Verification (before the swap):
@@ -29,7 +29,7 @@ from core import conversion_plan as cp
 from core import encoder_detect, history
 from core.ffmpeg_backend import _run_ffmpeg, probe_media
 from core import subtitle_ingest as si
-from core.library_safety import KIND_CLEANUP, KIND_REMUXED, KIND_RESIZED, SafeRun
+from core.library_safety import KIND_CLEANUP, KIND_REMUXED, KIND_RESIZED, PART_MARKER, RESIZE_MARKER, SafeRun
 from core.video_file import SUPPORTED_EXTENSIONS, VideoFile
 
 DURATION_TOLERANCE = 1.5
@@ -131,7 +131,7 @@ def convert_file(
         return ConversionOutcome(False, message=plan.skip_reason or "nothing to do")
     final = os.path.splitext(source)[0] + plan.container
     kind = KIND_RESIZED if plan.video in (cp.V_NVENC, cp.V_NVENC_SCALE) else KIND_REMUXED
-    marker = "resize" if kind == KIND_RESIZED else "part"
+    marker = RESIZE_MARKER if kind == KIND_RESIZED else PART_MARKER
 
     encoder = None
     if plan.video in (cp.V_NVENC, cp.V_NVENC_SCALE) and not run.dry_run:

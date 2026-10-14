@@ -6,8 +6,8 @@ legitimately named lookalikes still are. Pure filesystem, no external tools.
 
 import pytest
 
-from core.temp_names import is_app_temp_name
 from core.video_file import discover_video_files
+from redactor_common.core.temp_names import is_app_temp_name
 
 TEMP_NAMES = [
     "Movie.repairing.mp4",
@@ -23,6 +23,8 @@ TEMP_NAMES = [
     "MOVIE.REPAIRING.MP4",
     "Movie.Redact-ORIG.mkv",
     ".Movie.REDACT-ABCDEF01.MKV",
+    "Movie.redact-part.mkv",     # a conversion in progress (core/library_safety.temp_name)
+    "Movie.redact-resize.mp4",
 ]
 
 CASE_VARIANTS = {"MOVIE.REPAIRING.MP4", "Movie.Redact-ORIG.mkv", ".Movie.REDACT-ABCDEF01.MKV"}
@@ -40,6 +42,9 @@ LEGIT_NAMES = [
     ".Movie.redact-zzzzzzzz.mp4",   # not 8 hex digits
     ".Movie.redact-1a2b3c.mp4",     # too short
     "Movie.mp4",
+    "Kill.Bill.Part.mkv",          # the old bare ".part" marker hid real files like this one
+    "Movie.part.mp4",
+    "Movie.resize.mkv",
 ]
 
 
@@ -106,3 +111,7 @@ def test_names_match_what_the_app_writes():
     import os
     assert is_app_temp_name(os.path.basename(partial_path(os.path.join("d", "a.mp4"))))
     assert is_app_temp_name(os.path.basename(repair_path(os.path.join("d", "a.mkv"))))
+    from core import library_safety as ls
+    for marker in (ls.PART_MARKER, ls.RESIZE_MARKER):
+        name = os.path.basename(ls.temp_name(os.path.join("d", "Kill.Bill.mkv"), marker))
+        assert name.startswith("Kill.Bill.redact-") and is_app_temp_name(name)

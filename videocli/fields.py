@@ -12,6 +12,7 @@ import re
 
 from core.video_metadata import EDITABLE_FIELDS, NUMERIC_FIELDS, ContentType
 from redactor_common.cli import CliError
+from redactor_common.cli.fields import FieldResolver, spelling_variants
 from redactor_common.cli.values import check_text, is_ascii_number
 
 FIELD_NAMES = list(EDITABLE_FIELDS)
@@ -21,9 +22,6 @@ _ALIASES = {
     "show": "show_title", "series": "show_title", "season": "season_number", "episode": "episode_number",
     "type": "content_type", "rating": "personal_rating", "lang": "language", "sorttitle": "sort_title",
 }
-_LOOKUP: dict[str, str] = {name: name for name in FIELD_NAMES}
-_LOOKUP.update({name.replace("_", ""): name for name in FIELD_NAMES})
-_LOOKUP.update(_ALIASES)
 
 _DATE = re.compile(r"^\d{4}(-\d{2}(-\d{2})?)?$")
 _LANGUAGE = re.compile(r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})?$")
@@ -42,15 +40,6 @@ def _real_date(value: str) -> bool:
     except ValueError:
         return False
     return True
-
-
-def resolve_field(name: str) -> str:
-    """The metadata field for what the user typed. Raises CliError listing the valid names."""
-    key = name.strip().lower().replace(" ", "_").replace("-", "_")
-    field = _LOOKUP.get(key) or _LOOKUP.get(key.replace("_", ""))
-    if field is None:
-        raise CliError(f"unknown field {name!r}. Fields: {', '.join(FIELD_NAMES)}")
-    return field
 
 
 def check_value(field: str, value: str) -> str:
@@ -80,10 +69,13 @@ def check_value(field: str, value: str) -> str:
     return value
 
 
-def parse_assignment(text: str) -> tuple[str, str]:
-    """"show_title=Dune" -> (field, checked value). Splits on the first "="."""
-    if "=" not in text:
-        raise CliError(f"expected FIELD=VALUE, got {text!r}")
-    name, _, value = text.partition("=")
-    field = resolve_field(name)
-    return field, check_value(field, value)
+# The shared resolver (redactor_common.cli.fields): case-insensitive, and "Show Title", "show-title",
+# "show_title" and "showtitle" all reach the same field.
+_SPELLINGS: dict[str, str] = {}
+for _name in FIELD_NAMES:
+    _SPELLINGS.update(dict.fromkeys(spelling_variants(_name), _name))
+_SPELLINGS.update(_ALIASES)
+RESOLVER = FieldResolver(spellings=_SPELLINGS, names=FIELD_NAMES, check=check_value)
+
+resolve_field = RESOLVER.resolve          # "Season Number" -> "season_number"; CliError lists the names
+parse_assignment = RESOLVER.parse_assignment  # "show_title=Dune" -> (field, checked value)

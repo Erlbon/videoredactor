@@ -138,6 +138,28 @@ def test_paths_page_saves_tool_and_imdb_paths():
     assert get_tool_override("ffmpeg") == "C:/x/ffmpeg.exe"
 
 
+def test_tool_rows_are_the_shared_rows_over_this_apps_tools(monkeypatch):
+    from core import external_tools
+    from gui.tool_settings_dialog import EXECUTABLE_ROWS, ToolSettingsDialog
+    from redactor_common.gui.tool_path_row import ToolPathRow
+
+    monkeypatch.setattr(external_tools, "is_executable_available", lambda exe: exe == "mkvextract")
+    monkeypatch.setattr("gui.tool_settings_dialog.is_executable_available", lambda exe: exe == "mkvextract")
+    dialog = ToolSettingsDialog()
+    try:
+        rows = dialog.paths.rows
+        assert all(isinstance(r, ToolPathRow) for r in rows)
+        assert [(r.exe_name, r.label) for r in rows] == [(exe, f"{name}:") for exe, name in EXECUTABLE_ROWS]
+        assert "mkvextract" in dialog.path_edits and dialog.status_labels["mkvextract"].text() == "✓ found"
+        assert dialog.status_labels["ffmpeg"].text() == "✗ missing"
+        dialog.paths.row("mkvmerge").set_path("C:/tools/mkvmerge.exe")  # what Browse does once a file is picked
+        assert external_tools.get_tool_override("mkvmerge") == "C:/tools/mkvmerge.exe"
+        dialog.paths.row("mkvmerge").clear()
+        assert external_tools.get_tool_override("mkvmerge") == ""
+    finally:
+        dialog.close()
+
+
 def test_menu_entry_is_ctrl_comma_with_the_preferences_role(window):
     action = window.actions_by_key["preferences"]
     assert action.shortcut() == QKeySequence("Ctrl+,")

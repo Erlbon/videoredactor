@@ -201,7 +201,7 @@ def _run_ffmpeg(
 # Every ffmpeg started by _run_ffmpeg() while it runs, so closing the app
 # (gui closeEvent -> kill_running_ffmpeg, also at interpreter exit) never
 # leaves a 12-hour encode running headless. A killed run returns
-# (None, "Cancelled") like a Cancel click; its ".part" temp is cleaned up
+# (None, "Cancelled") like a Cancel click; its ".redact-part" / ".partial" temp is cleaned up
 # by the caller's normal failure path.
 _live_processes: set[subprocess.Popen] = set()
 _shutdown_killed: set[subprocess.Popen] = set()

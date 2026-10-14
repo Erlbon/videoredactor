@@ -9,9 +9,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from core.temp_names import is_app_temp_name
 from core.video_file import SUPPORTED_EXTENSIONS, VideoFile
 from redactor_common.cli import CliError, Output, expand_paths
+from redactor_common.core.temp_names import is_app_temp_name
 
 EXTENSIONS = tuple(sorted(SUPPORTED_EXTENSIONS))
 

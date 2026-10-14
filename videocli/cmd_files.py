@@ -51,20 +51,6 @@ def _values_for(video: VideoFile, zero_pad: int) -> dict[str, str]:
     return values
 
 
-def _journal_moves(out: Output) -> None:
-    """Tools > History follows every file this run renames or moves (history.record_move, the same hook the
-    app's rename log calls; a no-op while history is off): each result row that says "renamed" or "moved" is
-    passed on as it is recorded, right after that file's rename. A copy is not a move: its entries stay."""
-    record = out.record
-
-    def record_and_follow(row) -> None:
-        record(row)
-        if isinstance(row, dict) and row.get("status") in ("renamed", "moved") and row.get("new_path"):
-            history.record_move(row["path"], row["new_path"])
-
-    out.record = record_and_follow
-
-
 def _skip_for(pattern: str, zero_pad: int):
     """skip_reason for a pattern: an unreadable file, or a required field the pattern would leave empty."""
     flat = pattern.replace("/", " ").replace("\\", " ")
@@ -98,10 +84,10 @@ def run_rename(args: argparse.Namespace, out: Output) -> int:
     pattern = args.pattern or DEFAULT_RENAME_PATTERN
     zero_pad = _zero_pad(args)
     videos = load_videos(collect(args.paths, out, recurse=not args.no_recurse), out)
-    _journal_moves(out)
     failed = commands.rename_items(
         videos, pattern=pattern, values_for=lambda v: _values_for(v, zero_pad), path_of=lambda v: str(v.path),
         skip_reason=_skip_for(pattern, zero_pad), out=out, dry_run=args.dry_run, ascii_only=_ascii(args), companions=sidecar_pairs,
+        on_moved=history.record_move,
     )
     return commands.finish_run(out, failed, files=len(videos), dry_run=args.dry_run, pattern=pattern)
 
@@ -128,10 +114,12 @@ def run_move(args: argparse.Namespace, out: Output) -> int:
     root = args.root or get_setting("rename", "library_root", "").strip()
     zero_pad = _zero_pad(args)
     videos = load_videos(collect(args.paths, out, recurse=not args.no_recurse), out)
-    _journal_moves(out)
+    # Tools > History follows every file this run really renames or moves (history.record_move, a no-op while
+    # history is off); a copy is not a move, so its entries stay.
     failed = commands.move_items(
         videos, root=root, pattern=args.pattern, values_for=lambda v: _values_for(v, zero_pad),
         path_of=lambda v: str(v.path), skip_reason=_skip_for(args.pattern, zero_pad), out=out,
         dry_run=args.dry_run, copy=args.copy, ascii_only=_ascii(args), companions=sidecar_moves,
+        on_moved=history.record_move,
     )
     return commands.finish_run(out, failed, files=len(videos), dry_run=args.dry_run, root=root)

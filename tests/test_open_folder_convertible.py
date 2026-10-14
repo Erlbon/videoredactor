@@ -6,7 +6,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
-from PyQt6.QtWidgets import QApplication, QMessageBox  # noqa: E402
+from PyQt6.QtWidgets import QApplication, QCheckBox, QMessageBox  # noqa: E402
 
 from core.video_file import discover_convertible_files  # noqa: E402
 
@@ -14,7 +14,7 @@ _app = QApplication.instance() or QApplication([])
 
 
 def _tree(root: Path) -> None:
-    for name in ("a.mkv", "b.avi", "sub/c.WMV", "sub/deep/d.mov", "movie.vob", "stream.ts", "a.part.avi", "notes.txt"):
+    for name in ("a.mkv", "b.avi", "sub/c.WMV", "sub/deep/d.mov", "movie.vob", "stream.ts", "a.redact-part.avi", "notes.txt"):
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"x")
@@ -41,6 +41,20 @@ def window(monkeypatch, tmp_path):
     w.close()
 
 
+def _dry_box(box):
+    """The offer's "Dry run first" checkbox (an `options` widget of redactor_common's convert offer)."""
+    found = [c for c in box.findChildren(QCheckBox) if c.text().startswith("Dry run first")]
+    return found[0] if found else None
+
+
+def _answer(box, text):
+    """Click the button called `text` the way a user would (the shared offer reads clickedButton())."""
+    for button in box.buttons():
+        if button.text() == text:
+            button.click()
+    return QMessageBox.StandardButton.Yes if text == "Yes" else QMessageBox.StandardButton.No
+
+
 def test_open_folder_offers_conversion_and_hands_the_files_over(window, monkeypatch, tmp_path):
     folder = tmp_path / "lib"
     _tree(folder)
@@ -48,16 +62,17 @@ def test_open_folder_offers_conversion_and_hands_the_files_over(window, monkeypa
     asked = []
 
     def fake_exec(self):
-        asked.append((self.text(), self.checkBox()))
-        self.checkBox().setChecked(False)  # the user unticks "Dry run first" in the ONE dialog
-        return QMessageBox.StandardButton.Yes
+        asked.append((self.text(), _dry_box(self)))
+        _dry_box(self).setChecked(False)  # the user unticks "Dry run first" in the ONE dialog
+        return _answer(self, "Yes")
 
     monkeypatch.setattr(QMessageBox, "exec", fake_exec)
     monkeypatch.setattr(window, "_convert_with_rules", lambda paths, dry_run=None: seen.update(paths=paths, dry_run=dry_run))
     monkeypatch.setattr("gui.main_window.discover_video_files", lambda f, recursive, ignored=None: [])
     window._load_folder(folder, recursive=True)
     assert [os.path.basename(p) for p in seen["paths"]] == ["b.avi", "c.WMV", "d.mov"]
-    assert "3 video file(s)" in asked[0][0] and "AVI, MOV, WMV" in asked[0][0]
+    assert ("No MP4 or MKV files found, but 3 video file(s) in other formats (AVI, MOV, WMV) that can be converted "
+            "to MP4/MKV.\n\nConvert them now with the conversion rules?") in asked[0][0]
     assert len(asked) == 1 and asked[0][1] is not None  # the offer carries the dry-run checkbox itself
     assert seen["dry_run"] is False  # handed over, so _convert_with_rules asks nothing more
 
@@ -70,8 +85,8 @@ def test_open_folder_offer_defaults_to_a_dry_run_with_no_second_dialog(window, m
     boxes = []
 
     def fake_exec(self):
-        boxes.append((self.windowTitle(), self.checkBox().isChecked() if self.checkBox() else None))
-        return QMessageBox.StandardButton.Yes
+        boxes.append((self.windowTitle(), _dry_box(self).isChecked() if _dry_box(self) else None))
+        return _answer(self, "Yes")
 
     monkeypatch.setattr(QMessageBox, "exec", fake_exec)
     monkeypatch.setattr("gui.main_window.discover_video_files", lambda f, recursive, ignored=None: [])
@@ -87,7 +102,7 @@ def test_declining_converts_nothing_and_no_prompt_on_the_launch_restore(window, 
     folder = tmp_path / "lib"
     _tree(folder)
     calls = []
-    monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.No)
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: _answer(self, "No"))
     monkeypatch.setattr(window, "_convert_with_rules", lambda paths, dry_run=None: calls.append(paths))
     window._load_folder(folder, recursive=True)
     assert calls == []

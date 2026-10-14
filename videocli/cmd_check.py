@@ -20,7 +20,7 @@ from core.video_file import VideoFile
 from core.video_fingerprint import video_fingerprint
 from redactor_common.cli import EXIT_OK, EXIT_PARTIAL, Output, add_common_options
 from redactor_common.cli.commands import trash_to
-from redactor_common.core.trash import TrashError, move_to_trash
+from redactor_common.core.trash import TrashError, trash_with_retries
 
 from videocli.files import add_path_arguments, collect, load_videos
 
@@ -50,7 +50,8 @@ def _findings(result: CheckResult) -> list[dict]:
 
 def run_check(args: argparse.Namespace, out: Output) -> int:
     files = collect(args.paths, out, recurse=not args.no_recurse)
-    trash = trash_to(args.trash_dir) if args.trash_dir else move_to_trash
+    # The Recycle Bin, tried again for a moment when a scanner or indexer still holds the original.
+    trash = trash_to(args.trash_dir) if args.trash_dir else trash_with_retries()
     problems = 0
     for index, video in enumerate(load_videos(files, out), start=1):
         path = str(video.path)

@@ -82,6 +82,7 @@ from redactor_common.gui.search_replace_dialog import FILENAME_FIELD_KEY, Search
 from redactor_common.gui.move_runner import run_planned_moves
 from redactor_common.gui.folder_options import attach_include_subfolders, include_subfolders_slot
 from redactor_common.gui.progress import ProgressReporter, run_busy, run_with_progress
+from redactor_common.gui.convert_offer import YES as CONVERT_YES, offer_conversion
 from redactor_common.gui.history_dialog import HistoryDialog
 from redactor_common.gui.redact_dialog import RecipeEditorDialog, RedactResultsDialog
 from redactor_common.gui.redact_dialog import run_redact as run_redact_dialog
@@ -1224,23 +1225,15 @@ class MainWindow(QMainWindow):
         others = run_busy(self, "Looking for other video formats...", discover_convertible_files, folder_path, recursive=recursive)
         if not others:
             return
-        kinds = ", ".join(sorted({p.suffix.lstrip(".").upper() for p in others}))
-        intro = "No MP4 or MKV files found, but" if not loaded else "Also found"
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Icon.Question)
-        box.setWindowTitle("Other Video Formats Found")
-        box.setText(
-            f"{intro} {len(others)} video file(s) in other formats ({kinds}) that can be converted to MP4/MKV.\n\n"
-            "Convert them now with the conversion rules?\n\n" + self._rules_text()
-        )
-        shown = [str(p) for p in others[:200]]
-        more = f"\n... and {len(others) - len(shown)} more" if len(others) > len(shown) else ""
-        box.setDetailedText("\n".join(shown) + more)
-        # One dialog: the per-run "Dry run first" choice is asked here, so no second confirm follows.
+        # One dialog (redactor_common's convert offer): the per-run "Dry run first" choice is asked here, so no
+        # second confirm follows.
         dry_box = self._dry_run_checkbox()
-        box.setCheckBox(dry_box)
-        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        if box.exec() == QMessageBox.StandardButton.Yes:
+        answer = offer_conversion(
+            self, others, loaded, kind_label="MP4 or MKV", target_label="MP4/MKV", noun="video file",
+            question="Convert them now with the conversion rules?\n\n" + self._rules_text(),
+            title="Other Video Formats Found", yes_text="Yes", no_text="No", options=[dry_box],
+        )
+        if answer == CONVERT_YES:
             self._convert_with_rules([str(p) for p in others], dry_run=dry_box.isChecked())
 
     def _refresh_list(self) -> None:

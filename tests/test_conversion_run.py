@@ -103,7 +103,7 @@ def test_convert_file_end_to_end_with_cuda_fallback(tmp_path):
         return 0, ""
 
     def probe(path):
-        return media(path, ext_size=500, h=720, subs=1) if ".resize" in path else info
+        return media(path, ext_size=500, h=720, subs=1) if ".redact-resize" in path else info
 
     trashed = []
     run = SafeRun(library_root=str(lib), quarantine_root="", dry_run=False, trash=trashed.append, probe=probe)
@@ -112,7 +112,7 @@ def test_convert_file_end_to_end_with_cuda_fallback(tmp_path):
     assert len(calls) == 2 and "-hwaccel" in calls[0] and "-hwaccel" not in calls[1]
     assert open(src, encoding="utf-8").read() == "B" * 500
     assert len(trashed) == 1 and open(trashed[0], encoding="utf-8").read() == "A" * 1000
-    assert not any(".resize" in n for n in os.listdir(lib))
+    assert not any(".redact-resize" in n for n in os.listdir(lib))
 
 
 def test_convert_file_keeps_source_when_result_is_too_big(tmp_path):
@@ -126,7 +126,7 @@ def test_convert_file_keeps_source_when_result_is_too_big(tmp_path):
             f.write("B" * 950)
         return 0, ""
 
-    probe = lambda p: media(p, ext_size=950, h=720) if ".resize" in p else info  # noqa: E731
+    probe = lambda p: media(p, ext_size=950, h=720) if ".redact-resize" in p else info  # noqa: E731
     run = SafeRun(library_root=str(lib), quarantine_root="", dry_run=False, trash=lambda p: None, probe=probe)
     out = cr.convert_file(run, src, scale_plan(), info, GPU, runner=runner, probe=probe)
     assert not out.converted and "of the source" in out.message
@@ -162,7 +162,7 @@ def test_process_file_ingests_srt_converts_mp4_to_mkv_and_removes_the_srt(tmp_pa
         return 0, ""
 
     def probe(path):
-        return media(path, ext_size=3, h=720, subs=2) if ".part" in path else info
+        return media(path, ext_size=3, h=720, subs=2) if ".redact-part" in path else info
 
     trashed = []
     run = SafeRun(library_root=str(lib), quarantine_root="", dry_run=False, trash=trashed.append, probe=probe)

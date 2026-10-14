@@ -19,38 +19,17 @@ and the ones that change files take --dry-run. Exit codes: 0 done, 1 some files 
 
 from __future__ import annotations
 
-import argparse
-from typing import Sequence
-
 from core.version import APP_VERSION
-from redactor_common.cli import make_output
+from redactor_common.cli.main_factory import make_main
 
 from videocli import COMMANDS, cmd_check, cmd_files, cmd_redact, cmd_tags
 
 PROG = "videoredactor"
 
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog=PROG, description="The Video Redactor on the command line: inspect, tag, rename, check and redact video files.",
-    )
-    parser.add_argument("--version", action="version", version=f"{PROG} {APP_VERSION}")
-    sub = parser.add_subparsers(dest="command", metavar="COMMAND")
-    sub.required = True
-    cmd_tags.add_info_parser(sub)
-    cmd_tags.add_set_parser(sub)
-    cmd_files.add_rename_parser(sub)
-    cmd_files.add_move_parser(sub)
-    cmd_check.add_check_parser(sub)
-    cmd_redact.add_redact_parser(sub)
-    assert tuple(sub.choices) == COMMANDS, "videocli.COMMANDS must list the subcommands"
-    return parser
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    out = make_output(args)
-    try:
-        return args.handler(args, out)
-    finally:
-        out.close()
+build_parser, main = make_main(
+    PROG, APP_VERSION,
+    "The Video Redactor on the command line: inspect, tag, rename, check and redact video files.",
+    [cmd_tags.add_info_parser, cmd_tags.add_set_parser, cmd_files.add_rename_parser,
+     cmd_files.add_move_parser, cmd_check.add_check_parser, cmd_redact.add_redact_parser],
+    commands=COMMANDS,
+)

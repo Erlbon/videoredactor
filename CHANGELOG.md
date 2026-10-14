@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-10-14#05 -- Shared code from redactor_common instead of the app's own copies; conversion temp files renamed
+
+- Fix: a conversion in progress now writes `<name>.redact-part.<ext>` / `<name>.redact-resize.<ext>` (was `.part` / `.resize`). The old bare markers made Open Folder, Refresh List and the command line skip a real file such as `Kill.Bill.Part.mkv` as if it were a leftover temp file; such files are listed again. A leftover `.part` file from an interrupted conversion with an older version is now listed like any other video (delete it by hand).
+- The API Keys dialog asks the family's shared question when this computer has no credential store ("No Secure Storage Available", redactor_common's secret prompts), and a failure to write the unencrypted file is shown instead of raising. The remembered answer is re-applied at startup by redactor_common's `bind_fallback_preference`.
+- Command line: field names go through redactor_common's `FieldResolver`; "Show Title", "show-title", "show_title" and "showtitle" all reach the same field, the aliases are unchanged. The `videoredactor` parser is built by redactor_common's `make_main`. `check --repair` tries the Recycle Bin again for a moment when another program still holds the original (as `redact` already did).
+- Command line `rename` / `move`: Tools > History follows a file through the shared `on_moved` hook; a cross-volume move whose original could not be put in the Recycle Bin no longer moves its history entries.
+- Open Folder's "Other Video Formats Found" offer is redactor_common's convert offer (same text, Yes / No and the "Dry run first" checkbox); the folder search behind Open Folder, Refresh List and the offer is redactor_common's `find_by_extension`.
+- Tools > IMDb Database: the path status, free-space note, Browse (a Save dialog) and the build run are redactor_common's `LocalDatabaseSettingsDialog` build tail. Checking an existing database for the status line now runs off the GUI thread and waits until typing pauses. In the build question the "replaced only when the new one is complete" note now comes last.
+- Locate External Tools and Preferences > Tools use redactor_common's `ToolPathRow` / `ToolPathsWidget` (same rows incl. mkvextract, same texts, saved at once).
+- Export / Import Settings validates with redactor_common's `settings_coerce` (same error messages).
+- Removed the app's own copies: `core/temp_names.py`, the CLI field resolver and parser setup, the folder walkers, the convert-offer box, the CLI history wrapper, the settings codecs' validators, the IMDb dialog's status/free-space/Browse/build code and the tool path rows (about 260 lines net).
+- Requires redactor_common 2026-10-14-05.
+
 ## 2026-10-14#04 -- History follows renamed and converted files; no NVIDIA card needed for the conversion rules
 
 - Tools > History: a file's history now follows it when it is renamed or moved (File > Rename File, Rename / Export / Move, Undo Last Rename, Redact's rename and move steps, the command line's `rename` and `move`) or converted to a new name or extension (the conversion rules, Import and Convert, the Open Folder offer, the Redact convert step, and Remux to MP4 when its original goes to the Recycle Bin). Convert to MP4 (H.264) keeps the original, so the history stays with the original. With history off nothing is written.

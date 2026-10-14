@@ -15,7 +15,7 @@ that leaves files ready for a media server). It owns the hard rules:
    succeeded so undoing the lines in reverse order works:
        new_path<TAB>old_path     a move or rename
        path<TAB>CREATED          a new file
-3. A conversion writes to a temp name beside the source (".part" / ".resize"),
+3. A conversion writes to a temp name beside the source (".redact-part" / ".redact-resize"),
    is verified with ffprobe, and only then swapped in. A failed verification
    deletes only the temp file and keeps the original.
 4. Dry-run: the same calls, nothing touched; every action is listed with its reason.
@@ -49,8 +49,10 @@ KINDS = (KIND_REMUXED, KIND_DUPLICATES, KIND_DEFECTIVE, KIND_CLEANUP, KIND_RESIZ
 # The only containers the app produces.
 OUTPUT_EXTENSIONS = (".mp4", ".mkv")
 
-PART_MARKER = "part"  # <stem>.part<ext>
-RESIZE_MARKER = "resize"  # <stem>.resize<ext>
+# Conversion temp names. Deliberately "redact-" prefixed (redactor_common.core.temp_names recognises exactly these):
+# the bare words would hide a real file such as "Kill.Bill.Part.mkv" from Open Folder as a "temp file".
+PART_MARKER = "redact-part"  # <stem>.redact-part<ext>
+RESIZE_MARKER = "redact-resize"  # <stem>.redact-resize<ext>
 
 DEFAULT_RECENT_MINUTES = 10
 # The owner's rule: the converted file's duration is within 1.5 s of the source, whatever its length. The share of the
@@ -126,7 +128,7 @@ def set_safety_settings(s: SafetySettings, put: Callable[[str, str, str], None] 
 
 
 def temp_name(path: str, marker: str = PART_MARKER) -> str:
-    """The temp name beside `path` ("a.mkv" -> "a.part.mkv"; the real extension
+    """The temp name beside `path` ("a.mkv" -> "a.redact-part.mkv"; the real extension
     stays last so ffmpeg still picks the muxer). Same folder = same volume."""
     stem, ext = os.path.splitext(path)
     return f"{stem}.{marker}{ext}"

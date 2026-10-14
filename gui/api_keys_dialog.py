@@ -18,13 +18,13 @@ UNENCRYPTED file instead, and only a yes is remembered.
 from __future__ import annotations
 
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QFormLayout, QHBoxLayout, QLabel, QMessageBox, QPushButton,
+    QDialog, QVBoxLayout, QFormLayout, QHBoxLayout, QLabel, QPushButton,
 )
 
 from core import api_keys
 from core.config import remove_setting
-from redactor_common.core import secret_store
 from redactor_common.gui.secret_field import SecretField
+from redactor_common.gui.secret_prompts import save_with_fallback_prompt
 
 
 class ApiKeysDialog(QDialog):
@@ -66,32 +66,15 @@ class ApiKeysDialog(QDialog):
         button_row.addWidget(self.cancel_button)
         layout.addLayout(button_row)
 
-    def _ask_unencrypted_fallback(self) -> bool:
-        answer = QMessageBox.question(
-            self, "No secure storage available",
-            "This computer has no system credential store the app can use to keep "
-            "your API keys safely (Windows Credential Manager, macOS Keychain, or "
-            "the Linux Secret Service).\n\n"
-            "The keys can instead be saved in a plain, UNENCRYPTED file in your "
-            "user profile folder. Anyone who can read your files could read them.\n\n"
-            "Save the keys in an unencrypted file?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        return answer == QMessageBox.StandardButton.Yes
-
-    def _on_save(self) -> None:
+    def _save(self, allow_unencrypted_fallback) -> None:
         for key_id, field in self.fields.items():
-            try:
-                changed = field.apply()
-            except secret_store.SecretStoreUnavailable:
-                if not self._ask_unencrypted_fallback():
-                    # Stay open with what was typed; nothing is lost.
-                    return
-                api_keys.remember_unencrypted_fallback(True)
-                changed = field.apply()
-            if changed:
+            if field.apply(allow_unencrypted_fallback):
                 # A not-yet-migrated plaintext copy would otherwise come back
                 # after a removal, or go stale after a replacement.
                 remove_setting(api_keys.KEYS[key_id][2], "api_key")
-        self.accept()
+
+    def _on_save(self) -> None:
+        remember = api_keys.apply_fallback_preference()
+        # Declined or failed: stay open with what was typed; nothing is lost.
+        if save_with_fallback_prompt(self, self._save, remember, noun="API keys"):
+            self.accept()

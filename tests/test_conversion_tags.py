@@ -40,7 +40,7 @@ def job(tmp_path):
         return 0, ""
 
     def probe(path):
-        return _info(path, subs=1) if ".part" in path else _info(path)
+        return _info(path, subs=1) if ".redact-part" in path else _info(path)
 
     def make_run(dry_run=False):
         return ls.SafeRun(library_root=str(lib), quarantine_root="", dry_run=dry_run, trash=lambda p: None, probe=probe)

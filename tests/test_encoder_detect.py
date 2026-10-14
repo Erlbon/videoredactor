@@ -114,7 +114,7 @@ def _scale_run(tmp_path, settings, available):
         return 0, ""
 
     def probe(path):
-        return _media(path, size=500, h=720) if ".resize" in path else info
+        return _media(path, size=500, h=720) if ".redact-resize" in path else info
 
     run = SafeRun(library_root=str(lib), quarantine_root="", dry_run=False, trash=lambda p: None, probe=probe)
     out = cr.convert_file(

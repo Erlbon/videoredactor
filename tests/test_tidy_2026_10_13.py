@@ -110,7 +110,7 @@ def test_convert_file_verifies_with_the_runs_tolerance(tmp_path):
         return 0, ""
 
     def probe(path):
-        return cp.MediaInfo(path, 1, 603.0, streams) if ".part" in path else info  # 3 s off
+        return cp.MediaInfo(path, 1, 603.0, streams) if ".redact-part" in path else info  # 3 s off
 
     plan = cp.Plan(container=".mp4", reasons=["legacy"])
     strict = ls.SafeRun(str(lib), "", dry_run=False, trash=lambda p: None, tolerance_seconds=1, tolerance_fraction=0)

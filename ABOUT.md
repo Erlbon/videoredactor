@@ -96,7 +96,7 @@ names each one in the report for a manual decision, and only the third choice st
 MKV. These rules are separate from Preferences > Transcode, which
 only holds the settings of Media > Convert to MP4 (H.264).
 
-Every conversion is written to a temporary `.part` / `.resize` file beside the source and checked before it
+Every conversion is written to a temporary `.redact-part` / `.redact-resize` file beside the source and checked before it
 replaces anything: the same number of video and audio tracks, the expected number of subtitle tracks, the target
 height when scaling, a bitrate-driven re-encode smaller than the set share of the source, and a length within the duration
 tolerance (Preferences > Library safety: the larger of the seconds and the percentage you set; an AVI/OGM whose

@@ -142,6 +142,14 @@ def test_set_refuses_bad_input_before_touching_anything(video, argv, message):
     assert open(video, "rb").read() == before
 
 
+@pytest.mark.parametrize("typed", ["show_title", "Show Title", "show-title", "SHOWTITLE", "show", "series"])
+def test_field_names_resolve_through_the_shared_resolver(typed):
+    from videocli.fields import RESOLVER, parse_assignment, resolve_field
+    assert resolve_field(typed) == "show_title" and typed in RESOLVER
+    assert parse_assignment(f"{typed}= Dune ") == ("show_title", "Dune")
+    assert parse_assignment("Season Number=007") == ("season_number", "7")
+
+
 def test_set_on_an_unreadable_video_fails_with_exit_1(tmp_path, capsys):
     bad = tmp_path / "bad.mp4"
     bad.write_bytes(b"not a video")

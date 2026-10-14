@@ -29,6 +29,8 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from redactor_common.core import settings_bundle as sb
+from redactor_common.core import settings_coerce as sc
+from redactor_common.core.settings_coerce import required
 from redactor_common.core.pipeline import Recipe
 
 from core import config
@@ -56,60 +58,57 @@ REFRESH_PANEL = {"columns", "vocabulary"}
 # --- codecs --------------------------------------------------------------------
 
 
-def _text_ok(value: str) -> bool:
-    return len(value) <= _MAX_TEXT and "\n" not in value and "\r" not in value and "\x00" not in value
+# The validators are redactor_common.core.settings_coerce's (total: garbage in gives None); required() turns a
+# None into this adapter's ValueError, whose message names the rejected value in the import report.
+_TEXT_ERROR = "expected a single-line text value"
+_BOOL_ERROR = "expected true or false"
 
 
-def _str_codec(default: str = "", check: Callable[[str], bool] = lambda s: True):
+def _single_line(value: Any, check: Callable[[str], bool] | None = None) -> str:
+    return required(sc.coerce_str(value, single_line=True, max_len=_MAX_TEXT, check=check), _TEXT_ERROR)
+
+
+def _str_codec(default: str = "", check: Callable[[str], bool] | None = None):
     def read(raw: str) -> str:
         return raw if raw else default
 
     def coerce(value: Any) -> str:
-        if not isinstance(value, str) or not _text_ok(value) or not check(value):
-            raise ValueError("expected a single-line text value")
-        return value
+        return _single_line(value, check)
 
     return read, coerce
 
 
 def _bool_codec(default: bool):
     def read(raw: str) -> bool:
-        return default if raw == "" else raw == "1"
+        return default if raw == "" else raw == "1"  # the app itself reads these as == "1"
 
     def coerce(value: Any) -> str:
-        if not isinstance(value, bool):
-            raise ValueError("expected true or false")
-        return "1" if value else "0"
+        return "1" if required(sc.coerce_bool(value), _BOOL_ERROR) else "0"
 
     return read, coerce
 
 
 def _int_codec(default: int, low: int, high: int):
     def read(raw: str) -> int:
-        try:
-            number = int(raw)
-        except (TypeError, ValueError):
-            return default
-        return number if low <= number <= high else default
+        return sc.parse_int(raw, default, low, high)
 
     def coerce(value: Any) -> str:
-        if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
-            raise ValueError(f"expected a whole number from {low} to {high}")
-        return str(value)
+        return str(required(sc.coerce_int(value, low, high), f"expected a whole number from {low} to {high}"))
 
     return read, coerce
 
 
 def _clean_list(value: Any, *, forbidden: str, limit: int | None = None) -> list[str]:
-    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
-        raise ValueError("expected a list of text values")
-    out: list[str] = []
-    for item in value:
-        item = item.strip() if forbidden == _UNIT_SEPARATOR else item
-        if not item or not _text_ok(item) or any(ch in item for ch in forbidden) or item in out:
-            continue
-        out.append(item)
-    return out[:limit] if limit else out
+    return required(sc.coerce_str_list(
+        value, strip=forbidden == _UNIT_SEPARATOR, drop_blank=True, forbidden=forbidden,
+        single_line=True, max_len=_MAX_TEXT, dedupe=True, limit=limit or None,
+    ), "expected a list of text values")
+
+
+def _json_object_read(raw: str) -> Any:
+    """A JSON object kept as one line of ini text; "" when unset or unreadable."""
+    data = sc.parse_json(raw)
+    return data if isinstance(data, dict) else ""
 
 
 def _joined_list_codec(separator: str, defaults: list[str], *, limit: int | None = None):
@@ -140,21 +139,11 @@ def _hidden_columns_codec():
 
 def _column_widths_codec():
     def read(raw: str) -> dict[str, int]:
-        try:
-            data = json.loads(raw) if raw else {}
-        except (ValueError, TypeError):
-            return {}
-        if not isinstance(data, dict):
-            return {}
-        return {str(k): v for k, v in data.items()
-                if isinstance(v, int) and not isinstance(v, bool) and 0 < v <= 5000}
+        return sc.parse_width_map(raw, lo=1, hi=5000, numeric_strings=False)
 
     def coerce(value: Any) -> str:
-        if not isinstance(value, dict):
-            raise ValueError("expected a mapping of column name to width")
-        widths = {str(k): v for k, v in value.items()
-                  if isinstance(v, int) and not isinstance(v, bool) and 0 < v <= 5000}
-        return json.dumps(widths)
+        return json.dumps(required(sc.coerce_width_map(value, lo=1, hi=5000),
+                                   "expected a mapping of column name to width"))
 
     return read, coerce
 
@@ -162,14 +151,7 @@ def _column_widths_codec():
 def _recipe_codec():
     """The Redact recipe as a real JSON object in the bundle (the ini holds
     it as one line of JSON text). Unset = "" (the defaults apply)."""
-    def read(raw: str) -> Any:
-        if not raw.strip():
-            return ""
-        try:
-            data = json.loads(raw)
-        except (ValueError, TypeError):
-            return ""
-        return data if isinstance(data, dict) else ""
+    read = _json_object_read
 
     def coerce(value: Any) -> str:
         if value == "":
@@ -191,8 +173,7 @@ def _existing_file_codec():
         return raw
 
     def coerce(value: Any) -> str | None:
-        if not isinstance(value, str) or not _text_ok(value):
-            raise ValueError("expected a single-line text value")
+        value = _single_line(value)
         return value if value and os.path.isfile(value) else None
 
     return read, coerce
@@ -200,14 +181,7 @@ def _existing_file_codec():
 
 def _imdb_options_codec():
     """The IMDb build options as a real JSON object (unset = defaults)."""
-    def read(raw: str) -> Any:
-        if not raw.strip():
-            return ""
-        try:
-            data = json.loads(raw)
-        except (ValueError, TypeError):
-            return ""
-        return data if isinstance(data, dict) else ""
+    read = _json_object_read
 
     def coerce(value: Any) -> str:
         if value == "":
@@ -223,12 +197,10 @@ def _history_codec():
     """[history] enabled, read the way core/history.history_enabled() reads it ("true"/"1"/... = on, anything
     else or missing = off) and written the way set_history_enabled() writes it."""
     def read(raw: str) -> bool:
-        return raw.strip().lower() in {"1", "true", "yes", "on"}
+        return sc.parse_bool(raw, False, other_is_false=True)
 
     def coerce(value: Any) -> str:
-        if not isinstance(value, bool):
-            raise ValueError("expected true or false")
-        return "true" if value else "false"
+        return "true" if required(sc.coerce_bool(value), _BOOL_ERROR) else "false"
 
     return read, coerce
 

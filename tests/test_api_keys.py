@@ -118,3 +118,30 @@ def test_dialog_accepting_fallback_saves_and_remembers(app, monkeypatch):
     secret_store.set_allow_unencrypted_fallback(False)
     api_keys.apply_fallback_preference()
     assert secret_store.allow_unencrypted_fallback_enabled()
+
+
+def test_dialog_asks_the_shared_question(app, monkeypatch):
+    secret_store.set_backend(FakeKeyring(fail_set=True))
+    asked = []
+    monkeypatch.setattr(QMessageBox, "question",
+                        lambda *a, **k: asked.append(a[2]) or QMessageBox.StandardButton.No)
+    dlg = ApiKeysDialog()
+    dlg.fields["tmdb"].edit.setText("typed")
+    dlg.save_button.click()
+    from redactor_common.gui.secret_prompts import fallback_question
+    assert asked == [fallback_question("API keys")]
+
+
+def test_dialog_fallback_write_failure_is_shown_not_raised(app, monkeypatch, tmp_path):
+    secret_store.set_backend(FakeKeyring(fail_set=True))
+    blocker = tmp_path / "not-a-folder"
+    blocker.write_text("x", encoding="utf-8")
+    secret_store.set_fallback_dir(blocker / "sub")
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    warned = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warned.append(a[1]))
+    dlg = ApiKeysDialog()
+    dlg.fields["tmdb"].edit.setText("typed")
+    dlg.save_button.click()
+    assert warned and dlg.result() != dlg.DialogCode.Accepted
+    assert dlg.fields["tmdb"].edit.text() == "typed"

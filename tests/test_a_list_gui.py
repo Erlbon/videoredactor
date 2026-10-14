@@ -46,7 +46,7 @@ def test_a8_process_file_hands_the_cancel_event_to_the_ffmpeg_runner(tmp_path):
     run = SafeRun(library_root=str(lib), quarantine_root="", dry_run=False, trash=lambda p: None)
     out = cr.process_file(run, str(src), cp.ConversionSettings(), probe=lambda p: info, runner=runner, cancel_event=event)
     assert seen["event"] is event
-    assert not out.converted and src.exists() and os.listdir(lib) == ["ep.avi"]  # no .part left behind
+    assert not out.converted and src.exists() and os.listdir(lib) == ["ep.avi"]  # no .redact-part left behind
 
 
 def test_a8_kill_running_ffmpeg_stops_a_live_run(monkeypatch):
@@ -158,7 +158,7 @@ def _fake_engine(monkeypatch, src: str, written: list):
 
     def probe(path):
         out = cp.MediaInfo(path, 3, 10.0, [cp.StreamInfo(0, "video", "h264", width=640, height=480), cp.StreamInfo(1, "audio", "aac")])
-        return out if ".part" in path else info
+        return out if ".redact-part" in path else info
 
     real = cr.process_file
     monkeypatch.setattr(mw.conversion_run, "process_file", lambda run, p, conv, **kw: real(run, p, conv, probe=probe, runner=runner, **kw))

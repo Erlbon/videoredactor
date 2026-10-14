@@ -20,7 +20,6 @@ settings.ini (core/imdb_settings.py).
 from __future__ import annotations
 
 import os
-import shutil
 from typing import Optional
 
 from PyQt6.QtCore import Qt
@@ -37,9 +36,6 @@ from PyQt6.QtWidgets import (
     QSpinBox,
     QVBoxLayout,
 )
-from redactor_common.core.dump_import import DumpImportError
-from redactor_common.core.local_db import forget_cached
-from redactor_common.gui.dump_import_runner import run_dump_import
 from redactor_common.gui.local_db_settings_dialog import LocalDatabaseSettingsDialog
 
 from core import imdb_settings
@@ -63,6 +59,10 @@ DATASET_FILTER = "IMDb dataset (*.tsv.gz *.tsv *.gz);;All files (*)"
 # the full files' published row counts: a default build comes to roughly 0.6-1 GB and uses about 1 GB of
 # scratch space while it runs.
 FREE_SPACE_WARNING_BYTES = 3 * (1 << 30)
+FREE_SPACE_WARNING_TEXT = (
+    " That may not be enough: with the default options the finished database is estimated at "
+    "0.6-1 GB and the build needs about 1 GB more in scratch space. Choose another location or keep less."
+)
 
 PICKERS = [
     ("basics", "title.basics:", "Required -- path to title.basics.tsv.gz"),
@@ -102,9 +102,14 @@ class ImdbSettingsDialog(LocalDatabaseSettingsDialog):
             build=lambda dialog: self._build_database(),
             build_label="Build Database…",
             parent=parent,
+            # The shared build tail: default path (placeholder, Browse start, build destination), Browse as a
+            # Save dialog, the status line and the free-space note.
+            default_path=imdb_settings.default_database_path,
+            browse_for_destination=True,
+            show_status=True,
+            free_space_warning=(FREE_SPACE_WARNING_BYTES, FREE_SPACE_WARNING_TEXT),
         )
         self.setMinimumWidth(680)
-        self.path_edit.setPlaceholderText(imdb_settings.default_database_path())
         options = imdb_settings.load_options()
         sources = imdb_settings.load_sources()
 
@@ -174,18 +179,13 @@ class ImdbSettingsDialog(LocalDatabaseSettingsDialog):
         layout.addWidget(self.aka_original)
         self._sync_aka_boxes()
 
-        self.space_label = QLabel()
-        self.space_label.setWordWrap(True)
+        # The free-space note stays at the foot of the build box, where it was.
+        self.layout().removeWidget(self.space_label)
         layout.addWidget(self.space_label)
-        self.status_label = QLabel()
-        self.status_label.setWordWrap(True)
-        # Licence first, then the status line and the build box, above the Check File / Build row.
+        # Licence first, then (the shared status line and) the build box, above the Check File / Build row.
         self.layout().insertWidget(0, self.licence_label)
         self.layout().insertWidget(1, self.attribution_label)
-        self.layout().insertWidget(4, box)
-        self.layout().insertWidget(4, self.status_label)
-        self.path_edit.textChanged.connect(self._refresh_status)
-        self._refresh_status()
+        self.add_section(box)
 
     # -- widgets -------------------------------------------------------------------------
 
@@ -214,47 +214,6 @@ class ImdbSettingsDialog(LocalDatabaseSettingsDialog):
         for region_box in self.region_boxes.values():
             region_box.setEnabled(enabled)
         self.aka_original.setEnabled(enabled)
-
-    def _browse(self) -> None:
-        """The database may not exist yet, so this is a Save dialog that doesn't
-        ask to overwrite (picking an existing file just selects it)."""
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Choose where the database is (or will be) stored",
-            self.path_edit.text().strip() or imdb_settings.default_database_path(),
-            self._file_filter, options=QFileDialog.Option.DontConfirmOverwrite,
-        )
-        if path:
-            self.path_edit.setText(path)
-
-    def free_space_text(self) -> str:
-        """How much room the database's drive has, with a warning when that is less
-        than a default build needs; "" when it can't be told."""
-        folder = os.path.dirname(os.path.abspath(self.path_edit.text().strip() or imdb_settings.default_database_path()))
-        while folder and not os.path.isdir(folder):
-            parent = os.path.dirname(folder)
-            if parent == folder:
-                return ""
-            folder = parent
-        try:
-            free = shutil.disk_usage(folder).free
-        except OSError:
-            return ""
-        text = f"Free space where the database goes: {free / (1 << 30):,.1f} GB."
-        if free < FREE_SPACE_WARNING_BYTES:
-            text += (" That may not be enough: with the default options the finished database is estimated at "
-                     "0.6-1 GB and the build needs about 1 GB more in scratch space. Choose another location or keep less.")
-        return text
-
-    def _refresh_status(self) -> None:
-        path = self.path_edit.text().strip()
-        if not path:
-            self.status_label.setText("No database yet.")
-        elif not os.path.isfile(path):
-            self.status_label.setText("Not built yet -- the file doesn't exist.")
-        else:
-            ok, message = self.check_result()
-            self.status_label.setText(message if ok else f"Problem: {message}")
-        self.space_label.setText(self.free_space_text())
 
     # -- options / build -----------------------------------------------------------------
 
@@ -299,35 +258,20 @@ class ImdbSettingsDialog(LocalDatabaseSettingsDialog):
             notes.append("Without title.episode no episodes are kept.")
         if options.include_akas and not sources["akas"]:
             notes.append("Without title.akas there are no alternative titles.")
-        dest = self.path_edit.text().strip() or imdb_settings.default_database_path()
-        replacing = (
-            "\n\nThe existing database is replaced only when the new one is complete." if os.path.exists(dest) else ""
-        )
         extra = ("\n\n" + " ".join(notes)) if notes else ""
-        answer = QMessageBox.question(
-            self, "Build Database",
-            f"Build {os.path.basename(dest)} from the IMDb dataset file(s)?\n\nIt reads the whole files, which can take "
-            f"tens of minutes, and needs a few GB of free disk space while it runs.\n\nKeeping: {options.describe()}."
-            f"{extra}{replacing}\n\nReminder: {LICENCE_NOTICE}\n\n{ATTRIBUTION}",
+        # The shared build tail: asks (adding the "replaced only when complete" note when there is a database),
+        # saves the sources first so they are remembered even if the build is cancelled, releases a cached open
+        # handle on the old file, builds on a worker thread behind a cancellable progress dialog, reports the
+        # summary or the error, and fills in the path.
+        return self.run_build(
+            "Build IMDb Database", "Reading the IMDb datasets…",
+            lambda dest, progress, cancelled: build_imdb_database(
+                sources["basics"], dest, sources["ratings"], sources["episodes"], sources["akas"],
+                options, progress, cancelled,
+            ),
+            confirm=(
+                "Build {name} from the IMDb dataset file(s)?\n\nIt reads the whole files, which can take "
+                f"tens of minutes, and needs a few GB of free disk space while it runs.\n\nKeeping: {options.describe()}."
+                f"{extra}\n\nReminder: {LICENCE_NOTICE}\n\n{ATTRIBUTION}"
+            ),
         )
-        if answer != QMessageBox.StandardButton.Yes:
-            return None
-        self._save_all(dest)  # remember the sources even if the build is cancelled
-        forget_cached(dest)  # a lookup may still hold the old build open
-        try:
-            summary = run_dump_import(
-                self, "Build IMDb Database", "Reading the IMDb datasets…",
-                lambda progress, cancelled: build_imdb_database(
-                    sources["basics"], dest, sources["ratings"], sources["episodes"], sources["akas"],
-                    options, progress, cancelled,
-                ),
-            )
-        except DumpImportError as exc:
-            QMessageBox.warning(self, "Build IMDb Database", str(exc))
-            return None
-        if summary is None:
-            return None
-        QMessageBox.information(self, "Build IMDb Database", summary.describe())
-        self.path_edit.setText(dest)
-        self._refresh_status()
-        return dest

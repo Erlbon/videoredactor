@@ -15,6 +15,7 @@ from typing import Optional
 import hashlib
 import tempfile
 
+from redactor_common.core.folder_discovery import find_by_extension
 from redactor_common.core.save_errors import describe_save_error
 from redactor_common.core.scan_stamp import ScanStamp, make_stamp, parse_stamp
 
@@ -28,7 +29,7 @@ from core.ffmpeg_backend import IMPORTABLE_EXTENSIONS, extract_thumbnail, probe_
 from core.external_tools import is_tool_available, MKVTOOLNIX, FFMPEG
 from core.opensubtitles_client import clean_language_code
 from core.video_fingerprint import video_fingerprint
-from core.temp_names import is_app_temp_name
+from redactor_common.core.temp_names import is_app_temp_name
 from core.thumb_cache import CACHE_DIR_NAME, is_valid_thumbnail, prune_once_per_session, write_thumbnail_atomically
 
 SUPPORTED_EXTENSIONS = {".mp4", ".m4v", ".mkv"}
@@ -487,6 +488,8 @@ def has_subfolders(folder: Path) -> bool:
 # Importable formats that are NOT announced when Open Folder finds them: disc images/streams (.vob is left
 # alone by the conversion rules) and .ts (as often TypeScript as MPEG transport stream in a mixed folder).
 NOT_ANNOUNCED_EXTENSIONS = frozenset({".vob", ".ts"})
+# What Open Folder announces as convertible (see discover_convertible_files).
+CONVERTIBLE_ANNOUNCED_EXTENSIONS = frozenset(IMPORTABLE_EXTENSIONS - NOT_ANNOUNCED_EXTENSIONS)
 
 
 def discover_convertible_files(folder: Path, recursive: bool = False) -> list[Path]:
@@ -495,12 +498,8 @@ def discover_convertible_files(folder: Path, recursive: bool = False) -> list[Pa
     left out. Disc images and .ts are not announced; the app's own temp files never are."""
     if not folder.is_dir():
         return []
-    announced = IMPORTABLE_EXTENSIONS - NOT_ANNOUNCED_EXTENSIONS
-    candidates = folder.rglob("*") if recursive else folder.iterdir()
-    return sorted(
-        p for p in candidates
-        if p.suffix.lower() in announced and p.is_file() and not is_app_temp_name(p.name)
-    )
+    found = find_by_extension([folder], CONVERTIBLE_ANNOUNCED_EXTENSIONS, recursive, skip=is_app_temp_name)
+    return [Path(p) for p in found]
 
 
 def discover_video_files(
@@ -514,22 +513,13 @@ def discover_video_files(
     subfolders, which the GUI offers as an explicit prompt rather than
     silently changing behavior based on folder contents.
 
-    The app's own leftover temp/backup files (core.temp_names) are not
+    The app's own leftover temp/backup files (redactor_common.core.temp_names) are not
     listed; pass a list as `ignored` to collect the ones skipped.
     """
     if not folder.is_dir():
         return []
-    if recursive:
-        candidates = folder.rglob("*")
-    else:
-        candidates = folder.iterdir()
-    found = []
-    for p in candidates:
-        if not (p.suffix.lower() in SUPPORTED_EXTENSIONS and p.is_file()):
-            continue
-        if is_app_temp_name(p.name):
-            if ignored is not None:
-                ignored.append(p)
-            continue
-        found.append(p)
-    return sorted(found)
+    skipped: list[str] = []
+    found = find_by_extension([folder], SUPPORTED_EXTENSIONS, recursive, skip=is_app_temp_name, ignored=skipped)
+    if ignored is not None:
+        ignored.extend(Path(p) for p in skipped)
+    return [Path(p) for p in found]
