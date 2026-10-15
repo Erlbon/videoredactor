@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-15#01 -- A large Play button under the thumbnail in the side panel
+
+- New: a large Play button sits directly under the thumbnail in the side panel. It does exactly what Media > Play does, and is enabled only when one file is selected and it loaded without error. Media > Play, the right-click entry and the toolbar button are unchanged.
+
 ## 2026-10-14#09 -- Play: a Play button and Media > Play that start playing at once
 
 - Changed: "Preview" is now Play. Media > Play (Ctrl+Shift+P), the file list's right-click entry Play, and a new Play button on the main toolbar open the selected video in the player window and start playing immediately. Exactly one file must be selected; otherwise the status bar says so and nothing opens. Double-clicking a row does what it did before.

@@ -18,7 +18,7 @@ from typing import Optional
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFormLayout, QLineEdit,
-    QTextEdit, QSpinBox, QComboBox, QLabel,
+    QTextEdit, QSpinBox, QComboBox, QLabel, QPushButton, QStyle,
 )
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
@@ -135,7 +135,18 @@ class TagPanel(QWidget):
         )
         self.preview_label = self.preview_box.image_label
         self.preview_label.setStyleSheet("background-color: #222; color: #888;")  # a "screen" look for video frames
-        self._vertical_splitter = ImagePanelSplitter(self.scroll_area, self.preview_box, initial_sizes=(500, 300))
+        # A large Play button directly under the thumbnail (same action as Media > Play: MainWindow wires it).
+        self.play_button = QPushButton(" Play")
+        self.play_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
+        self.play_button.setMinimumHeight(40)
+        self.play_button.setToolTip("Play the selected file (Ctrl+Shift+P)")
+        self.play_button.setEnabled(False)
+        preview_column = QWidget()
+        preview_layout = QVBoxLayout(preview_column)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+        preview_layout.addWidget(self.preview_box, 1)
+        preview_layout.addWidget(self.play_button)
+        self._vertical_splitter = ImagePanelSplitter(self.scroll_area, preview_column, initial_sizes=(500, 300))
         outer.addWidget(self._vertical_splitter, 1)
 
         self.set_content_type_filter(None)  # builds the initial (all-fields) form

@@ -416,6 +416,7 @@ class MainWindow(QMainWindow):
         self.tag_panel = TagPanel()
         self.tag_panel.apply_requested.connect(self._on_apply_to_selected)
         self.tag_panel.collapseToggleRequested.connect(self._toggle_tag_panel)
+        self.tag_panel.play_button.clicked.connect(lambda _checked=False: self.actions_by_key["play"].trigger())
         # Deliberately low minimum -- lets the panel be dragged down to a
         # sliver, or fully collapsed (see _toggle_tag_panel()), rather
         # than being locked to a wide fixed range.
@@ -1618,8 +1619,13 @@ class MainWindow(QMainWindow):
         if checked == self._panel_collapser.is_collapsed():
             self._toggle_tag_panel()
 
+    def _update_play_button(self, selected: list[VideoFile]) -> None:
+        """The side panel's Play button: on only for exactly one selected file that loaded without error."""
+        self.tag_panel.play_button.setEnabled(len(selected) == 1 and not selected[0].load_error)
+
     def _on_selection_changed(self) -> None:
         selected = self._selected_video_files()
+        self._update_play_button(selected)
         set_apply_count(self.apply_action, len(selected))  # 'Apply to N Selected', greyed at 0
         if not selected:
             self.tag_panel.set_preview_image(None)
