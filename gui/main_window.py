@@ -117,7 +117,7 @@ from gui.tmdb_episode_picker_dialog import TVEpisodePickerDialog
 from gui.tmdb_attribution import AppCreditsDialog
 from gui.tvdb_search_dialog import TVDBSearchDialog
 from gui.tvdb_episode_picker_dialog import TVDBEpisodePickerDialog
-from gui.subtitle_search_dialog import SubtitleSearchDialog
+from gui.subtitle_search_dialog import SOURCE_LRCLIB, SubtitleSearchDialog
 from gui.tool_settings_dialog import ToolSettingsDialog
 from gui.video_preferences import VideoPreferencesDialog
 from redactor_common.gui.preferences_dialog import preferences_menu_action
@@ -486,7 +486,7 @@ class MainWindow(QMainWindow):
             entry("tvdb", "TheTVDB (T&V Show)…", self._on_import_tvdb, "Ctrl+Shift+T"),
             entry("imdb_local", "IMDb (&Local Database)…", self._on_import_imdb_local, None),
             # Was Ctrl+Shift+O, which is Open Folder in the rest of the family.
-            entry("subtitles", "&Subtitles (OpenSubtitles)…", self._on_import_subtitles, "Ctrl+Shift+L"),
+            entry("subtitles", "&Subtitles (OpenSubtitles, Lyrics)…", self._on_import_subtitles, "Ctrl+Shift+L"),
         ]
 
     def _build_menu_bar(self) -> None:
@@ -3027,8 +3027,13 @@ class MainWindow(QMainWindow):
             )
             return
 
-        dialog = SubtitleSearchDialog(str(vf.path), language="en", parent=self)
-        if not dialog.exec() or dialog.selected_candidate is None:
+        dialog = SubtitleSearchDialog(str(vf.path), language="en", parent=self, video=vf)
+        if not dialog.exec():
+            return
+        if dialog.source == SOURCE_LRCLIB:
+            self._save_lyrics_subtitle(vf, dialog)
+            return
+        if dialog.selected_candidate is None:
             return
         candidate = dialog.selected_candidate
 
@@ -3051,6 +3056,21 @@ class MainWindow(QMainWindow):
 
         sync_note = "exact match" if candidate.hash_matched else "title match -- sync not guaranteed"
         self.status_bar.showMessage(f"Saved subtitle to {detail.name} ({sync_note})")
+
+    def _save_lyrics_subtitle(self, vf: VideoFile, dialog: SubtitleSearchDialog) -> None:
+        """Writes the SRT the Lyrics (LRCLIB) page built (offset already applied) as the usual sidecar
+        <stem>.<lang>.srt; an existing file is only replaced when the user says so."""
+        srt, language, match = dialog.selected_srt, dialog.selected_language, dialog.selected_match
+        status, detail = self._save_sidecar(
+            lambda overwrite: vf.save_subtitle_sidecar(srt, language=language, overwrite=overwrite), {}
+        )
+        if status == "error":
+            QMessageBox.warning(self, "Subtitle Not Saved", f"Couldn't write the subtitle file: {detail}")
+            return
+        if status == "kept":
+            self.status_bar.showMessage("Kept the existing subtitle file")
+            return
+        self.status_bar.showMessage(f"Saved lyrics subtitle to {detail.name} (LRCLIB, {match.score.label})")
 
     # --- Filename patterns -------------------------------------------------
 

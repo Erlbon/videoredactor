@@ -22,7 +22,9 @@ into files one at a time.
   correctly, not just show-level metadata.
 - **Subtitle fetching** via OpenSubtitles, hash-matched against the
   exact file first (guaranteed sync) with a title-search fallback that's
-  clearly flagged as sync-not-guaranteed.
+  clearly flagged as sync-not-guaranteed. For music videos the same
+  dialog can fetch time-synced lyrics from LRCLIB and write them as an
+  .srt (with an offset control).
 - **Offline IMDb database** (Tools > IMDb Database…) — builds a small
   local database from IMDb's free datasets, which you download
   yourself (datasets.imdbws.com: `title.basics`, and optionally

@@ -67,7 +67,7 @@ from redactor_common.core.local_db import year_gap
 from redactor_common.core.rename_pattern import render_filename, unique_path, zero_pad_numeric_value
 from redactor_common.core.trash import move_to_trash
 
-from core import imdb_import, imdb_local, opensubtitles_client, tmdb_client, tvdb_client
+from core import imdb_import, imdb_local, lyrics_subtitles, opensubtitles_client, tmdb_client, tvdb_client
 from core import conversion_plan, conversion_run, history, library_safety
 from core.config import get_setting, set_setting
 from core.ffmpeg_backend import _run, remux_to_mp4, verify_remux
@@ -1108,21 +1108,76 @@ class SubtitleChoice:
         return f"{c.language} subtitle '{c.release_name}'" + ("" if c.hash_matched else " (sync not guaranteed)")
 
 
+@dataclass
+class LyricsChoice:
+    """An LRCLIB result for a music video: the SRT text is already built (no offset)."""
+    lyrics: Any  # redactor_common.core.lrclib.Lyrics
+    match: Any   # redactor_common.core.lrclib.MatchScore
+    srt_text: str
+    language: str
+
+    def __str__(self) -> str:
+        l = self.lyrics
+        return f"{self.language} lyrics '{l.artist_name} - {l.track_name}' from LRCLIB ({self.match.label})"
+
+
 class SubtitlesStep(VideoStep):
     key = "subtitles"
-    label = "Download a missing subtitle (OpenSubtitles)"
+    label = "Download a missing subtitle (OpenSubtitles, LRCLIB lyrics)"
     description = (
         "For a video with no subtitle file beside it, looks one up on OpenSubtitles and saves it as "
         "<name>.<lang>.srt. A match by the video's own hash is applied (it syncs by construction); a match "
         "by title may not be in sync and goes to Needs review. Off by default: it needs an API key and "
-        "counts against your daily download quota."
+        "counts against your daily download quota. Music videos can use time-synced lyrics from LRCLIB instead "
+        "(option below, off by default): only a match with the same artist, title and length is saved, the rest "
+        "go to Needs review."
     )
     default_enabled = False
-    options = (OptionSpec("language", "Language code", "str", "en", max_length=8),)
+    options = (
+        OptionSpec("language", "Language code", "str", "en", max_length=8),
+        OptionSpec(
+            "use_lrclib", "Use LRCLIB lyrics for music videos", "bool", False,
+            tooltip="For a Music Video, look for time-synced lyrics on LRCLIB (no key needed) before OpenSubtitles. "
+            "Only a match with the same artist and title and a length within 2 s is saved by itself; every other "
+            "match is only a suggestion in the review. The lyrics' language is unknown, so a single Language tag "
+            "on the video is used, else 'und'.",
+        ),
+    )
+
+    def _lyrics_result(self, ctx: VideoCtx) -> StepResult | None:
+        """The LRCLIB suggestion for a music video, None when it found nothing usable (OpenSubtitles may go on)."""
+        query = lyrics_subtitles.query_for_video(ctx.work)
+        match = ctx.bg(lyrics_subtitles.best_timed, query)
+        if match is None:
+            return None
+        srt = lyrics_subtitles.srt_for(match.lyrics, query.duration)
+        if not srt:
+            return None
+        choice = LyricsChoice(match.lyrics, match.score, srt, lyrics_subtitles.guess_language(ctx.work))
+        if match.score.is_exact:
+            return StepResult.suggestion(choice, SUBTITLE_HASH_CONFIDENCE, "LRCLIB lyrics: same artist, title and length")
+        return StepResult.suggestion(
+            choice, SUBTITLE_TEXT_CONFIDENCE, f"LRCLIB lyrics, {match.score.label}: sync is not guaranteed"
+        )
 
     def execute(self, ctx: VideoCtx) -> StepResult:
         if any(s.lower().endswith(".srt") for s in sidecar_suffixes(str(ctx.video.path))):
             return StepResult.nothing()
+        if (
+            self.options_for(ctx).get("use_lrclib")
+            and ctx.work.metadata.content_type is ContentType.MUSIC_VIDEO
+        ):
+            try:
+                found_lyrics = self._lyrics_result(ctx)
+            except lyrics_subtitles.LrclibError as exc:
+                found_lyrics = None
+                lyrics_note = f"LRCLIB unavailable: {exc}"
+            else:
+                lyrics_note = ""
+            if found_lyrics is not None:
+                return found_lyrics
+            if opensubtitles_client.get_api_key() is None:
+                return StepResult.nothing(note=lyrics_note or "no synced lyrics found on LRCLIB")
         language = opensubtitles_client.clean_language_code(self.options_for(ctx)["language"].strip() or "en")
         try:
             found = ctx.bg(opensubtitles_client.search_by_hash, ctx.original, language)
@@ -1149,6 +1204,13 @@ class SubtitlesStep(VideoStep):
         )
 
     def apply_suggestion(self, ctx: VideoCtx, result: StepResult) -> str:
+        if isinstance(result.value, LyricsChoice):
+            choice = result.value
+            try:
+                path = ctx.video.save_subtitle_sidecar(choice.srt_text, language=choice.language, overwrite=False)
+            except FileExistsError as exc:
+                return f"kept the existing {os.path.basename(exc.filename or 'subtitle file')}"
+            return f"saved {path.name} (LRCLIB lyrics)"
         candidate = result.value.candidate
         text = ctx.bg(opensubtitles_client.download_subtitle_text, candidate.file_id)
         try:

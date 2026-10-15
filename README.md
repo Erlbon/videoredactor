@@ -6,7 +6,7 @@ library into MP4/MKV with ffmpeg. Part of the Redactor family; shared code comes
 
 - Edit tags of many files at once from the side panel. Filter the file list from the funnel in any column header (Content Type, Status, Filename, Year...): tick the values to show, or type a 'contains' text; filtered columns turn blue.
 - Look up metadata on TMDB, TheTVDB or an offline IMDb database you build yourself; every match is confirmed by hand.
-- Fetch subtitles from OpenSubtitles (hash match first; a title match is flagged as sync-not-guaranteed).
+- Fetch subtitles from OpenSubtitles (hash match first; a title match is flagged as sync-not-guaranteed), or, for music videos, time-synced lyrics from LRCLIB (free, no key) turned into an .srt with an adjustable offset. The Redact subtitle step can use LRCLIB too (option off by default; it only saves a same-artist, same-title, same-length match, everything else is a suggestion).
 - Check files for damage and repair them losslessly; find duplicates; rename and move files by tag patterns.
 - Redact: one click runs a saved recipe of steps on the selected (or all loaded) files.
 - Convert other formats (AVI, WMV, MOV, FLV, MPG, WebM...) to MP4 or MKV with conversion rules that copy streams
@@ -33,7 +33,7 @@ More detail, the command line, and the licences of the data sources: [ABOUT.md](
 | File | Open Files (Ctrl+O), Open Folder (Ctrl+Shift+O), Include Subfolders (also a checkbox on the toolbar next to Open Folder), Import and Convert; Save All (Ctrl+Shift+A); Rename File (F2), Undo Last Rename, Rename / Export / Move (Ctrl+E); Export Settings, Import Settings; Remove from List (Del), Clear List; Exit |
 | Edit | Undo (Ctrl+Z), Redo (Ctrl+Y); Apply to N Selected (Ctrl+Return); Redact (Ctrl+Shift+E), Edit Redact Recipe; Search and Replace (Ctrl+H), Change Case, Auto-Number |
 | View | Show Metadata Panel; Zoom In / Out / Reset (Ctrl++, Ctrl+-, Ctrl+0); Clear All Filters; Refresh List (F5, Ctrl+R); Command Palette (Ctrl+K) |
-| Metadata | Parse Filename (Ctrl+I); Look Up: TMDB (Movie) (Ctrl+M), TMDB (TV Show) (Ctrl+T), TheTVDB (TV Show) (Ctrl+Shift+T), IMDb (Local Database), Subtitles (OpenSubtitles) (Ctrl+Shift+L); Number Episodes |
+| Metadata | Parse Filename (Ctrl+I); Look Up: TMDB (Movie) (Ctrl+M), TMDB (TV Show) (Ctrl+T), TheTVDB (TV Show) (Ctrl+Shift+T), IMDb (Local Database), Subtitles (OpenSubtitles, Lyrics) (Ctrl+Shift+L); Number Episodes |
 | Media | Play (Ctrl+Shift+P, also a toolbar button and a large button under the side-panel thumbnail), Remux to MP4 (Ctrl+Shift+M), Convert to MP4 (H.264) (Ctrl+Shift+C), Convert to MP4/MKV (Rules); Check Files, Find Duplicates |
 | Tools | Preferences (Ctrl+,); API Keys, External Tools, IMDb Database; Columns, Genres, Languages; History |
 | Help | Changelog, Credits, About |
@@ -56,7 +56,7 @@ in place and its original goes to the Recycle Bin.
 | Fill empty tags from the filename | on |
 | Fill empty tags from the folder path | on |
 | Look up metadata (IMDb, TMDB, TheTVDB) | on |
-| Download a missing subtitle (OpenSubtitles) | off |
+| Download a missing subtitle (OpenSubtitles, LRCLIB lyrics) | off |
 | Remux MKV to MP4 (lossless) | off |
 | Convert to MP4/MKV and ingest subtitles | off |
 | Rename by pattern | off |

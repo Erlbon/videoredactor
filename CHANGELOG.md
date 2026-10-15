@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-15#04 -- Synced lyrics from LRCLIB as subtitles for music videos
+
+- New: Metadata > Look Up > Subtitles now has a Source choice, OpenSubtitles or Lyrics (LRCLIB). A Music Video opens on Lyrics (LRCLIB), anything else on OpenSubtitles as before. LRCLIB (lrclib.net) is free and needs no key.
+- The Lyrics page searches with the artist and title from the tags (else the file name "Artist - Title"), shown in two editable fields. It tries the exact signature (artist, title, album, length) first, then a search. Each result shows title, artist, album, the track's length against the video's, a match label (exact, close, or different length with how many seconds the video is longer or shorter: a music video often has an intro or outro) and synced / no timing. Entries without timing are greyed and cannot be chosen.
+- A preview shows the first 8 subtitle cues. Offset (seconds), -30 to +30 in 0.5 steps, updates the preview live and is applied when the file is written. A yellow line says "Sync is not guaranteed: lyrics are timed to the album version" unless the match is exact. You pick explicitly; nothing is applied by itself.
+- The file is written like every other subtitle sidecar, <name>.<lang>.srt, never replacing an existing one unasked. LRCLIB has no language field, so the language is a small box prefilled from the video's Language tag (else und).
+- New: the Redact step "Download a missing subtitle" has an option "Use LRCLIB lyrics for music videos" (off by default). Then, for a Music Video, only a match with the same artist and title and a length within 2 seconds is saved by itself; every other match is a suggestion in Needs review. If LRCLIB finds nothing, OpenSubtitles is tried as before (it needs its key).
+- The command line has no subtitle command, so nothing changed there.
+- Credits: LRCLIB added to Help > Credits.
+- Requires redactor_common 2026-10-15-07 (new core/lrclib.py: client, LRC parser, LRC to SRT, match scoring).
+
 ## 2026-10-15#03 -- Every table column can be resized by dragging, in all dialogs
 
 - Changed: every table column can be resized by dragging, in all dialogs. Check Files no longer locks its Status column to its contents or stretches Findings; all three columns drag, and the last one still fills the width that is left. The main file list gets sensible starting widths from its contents, and your saved column widths still win; the column filter funnels keep working after a resize.

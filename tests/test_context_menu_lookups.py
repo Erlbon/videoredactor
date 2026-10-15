@@ -21,7 +21,7 @@ def test_every_lookup_is_in_the_right_click_menu(window, monkeypatch):
     assert sub.text == "Look Up"
     assert [i.text for i in sub.items] == [
         "TMDB (&Movie)…", "TMDB (&TV Show)…", "TheTVDB (T&V Show)…", "IMDb (&Local Database)…",
-        "&Subtitles (OpenSubtitles)…",
+        "&Subtitles (OpenSubtitles, Lyrics)…",
     ]
 
 

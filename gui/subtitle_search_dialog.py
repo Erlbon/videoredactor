@@ -21,13 +21,15 @@ from __future__ import annotations
 from typing import Optional
 
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
-    QLineEdit, QPushButton, QLabel, QMessageBox,
+    QComboBox, QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
+    QLineEdit, QPushButton, QLabel, QMessageBox, QStackedWidget, QWidget,
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 
 from gui.lookup import run_lookup
+from gui.lyrics_panel import LyricsPanel
+from core.video_metadata import ContentType
 from core.opensubtitles_client import (
     search_by_hash, search_by_title, SubtitleCandidate, OpenSubtitlesError,
 )
@@ -43,21 +45,51 @@ SYNC_WARNING_BG = QColor(255, 244, 200)
 SYNC_WARNING_FG = QColor(70, 55, 0)
 
 
-class SubtitleSearchDialog(QDialog):
-    """Usage: dialog = SubtitleSearchDialog(video_path, language='en', parent=self);
-    if dialog.exec(): candidate = dialog.selected_candidate
-    """
+SOURCE_OPENSUBTITLES = "opensubtitles"
+SOURCE_LRCLIB = "lrclib"
 
-    def __init__(self, video_path: str, language: str = "en", parent=None):
+
+class SubtitleSearchDialog(QDialog):
+    """Usage: dialog = SubtitleSearchDialog(video_path, language='en', parent=self, video=vf);
+    if dialog.exec(): dialog.source says which page was used:
+      "opensubtitles": dialog.selected_candidate (download it);
+      "lrclib": dialog.selected_srt (the finished SRT text, offset applied), dialog.selected_language,
+                dialog.selected_match (an lrclib.Match).
+    `video` (a VideoFile) enables the Lyrics (LRCLIB) source; it is the default for a Music Video."""
+
+    def __init__(self, video_path: str, language: str = "en", parent=None, video=None, lyrics_search=None,
+                 source: Optional[str] = None):
         super().__init__(parent)
         self.video_path = video_path
         self.language = language
+        self.video = video
         self.selected_candidate: Optional[SubtitleCandidate] = None
+        self.source = SOURCE_OPENSUBTITLES
+        self.selected_srt = ""
+        self.selected_language = ""
+        self.selected_match = None
+        self.lyrics_panel: Optional[LyricsPanel] = None
+        self._opensubtitles_started = False
 
-        self.setWindowTitle("Import Subtitles from OpenSubtitles")
-        self.resize(500, 450)
+        self.setWindowTitle("Import Subtitles")
+        self.resize(560, 560)
 
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        source_row = QHBoxLayout()
+        source_row.addWidget(QLabel("Source:"))
+        self.source_combo = QComboBox()
+        self.source_combo.addItem("OpenSubtitles", SOURCE_OPENSUBTITLES)
+        if video is not None:
+            self.source_combo.addItem("Lyrics (LRCLIB)", SOURCE_LRCLIB)
+        source_row.addWidget(self.source_combo, 1)
+        outer.addLayout(source_row)
+        self.stack = QStackedWidget()
+        outer.addWidget(self.stack, 1)
+
+        page = QWidget()
+        self.stack.addWidget(page)
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
 
         self.status_label = QLabel("Checking for an exact (hash-matched) subtitle...")
         layout.addWidget(self.status_label)
@@ -77,6 +109,11 @@ class SubtitleSearchDialog(QDialog):
         fallback_row.addWidget(self.fallback_search_button)
         layout.addLayout(fallback_row)
 
+        if video is not None:
+            self.lyrics_panel = LyricsPanel(video, search=lyrics_search)
+            self.lyrics_panel.selection_changed.connect(self._update_select_button)
+            self.stack.addWidget(self.lyrics_panel)
+
         button_row = QHBoxLayout()
         button_row.addStretch()
         self.select_button = QPushButton("Use Selected")
@@ -86,9 +123,45 @@ class SubtitleSearchDialog(QDialog):
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.clicked.connect(self.reject)
         button_row.addWidget(self.cancel_button)
-        layout.addLayout(button_row)
+        outer.addLayout(button_row)
 
-        self._run_hash_search()
+        wanted = source
+        if wanted is None:
+            is_music = video is not None and video.metadata.content_type is ContentType.MUSIC_VIDEO
+            wanted = SOURCE_LRCLIB if is_music else SOURCE_OPENSUBTITLES
+        self.source_combo.currentIndexChanged.connect(self._on_source_changed)
+        self.set_source(wanted)
+
+    def set_source(self, source: str) -> None:
+        """Show the OpenSubtitles or the Lyrics (LRCLIB) page; the first visit of a page starts its search."""
+        if source == SOURCE_LRCLIB and self.lyrics_panel is None:
+            source = SOURCE_OPENSUBTITLES
+        index = self.source_combo.findData(source)
+        self.source_combo.blockSignals(True)
+        self.source_combo.setCurrentIndex(index)
+        self.source_combo.blockSignals(False)
+        self._on_source_changed()
+
+    def _on_source_changed(self) -> None:
+        self.source = self.source_combo.currentData()
+        if self.source == SOURCE_LRCLIB:
+            self.stack.setCurrentWidget(self.lyrics_panel)
+            if not self.lyrics_panel.matches and not getattr(self.lyrics_panel, "_started", False):
+                self.lyrics_panel._started = True
+                self.lyrics_panel.run_search()
+        else:
+            self.stack.setCurrentIndex(0)
+            if not self._opensubtitles_started:
+                self._opensubtitles_started = True
+                self._run_hash_search()
+        self._update_select_button()
+
+    def _update_select_button(self, *_args) -> None:
+        if self.source == SOURCE_LRCLIB:
+            match = self.lyrics_panel.selected_match
+            self.select_button.setEnabled(bool(match is not None and match.lyrics.has_timing))
+        else:
+            self.select_button.setEnabled(bool(self.results_list.selectedItems()))
 
     def _run_hash_search(self) -> None:
         try:
@@ -146,10 +219,19 @@ class SubtitleSearchDialog(QDialog):
         return f"{sync_note} {release} -- {candidate.download_count} downloads"
 
     def _on_selection_changed(self) -> None:
-        items = self.results_list.selectedItems()
-        self.select_button.setEnabled(bool(items))
+        self._update_select_button()
 
     def _on_accept(self) -> None:
+        if self.source == SOURCE_LRCLIB:
+            match = self.lyrics_panel.selected_match
+            srt = self.lyrics_panel.current_srt()
+            if match is None or not srt:
+                return
+            self.selected_match = match
+            self.selected_srt = srt
+            self.selected_language = self.lyrics_panel.language()
+            self.accept()
+            return
         items = self.results_list.selectedItems()
         if not items:
             return

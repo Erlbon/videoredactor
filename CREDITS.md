@@ -44,3 +44,7 @@ system:
   information there, or supporting them directly.
 - **[OpenSubtitles](https://www.opensubtitles.com/)** — subtitle
   search and download.
+- **[LRCLIB](https://lrclib.net/)** — free, keyless, community-written
+  synced lyrics, used as a subtitle source for music videos. The lyrics
+  belong to their authors; LRCLIB's data is contributed by its users, and
+  the app only fetches a song's lyrics when you ask for it.
