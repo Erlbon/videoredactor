@@ -53,7 +53,7 @@ def _install_dirs() -> list[Path]:
 # ToolInfo groups below -- used to validate a key before writing an
 # override for it (see set_tool_override), so a typo'd exe name can't
 # silently create a dead settings.ini entry nothing ever reads.
-KNOWN_EXECUTABLES = frozenset({"ffmpeg", "ffprobe", "mkvpropedit", "mkvmerge", "mkvextract"})
+KNOWN_EXECUTABLES = frozenset({"ffmpeg", "ffprobe", "mkvpropedit", "mkvmerge", "mkvextract", "argos-translate"})
 
 
 @dataclass

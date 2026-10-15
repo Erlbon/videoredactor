@@ -33,6 +33,7 @@ EXECUTABLE_ROWS = [
     ("mkvpropedit", "mkvpropedit"),
     ("mkvmerge", "mkvmerge"),
     ("mkvextract", "mkvextract"),
+    ("argos-translate", "argos-translate (optional, subtitle translation)"),
 ]
 
 # Sanity check at import time: if this list and external_tools.py's

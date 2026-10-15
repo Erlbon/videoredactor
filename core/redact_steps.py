@@ -68,6 +68,7 @@ from redactor_common.core.rename_pattern import render_filename, unique_path, ze
 from redactor_common.core.trash import move_to_trash
 
 from core import imdb_import, imdb_local, lyrics_subtitles, opensubtitles_client, tmdb_client, tvdb_client
+from core import subtitle_translation, translation_settings
 from core import conversion_plan, conversion_run, history, library_safety
 from core.config import get_setting, set_setting
 from core.ffmpeg_backend import _run, remux_to_mp4, verify_remux
@@ -1220,6 +1221,81 @@ class SubtitlesStep(VideoStep):
         return f"saved {path.name}"
 
 
+@dataclass
+class TranslationChoice:
+    """A machine translation of a foreign subtitle, ready to be written as <name>.en.srt after review."""
+    cues: Any          # list[redactor_common.core.srt.Cue], English text, original timing
+    source_lang: str
+    engine: str
+    source_name: str
+
+    def __str__(self) -> str:
+        return f"English machine translation of {self.source_name} ({self.source_lang}, {self.engine})"
+
+
+# A translation is only ever a suggestion: this stays far below any sensible auto-apply threshold.
+TRANSLATION_CONFIDENCE = 0.3
+
+
+class SubtitleTranslateStep(VideoStep):
+    key = "translate_subtitles"
+    label = "Translate non-English subtitles of music videos to English"
+    description = (
+        "For a Music Video with a non-English subtitle file beside it and no English one, translates that subtitle "
+        "to English with the engine set under Tools > Preferences > Translation (your own LibreTranslate server or "
+        "the argos-translate command; nothing is built into this program). The result is a machine translation: "
+        "it is never written by itself, it goes to Needs review, and when approved it is saved as <name>.en.srt "
+        "next to the original (which is not touched) and marked as machine translated. Off by default."
+    )
+    default_enabled = False
+
+    def execute(self, ctx: VideoCtx) -> StepResult:
+        if ctx.work.metadata.content_type is not ContentType.MUSIC_VIDEO:
+            return StepResult.nothing()
+        externals = [
+            (e, subtitle_translation.iso1(e.language))
+            for e in subtitle_translation.si.find_external_subs(str(ctx.video.path))
+        ]
+        if not externals or any(lang == "en" for _e, lang in externals):
+            return StepResult.nothing()
+        ext, language = externals[0]
+        source = subtitle_translation.SubtitleSource(
+            os.path.basename(ext.path), subtitle_translation.KIND_SIDECAR, language, ext.path
+        )
+        try:
+            text = subtitle_translation.read_text(source)
+        except Exception as exc:  # noqa: BLE001 -- a note, never a failure of the whole recipe
+            return StepResult.nothing(note=f"not translated: {os.path.basename(ext.path)} could not be read ({exc})")
+        language, _guessed = subtitle_translation.source_language(source, text)
+        if not language:
+            return StepResult.nothing(
+                note=f"not translated: the language of {os.path.basename(ext.path)} is unknown "
+                "(translate it from Media > Translate Subtitles to English and confirm the language)"
+            )
+        cues = subtitle_translation.parse_srt(text)
+        if not cues:
+            return StepResult.nothing()
+        translator = translation_settings.make_translator()
+        result = ctx.bg(
+            subtitle_translation.translate_all, cues, language, translation_settings.target_language(), translator
+        )
+        if result.error or result.cancelled or result.failed or not result.translated:
+            reason = result.error or "some cues could not be translated"
+            return StepResult.nothing(note=f"translation not used: {reason}")
+        return StepResult.suggestion(
+            TranslationChoice(result.cues, language, result.engine or translator.name, source.label),
+            TRANSLATION_CONFIDENCE, "machine translation: always check it before keeping it",
+        )
+
+    def apply_suggestion(self, ctx: VideoCtx, result: StepResult) -> str:
+        choice = result.value
+        try:
+            path = subtitle_translation.write_translation(ctx.video, choice.cues, choice.engine, choice.source_lang)
+        except FileExistsError as exc:
+            return f"kept the existing {os.path.basename(exc.filename or 'subtitle file')}"
+        return f"saved {path.name} (machine translation, {choice.engine})"
+
+
 # --- step 5: MKV -> MP4 remux ------------------------------------------------------------
 
 
@@ -1568,6 +1644,7 @@ def build_catalogue(
         PathTagsStep(env=env, sample=sample),
         LookupStep(),
         SubtitlesStep(),
+        SubtitleTranslateStep(),
         RemuxStep(),
         ConvertStep(),
         RenameStep(env=env, sample=sample),

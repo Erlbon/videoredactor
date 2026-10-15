@@ -68,6 +68,7 @@ class SubtitleSearchDialog(QDialog):
         self.selected_srt = ""
         self.selected_language = ""
         self.selected_match = None
+        self.translate_requested = False
         self.lyrics_panel: Optional[LyricsPanel] = None
         self._opensubtitles_started = False
 
@@ -120,6 +121,12 @@ class SubtitleSearchDialog(QDialog):
         self.select_button.setEnabled(False)
         self.select_button.clicked.connect(self._on_accept)
         button_row.addWidget(self.select_button)
+        self.translate_button = QPushButton("Use and Translate...")
+        self.translate_button.setToolTip(
+            "Write the lyrics as a subtitle, then open the side-by-side English translation for it."
+        )
+        self.translate_button.clicked.connect(self._on_use_and_translate)
+        button_row.addWidget(self.translate_button)
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.clicked.connect(self.reject)
         button_row.addWidget(self.cancel_button)
@@ -162,6 +169,8 @@ class SubtitleSearchDialog(QDialog):
             self.select_button.setEnabled(bool(match is not None and match.lyrics.has_timing))
         else:
             self.select_button.setEnabled(bool(self.results_list.selectedItems()))
+        self.translate_button.setVisible(self.source == SOURCE_LRCLIB)
+        self.translate_button.setEnabled(self.source == SOURCE_LRCLIB and self.select_button.isEnabled())
 
     def _run_hash_search(self) -> None:
         try:
@@ -220,6 +229,13 @@ class SubtitleSearchDialog(QDialog):
 
     def _on_selection_changed(self) -> None:
         self._update_select_button()
+
+    def _on_use_and_translate(self) -> None:
+        """Lyrics page: write the chosen lyrics as usual, then the main window opens the translation for it."""
+        self.translate_requested = True
+        self._on_accept()
+        if not self.result():
+            self.translate_requested = False
 
     def _on_accept(self) -> None:
         if self.source == SOURCE_LRCLIB:

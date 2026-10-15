@@ -6,6 +6,7 @@ library into MP4/MKV with ffmpeg. Part of the Redactor family; shared code comes
 
 - Edit tags of many files at once from the side panel. Filter the file list from the funnel in any column header (Content Type, Status, Filename, Year...): tick the values to show, or type a 'contains' text; filtered columns turn blue.
 - Look up metadata on TMDB, TheTVDB or an offline IMDb database you build yourself; every match is confirmed by hand.
+- Translate a foreign subtitle to English, side by side (Media > Translate Subtitles to English; offline engine of your own: a LibreTranslate server or the argos-translate command, nothing bundled). The original stays, the translation is a second file <name>.en.srt, editable before it is written and never replacing an existing file. Media > Compare Subtitles shows any two subtitle tracks of a video side by side.
 - Fetch subtitles from OpenSubtitles (hash match first; a title match is flagged as sync-not-guaranteed), or, for music videos, time-synced lyrics from LRCLIB (free, no key) turned into an .srt with an adjustable offset. The Redact subtitle step can use LRCLIB too (option off by default; it only saves a same-artist, same-title, same-length match, everything else is a suggestion).
 - Check files for damage and repair them losslessly; find duplicates; rename and move files by tag patterns.
 - Redact: one click runs a saved recipe of steps on the selected (or all loaded) files.
@@ -57,6 +58,7 @@ in place and its original goes to the Recycle Bin.
 | Fill empty tags from the folder path | on |
 | Look up metadata (IMDb, TMDB, TheTVDB) | on |
 | Download a missing subtitle (OpenSubtitles, LRCLIB lyrics) | off |
+| Translate non-English subtitles of music videos to English (needs a translation engine; the result is only a suggestion) | off |
 | Remux MKV to MP4 (lossless) | off |
 | Convert to MP4/MKV and ingest subtitles | off |
 | Rename by pattern | off |

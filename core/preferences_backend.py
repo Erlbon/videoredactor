@@ -45,6 +45,10 @@ KEY_AUDIO_BITRATE = "audio_bitrate"
 KEY_THREADS = "threads"
 KEY_DUPLICATE_THRESHOLD = "duplicate_threshold"
 KEY_HISTORY_ENABLED = "history_enabled"
+KEY_TRANSLATION_ENGINE = "translation_engine"
+KEY_TRANSLATION_URL = "translation_url"
+KEY_TRANSLATION_COMMAND = "translation_command"
+KEY_TRANSLATION_TARGET = "translation_target"
 
 # preference key -> (ini section, ini key)
 INI_LOCATIONS: dict[str, tuple[str, str]] = {
@@ -57,6 +61,10 @@ INI_LOCATIONS: dict[str, tuple[str, str]] = {
     KEY_THREADS: ("transcode", "threads"),
     KEY_DUPLICATE_THRESHOLD: ("duplicates", "threshold"),
     KEY_HISTORY_ENABLED: (history.SETTINGS_SECTION, history.SETTINGS_KEY),
+    KEY_TRANSLATION_ENGINE: ("translation", "engine"),
+    KEY_TRANSLATION_URL: ("translation", "url"),
+    KEY_TRANSLATION_COMMAND: ("tools", "argos-translate"),
+    KEY_TRANSLATION_TARGET: ("translation", "target"),
 }
 
 _BITRATE = re.compile(r"\d{1,4}[kKmM]?")
@@ -89,7 +97,32 @@ def history_section(actions: tuple[PrefAction, ...] = ()) -> PrefSection:
     ), history_help_text(history.journal_path()), actions=actions)
 
 
-def build_sections(history_actions: tuple[PrefAction, ...] = ()) -> list[PrefSection]:
+def translation_section(actions: tuple[PrefAction, ...] = ()) -> PrefSection:
+    """Preferences > Translation: which engine translates subtitles (Media > Translate Subtitles to English).
+    Nothing is bundled and nothing translates by itself."""
+    from redactor_common.core.translate import DEFAULT_URL
+
+    return PrefSection("translation", "Translation", (
+        PrefSpec(KEY_TRANSLATION_ENGINE, "Engine", "choice", "libretranslate",
+                 choices=(("libretranslate", "LibreTranslate server"), ("argos", "argos-translate command")),
+                 help="LibreTranslate: your own server (for example the Docker image libretranslate/libretranslate), "
+                      "offline models, any compatible server works. argos-translate: the argostranslate command "
+                      "line with its offline models. Neither is part of this program."),
+        PrefSpec(KEY_TRANSLATION_URL, "Server address", "str", DEFAULT_URL,
+                 help="Used by the LibreTranslate engine. An API key, if the server wants one, goes under "
+                      "Tools > API Keys (LibreTranslate)."),
+        PrefSpec(KEY_TRANSLATION_COMMAND, "argos-translate command", "path", "",
+                 help="Used by the argos-translate engine. Blank finds it on PATH. The same setting as the "
+                      "argos-translate row under Tools > External Tools."),
+        PrefSpec(KEY_TRANSLATION_TARGET, "Translate to", "str", "en",
+                 help="The language code translations are made in (English: en)."),
+    ), "Machine translation is optional and off until you start it: Media > Translate Subtitles to English... "
+       "or the Redact step. A translation is always written as a separate file and marked as machine "
+       "translated; the original subtitle is never changed.", actions=actions)
+
+
+def build_sections(history_actions: tuple[PrefAction, ...] = (),
+                   translation_actions: tuple[PrefAction, ...] = ()) -> list[PrefSection]:
     """The shared dialog's pages. `history_actions`: the History page's buttons (the dialog passes its Qt
     Delete History... callback; this module stays Qt-free)."""
     return [
@@ -115,6 +148,7 @@ def build_sections(history_actions: tuple[PrefAction, ...] = ()) -> list[PrefSec
                           "more, with more false matches.",
                      minimum=0, maximum=32),
         ), "Used by Media > Find Duplicates as its starting value."),
+        translation_section(translation_actions),
         history_section(history_actions),
     ]
 

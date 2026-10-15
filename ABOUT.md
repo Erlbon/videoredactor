@@ -20,6 +20,15 @@ into files one at a time.
 - **Season & episode picker** for TV — after matching a show, pick the
   exact season and episode so per-episode titles and air dates land
   correctly, not just show-level metadata.
+- **Subtitle translation** (Media > Translate Subtitles to English…,
+  Media > Compare Subtitles…) — translates a non-English subtitle to
+  English with an engine you run yourself (a LibreTranslate server or
+  the argos-translate command; nothing is built in). Original and
+  translation are two files (<name>.ru.srt, <name>.en.srt), shown side
+  by side with the English cells editable; the translation is marked
+  as machine translated (embedding gives the track the title
+  "English (machine translation)"). Set up under Tools > Preferences >
+  Translation.
 - **Subtitle fetching** via OpenSubtitles, hash-matched against the
   exact file first (guaranteed sync) with a title-search fallback that's
   clearly flagged as sync-not-guaranteed. For music videos the same
@@ -292,7 +301,7 @@ Guesses below the confidence threshold are listed under "needs review" and not a
 | `--trash-dir FOLDER` | Move originals into this folder (created if needed) instead of the Recycle Bin, for a machine or a task that has none. |
 | `--list-steps` | Show the steps and whether the recipe has each on, then stop (no `PATH` needed). |
 
-Steps: `check_repair`, `filename_tags`, `path_tags`, `lookup`, `subtitles`, `remux_mkv_to_mp4`, `convert_library`,
+Steps: `check_repair`, `filename_tags`, `path_tags`, `lookup`, `subtitles`, `translate_subtitles`, `remux_mkv_to_mp4`, `convert_library`,
 `rename`, `move_into_folders`. Without `--recipe` the recipe saved in the app is used (the defaults if none was saved). A
 repair is only automatic when a lossless remux fully fixes the file; a damaged file is reported and left alone.
 Exit code 1 if any file failed; files that need review are not failures. Rename and Move run last, after the

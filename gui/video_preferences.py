@@ -201,6 +201,45 @@ def delete_history_action(parent: QWidget) -> bool:
     return True
 
 
+CHECK_ENGINE_LABEL = "Check the engine..."
+CHECK_ENGINE_HELP = "Tests the engine as typed above (without saving): reachable or runs, and which language pairs it has."
+
+
+def check_engine_action(parent: QWidget) -> None:
+    """Preferences > Translation's Check the engine button: builds the engine from what is typed in the dialog
+    (the saved settings when it cannot be read) and reports in a message box. Runs off the GUI thread."""
+    from redactor_common.core.translate import ArgosCliTranslator, LibreTranslateTranslator, TranslateError
+    from redactor_common.gui.progress import run_busy
+
+    from core import api_keys, translation_settings as ts
+    from core.external_tools import get_executable_path
+    from core.preferences_backend import KEY_TRANSLATION_COMMAND, KEY_TRANSLATION_ENGINE, KEY_TRANSLATION_URL
+
+    rows = getattr(parent, "_rows", {})
+
+    def typed(key: str, fallback: str) -> str:
+        try:
+            return str(rows[key].get()).strip() or fallback
+        except Exception:  # noqa: BLE001 -- not a preferences dialog (tests): the saved value
+            return fallback
+
+    engine = typed(KEY_TRANSLATION_ENGINE, ts.engine())
+    if engine == ts.ENGINE_ARGOS:
+        command = typed(KEY_TRANSLATION_COMMAND, "") or get_executable_path("argos-translate")
+        translator = ArgosCliTranslator(command)
+    else:
+        translator = LibreTranslateTranslator(
+            typed(KEY_TRANSLATION_URL, ts.server_url()), api_key=api_keys.get_key("libretranslate") or "",
+            user_agent=ts.USER_AGENT,
+        )
+    try:
+        message = run_busy(parent, "Checking the translation engine...", ts.check_engine, translator)
+    except TranslateError as exc:
+        QMessageBox.warning(parent, "Translation Engine", str(exc))
+        return
+    QMessageBox.information(parent, "Translation Engine", message)
+
+
 _DISC_LABELS = {
     conversion_plan.DISC_LEAVE: "Leave alone (never touched)",
     conversion_plan.DISC_LIST: "Leave alone, but list them for review",
@@ -356,8 +395,9 @@ class VideoPreferencesDialog(PreferencesDialog):
             return build
 
         actions = (PrefAction(DELETE_HISTORY_LABEL, delete_history_action, DELETE_HISTORY_HELP),)
+        translation_actions = (PrefAction(CHECK_ENGINE_LABEL, check_engine_action, CHECK_ENGINE_HELP),)
         super().__init__(
-            build_sections(history_actions=actions), make_backend(), parent,
+            build_sections(history_actions=actions, translation_actions=translation_actions), make_backend(), parent,
             extra_pages=[
                 ("Tools / Paths", build_paths_page),
                 ("Conversion", deferred_page(ConversionPage)),

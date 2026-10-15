@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-15#05 -- Translate subtitles to English, side by side; Compare Subtitles
+
+- New: Media > Translate Subtitles to English... (also in the right-click menu under Subtitles) for one selected video. It lists the video's non-English subtitles (files beside it, and embedded text tracks), shows the original and an English column side by side with the time of each cue, and translates on request with a progress window that has Cancel. The English cells can be edited before anything is written. Write English Subtitle saves <name>.en.srt next to the video with the original timing; it never replaces a file (if <name>.en.srt exists it offers <name>.eng.srt, or cancel), and the original subtitle is never touched. The dialog says "Machine translation (engine X) - check before relying on it."
+- The subtitle's language is its tag; without one it is guessed from the text and you are asked to confirm it.
+- No engine is built in (nothing was added to the exe). Choose one under Tools > Preferences > Translation: a LibreTranslate-compatible server (for example your own Docker container; address and, if it wants one, an API key under Tools > API Keys), or the argos-translate command (its location is also a row under Tools > External Tools). "Check the engine" reports whether it is reachable and which language pairs it has. Nothing translates unless you start it.
+- A machine translation is marked: the app remembers the text it wrote, and when a conversion embeds that subtitle the track gets the stream title "English (machine translation)". The file name has no extra token. With Tools > History on, the written file is recorded there too.
+- New: Media > Compare Subtitles... shows any two subtitle tracks of the selected video side by side, read only, with rows lined up by time overlap, so tracks with a different number of cues still match up (for example Song.ru.srt next to a human-made Song.en.srt).
+- New: in the lyrics subtitle search (Metadata > Look Up > Subtitles, source Lyrics) a button Use and Translate... writes the lyrics and opens the translation for them.
+- New: the Redact step "Translate non-English subtitles of music videos to English" (off by default; command line step translate_subtitles). Only for a Music Video that has a non-English subtitle file and no English one; the result is never written by itself, it goes to Needs review.
+- Requires redactor_common 2026-10-15-08 (new core/translate.py and core/srt.py, run_work_with_progress).
+
 ## 2026-10-15#04 -- Synced lyrics from LRCLIB as subtitles for music videos
 
 - New: Metadata > Look Up > Subtitles now has a Source choice, OpenSubtitles or Lyrics (LRCLIB). A Music Video opens on Lyrics (LRCLIB), anything else on OpenSubtitles as before. LRCLIB (lrclib.net) is free and needs no key.

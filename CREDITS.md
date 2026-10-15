@@ -44,6 +44,11 @@ system:
   information there, or supporting them directly.
 - **[OpenSubtitles](https://www.opensubtitles.com/)** — subtitle
   search and download.
+- **[LibreTranslate](https://libretranslate.com/)** and
+  **[Argos Translate](https://github.com/argosopentech/argos-translate)** —
+  the optional offline translation engines subtitle translation can
+  talk to (not included: you run your own server or install the
+  command).
 - **[LRCLIB](https://lrclib.net/)** — free, keyless, community-written
   synced lyrics, used as a subtitle source for music videos. The lyrics
   belong to their authors; LRCLIB's data is contributed by its users, and

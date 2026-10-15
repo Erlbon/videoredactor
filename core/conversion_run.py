@@ -28,6 +28,7 @@ from typing import Callable
 from core import conversion_plan as cp
 from core import encoder_detect, history
 from core.ffmpeg_backend import _run_ffmpeg, probe_media
+from core import mt_registry
 from core import subtitle_ingest as si
 from core.library_safety import KIND_CLEANUP, KIND_REMUXED, KIND_RESIZED, PART_MARKER, RESIZE_MARKER, SafeRun
 from core.video_file import SUPPORTED_EXTENSIONS, VideoFile
@@ -272,7 +273,7 @@ def process_file(
             if not run.dry_run:
                 with open(path, "w", encoding="utf-8", newline="") as f:
                     f.write(s.text)
-            added.append(cp.AddedSub(path, s.language, s.title, s.default, s.hearing_impaired))
+            added.append(cp.AddedSub(path, s.language, mt_registry.track_title(s.text, s.title), s.default, s.hearing_impaired))
         outcome = convert_file(run, source, plan, info, settings, added=added, probe=probe, **convert_kwargs)
     outcome.notes = notes + outcome.notes
     if outcome.converted and carry_tags and tags is not None and not run.dry_run:

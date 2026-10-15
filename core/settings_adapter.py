@@ -261,6 +261,11 @@ SECTIONS: dict[str, tuple[str, bool, list[Key]]] = {
     "history": ("Tools > History on/off (importing a bundle with it on turns recording on)", True, [
         _key("enabled", "history", "enabled", _history_codec()),
     ]),
+    "translation": ("Subtitle translation engine, server address and target language", False, [
+        _key("engine", "translation", "engine", _str_codec()),
+        _key("url", "translation", "url", _str_codec()),
+        _key("target", "translation", "target", _str_codec()),
+    ]),
     "imdb_options": ("IMDb database build options", True, [
         _key("options", "imdb", "options", _imdb_options_codec()),
     ]),

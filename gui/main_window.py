@@ -118,6 +118,7 @@ from gui.tmdb_attribution import AppCreditsDialog
 from gui.tvdb_search_dialog import TVDBSearchDialog
 from gui.tvdb_episode_picker_dialog import TVDBEpisodePickerDialog
 from gui.subtitle_search_dialog import SOURCE_LRCLIB, SubtitleSearchDialog
+from gui.subtitle_translation_dialog import MODE_COMPARE, MODE_TRANSLATE, SubtitleTranslationDialog
 from gui.tool_settings_dialog import ToolSettingsDialog
 from gui.video_preferences import VideoPreferencesDialog
 from redactor_common.gui.preferences_dialog import preferences_menu_action
@@ -563,6 +564,9 @@ class MainWindow(QMainWindow):
                     Separator(),
                     MenuAction("check_files", "&Check Files…", self._on_check_files),
                     MenuAction("find_duplicates", labels.FIND_DUPLICATES, self._on_find_duplicates),
+                    Separator(),
+                    MenuAction("translate_subtitles", "&Translate Subtitles to English…", self._on_translate_subtitles),
+                    MenuAction("compare_subtitles", "Co&mpare Subtitles…", self._on_compare_subtitles),
                 ]),
             ],
             tools=_with_preferences(self._on_open_preferences, standard_tools_items(
@@ -1562,6 +1566,10 @@ class MainWindow(QMainWindow):
             items.append(Submenu("Organize", [
                 self.actions_by_key["rename_export_move"],
                 MenuAction("ctx_number_episodes", "Number Episodes…", lambda: self._quick_number_episodes(files)),
+            ]))
+            items.append(Submenu("Subtitles", [
+                self.actions_by_key["translate_subtitles"],
+                self.actions_by_key["compare_subtitles"],
             ]))
             items.extend([Separator(), self.redact_action, Separator(), self.remove_from_list_action])
             return items
@@ -3057,6 +3065,33 @@ class MainWindow(QMainWindow):
         sync_note = "exact match" if candidate.hash_matched else "title match -- sync not guaranteed"
         self.status_bar.showMessage(f"Saved subtitle to {detail.name} ({sync_note})")
 
+    def _one_loaded_video(self, what: str) -> Optional[VideoFile]:
+        files = self._selected_video_files()
+        if len(files) != 1:
+            self.status_bar.showMessage(f"{what} needs exactly one file selected")
+            return None
+        if files[0].load_error:
+            self.status_bar.showMessage(f"{files[0].path.name} failed to load: fix that first")
+            return None
+        return files[0]
+
+    def _on_translate_subtitles(self, preselect: str = "") -> None:
+        """Media > Translate Subtitles to English...: the side-by-side translation dialog for the one selected
+        video (never translates or writes anything until its buttons are pressed)."""
+        vf = self._one_loaded_video("Translate Subtitles")
+        if vf is None:
+            return
+        dialog = SubtitleTranslationDialog(vf, MODE_TRANSLATE, parent=self, preselect=preselect or "")
+        dialog.exec()
+        if dialog.written_path is not None:
+            self.status_bar.showMessage(f"Saved {dialog.written_path.name} (machine translation)")
+
+    def _on_compare_subtitles(self) -> None:
+        """Media > Compare Subtitles...: any two subtitle tracks of the selected video side by side, read only."""
+        vf = self._one_loaded_video("Compare Subtitles")
+        if vf is not None:
+            SubtitleTranslationDialog(vf, MODE_COMPARE, parent=self).exec()
+
     def _save_lyrics_subtitle(self, vf: VideoFile, dialog: SubtitleSearchDialog) -> None:
         """Writes the SRT the Lyrics (LRCLIB) page built (offset already applied) as the usual sidecar
         <stem>.<lang>.srt; an existing file is only replaced when the user says so."""
@@ -3071,6 +3106,8 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage("Kept the existing subtitle file")
             return
         self.status_bar.showMessage(f"Saved lyrics subtitle to {detail.name} (LRCLIB, {match.score.label})")
+        if getattr(dialog, "translate_requested", False):
+            self._on_translate_subtitles(preselect=str(detail))
 
     # --- Filename patterns -------------------------------------------------
 
