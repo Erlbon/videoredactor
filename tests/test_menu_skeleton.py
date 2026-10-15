@@ -47,7 +47,8 @@ def test_other_menus_hold_what_the_spec_says(window):
         "Search and Replace…", "Change Case…", "Auto-Number…",
     ]
     assert _labels(menus["View"]) == [
-        "Show Metadata Panel", "Zoom In", "Zoom Out", "Reset Zoom", "Refresh List", "Command Palette…",
+        "Show Metadata Panel", "Zoom In", "Zoom Out", "Reset Zoom", "Clear All Filters", "Refresh List",
+        "Command Palette…",
     ]
     assert _labels(menus["Metadata"]) == ["Parse Filename…", "Look Up", "Number Episodes…"]
     look_up = next(a for a in menus["Metadata"].actions() if a.menu()).menu()
@@ -135,8 +136,10 @@ def test_toolbar_reuses_the_menu_actions_in_order(window):
     toolbar = window.findChildren(QToolBar)[0]
     acts = [a for a in toolbar.actions() if not a.isSeparator()]
     reg = window.actions_by_key
-    assert acts[:8] == [reg["open_files"], reg["open_folder"], reg["play"], reg["apply"], reg["save_all"],
-                        reg["redact"], reg["undo"], reg["redo"]]
+    # The Include Subfolders checkbox (a widget action) sits right after Open Folder.
+    assert acts[2].defaultWidget() is window.include_subfolders_box
+    assert acts[:2] + acts[3:9] == [reg["open_files"], reg["open_folder"], reg["play"], reg["apply"], reg["save_all"],
+                                    reg["redact"], reg["undo"], reg["redo"]]
     assert "save" not in reg  # one Save button: Save All
     assert window.zoom.zoom_out_action in acts and window.zoom.zoom_in_action in acts
     assert window.undo_action is reg["undo"] and window.redo_action is reg["redo"]

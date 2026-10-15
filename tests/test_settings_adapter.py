@@ -273,7 +273,7 @@ def test_menu_actions_open_the_shared_dialogs(window, monkeypatch):
 
 
 def test_import_refreshes_columns_and_panel_live(window, monkeypatch):
-    window._rebuild_table_columns(None)
+    window._rebuild_table_columns()
     assert not window.table.isColumnHidden(window._column_order.index("network"))
     VideoSettingsAdapter().write_section("columns", {"hidden": ["network"]})
     refreshed = []

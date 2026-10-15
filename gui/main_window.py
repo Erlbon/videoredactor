@@ -80,7 +80,10 @@ from core.app_paths import base_dir
 from redactor_common.gui.rename_pattern_dialog import RenamePatternDialog
 from redactor_common.gui.search_replace_dialog import FILENAME_FIELD_KEY, SearchReplaceDialog
 from redactor_common.gui.move_runner import run_planned_moves
-from redactor_common.gui.folder_options import attach_include_subfolders, include_subfolders_slot
+from redactor_common.gui.folder_options import (
+    add_include_subfolders_checkbox, attach_include_subfolders, include_subfolders_slot,
+)
+from redactor_common.gui.column_filter import KIND_TEXT, KIND_VALUES, ColumnFilterHeader
 from redactor_common.gui.progress import run_busy, run_with_progress
 from redactor_common.gui.work_progress import run_work_with_progress
 from redactor_common.gui.convert_offer import YES as CONVERT_YES, offer_conversion
@@ -157,6 +160,19 @@ TECHNICAL_LABELS = {
     "resolution": "Resolution",
     "size_bytes": "Size",
     "bitrate": "Bitrate",
+}
+
+# Header filters (the funnel in a column header): which columns get one. KIND_VALUES = a checklist of the
+# distinct values; KIND_TEXT = a "contains..." box above the checklist. Left out on purpose: Duration, Size and
+# Bitrate (almost every value is distinct, so a checklist would be useless).
+FILTER_COLUMN_KINDS = {
+    "filename": KIND_TEXT, "path": KIND_TEXT, "status": KIND_VALUES, "content_type": KIND_VALUES,
+    "resolution": KIND_VALUES, "language": KIND_VALUES,
+    "personal_rating": KIND_VALUES, "season_number": KIND_VALUES, "episode_number": KIND_VALUES,
+    **{f: KIND_TEXT for f in (
+        "title", "sort_title", "description", "genre_tags", "release_date", "comment", "director", "cast",
+        "writer", "studio", "collection", "show_title", "network", "artist", "album", "track_title", "composer",
+    )},
 }
 
 FILE_ROLE = Qt.ItemDataRole.UserRole  # row -> VideoFile mapping, not row index
@@ -384,7 +400,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._build_menu_bar()
         self._build_toolbar()
-        self._rebuild_table_columns(content_type_filter=None)
+        self._rebuild_table_columns()
         self._check_external_tools_on_startup()
         self._restore_last_folder_on_startup()
 
@@ -393,20 +409,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         root_layout = QVBoxLayout(central)
 
-        # --- Top bar: content type filter ---
-        # (Open Folder / Save moved to the toolbar -- see _build_toolbar --
-        # so this row is just the filter now, not a mix of the two.)
-        top_bar = QHBoxLayout()
-        top_bar.addWidget(QLabel("Filter by Content Type:"))
-        self.filter_combo = QComboBox()
-        self.filter_combo.addItem("All (no filter)", None)
-        for ct in ContentType:
-            if ct != ContentType.UNSET:
-                self.filter_combo.addItem(ct.value, ct)
-        self.filter_combo.currentIndexChanged.connect(self._on_filter_changed)
-        top_bar.addWidget(self.filter_combo)
-        top_bar.addStretch()
-        root_layout.addLayout(top_bar)
+        # (No filter row above the table: every filterable column has a funnel in its header, see
+        # ColumnFilterHeader below; Open Folder / Save live on the toolbar.)
 
         # --- Splitter: TagPanel (left) + file table (right) ---
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -425,6 +429,12 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.tag_panel)
 
         self.table = QTableWidget()
+        # The header carries the per-column filters (funnel button on every filterable column); installed before
+        # sorting is switched on and before any header signal is connected.
+        self.filter_header = ColumnFilterHeader(self.table)
+        self.table.setHorizontalHeader(self.filter_header)
+        self.filter_header.configure(self._column_key, FILTER_COLUMN_KINDS)
+        self.filter_header.filtersChanged.connect(self._on_filters_changed)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         # Click a header to sort by that column -- safe here because row
@@ -527,6 +537,7 @@ class MainWindow(QMainWindow):
                 reset_zoom=lambda: self.zoom.zoom_reset(),
                 # The family's F5 and Ctrl+R (Ctrl+R used to be Remux here; Remux is Ctrl+Shift+M now).
                 refresh_list=self._refresh_list,
+                extra_view=[MenuAction("clear_column_filters", "&Clear All Filters", self._clear_column_filters)],
             ),
             app_menus=[
                 AppMenu(labels.MENU_METADATA, [
@@ -627,6 +638,8 @@ class MainWindow(QMainWindow):
 
         toolbar.addAction(self.open_files_action)
         toolbar.addAction(self.open_folder_action)
+        # A checkbox right after Open Folder, mirroring File > Include Subfolders (one saved value).
+        self.include_subfolders_box = add_include_subfolders_checkbox(toolbar, self.actions_by_key["include_subfolders"])
         toolbar.addSeparator()
         # Plays the selected file (same action as Media > Play).
         toolbar.addAction(self.actions_by_key["play"])
@@ -744,7 +757,7 @@ class MainWindow(QMainWindow):
         read fresh each time their dialog opens, so they need nothing."""
         applied = set(result.applied)
         if applied & REFRESH_COLUMNS:
-            self._rebuild_table_columns(self.filter_combo.currentData())
+            self._rebuild_table_columns()
         if applied & REFRESH_PANEL:
             self.tag_panel.refresh_fields()
         self.status_bar.showMessage("Settings imported.")
@@ -901,27 +914,20 @@ class MainWindow(QMainWindow):
         one, and a lambda doing two dispatches reads worse than a
         method with a name that says so.
         """
-        self._rebuild_table_columns(self.filter_combo.currentData())
+        self._rebuild_table_columns()
         self.tag_panel.refresh_fields()
 
     # --- Column / filter handling -------------------------------------
 
-    def _rebuild_table_columns(self, content_type_filter: Optional[ContentType]) -> None:
-        """Rebuild table columns for the given filter (None = all fields).
+    def _column_key(self, column: int) -> str:
+        """Logical column index -> field name (the key the header's filters are stored under)."""
+        return self._column_order[column]
 
-        Applies the user's persisted drag-order and hidden-column
-        preferences on top of whatever the filter says is relevant --
-        the filter decides the CANDIDATE set of columns, the user's
-        saved preferences decide their order and which of those
-        candidates are actually shown. Changing the filter re-runs this
-        (see _on_filter_changed), so persisted preferences survive a
-        filter change rather than needing to be re-set every time.
-        """
-        if content_type_filter is None:
-            field_names = list(FIELD_LABELS.keys())
-        else:
-            from core.video_metadata import fields_for_content_type
-            field_names = fields_for_content_type(content_type_filter)
+    def _rebuild_table_columns(self) -> None:
+        """Rebuild the table columns: every field, in the user's persisted drag-order, with the persisted
+        hidden-column and width preferences applied. (The Content Type filter no longer changes which columns
+        exist: it is a row filter in the column header now, see ColumnFilterHeader.)"""
+        field_names = list(FIELD_LABELS.keys())
 
         rest = [f for f in field_names if f != "content_type"]
         base_order = ALWAYS_VISIBLE_COLUMNS + rest + TECHNICAL_COLUMNS
@@ -1027,6 +1033,7 @@ class MainWindow(QMainWindow):
             is_visible=is_column_visible,
             on_toggle=self._on_column_visibility_toggled,
             open_column_settings_dialog=self._on_open_column_visibility,
+            top_actions=[("Clear All Filters", self._clear_column_filters, self.filter_header.filters.any_active())],
         )
 
     def _on_column_visibility_toggled(self, field_name: str, checked: bool) -> None:
@@ -1053,10 +1060,38 @@ class MainWindow(QMainWindow):
         # in sync the same way.
         self.tag_panel.refresh_fields()
 
-    def _on_filter_changed(self) -> None:
-        content_type = self.filter_combo.currentData()
-        self._rebuild_table_columns(content_type)
-        self.tag_panel.set_content_type_filter(content_type)
+    def _on_filters_changed(self) -> None:
+        """A column filter was set or cleared in a header funnel: hide/show the rows and say what is shown."""
+        self._apply_column_filters(announce=True)
+
+    def _apply_column_filters(self, announce: bool = False) -> None:
+        """Hides the rows the header filters reject (deselecting any selected row that gets hidden, so a batch
+        action only reaches visible files). Re-run after every table rebuild: a rebuild shows all rows again.
+        Hidden rows stay in self.video_files; see _visible_video_files for which actions mean 'all visible'
+        and which mean 'all loaded'."""
+        header = self.filter_header
+        shown, total = header.apply_to_table()
+        if announce:
+            if header.filters.any_active():
+                names = header.filters.describe(lambda key: COLUMN_LABEL_LOOKUP.get(key, str(key)))
+                self.status_bar.showMessage(f"Showing {shown} of {total} files (filtered by {names})")
+            else:
+                self.status_bar.showMessage(f"Filters cleared: showing all {total} files")
+        # (apply_to_table already signals a selection change when it deselected a hidden row.)
+
+    def _clear_column_filters(self) -> None:
+        self.filter_header.clear_all_filters()
+
+    def _visible_video_files(self) -> list[VideoFile]:
+        """Every loaded file whose row is not hidden by a column filter, in list order. With no filter active
+        that is every loaded file. Used where an action means 'all the files I can see' when nothing is
+        selected (Redact, batch edits, Check Files); Save All, Find Duplicates and Clear List deliberately
+        keep working on every loaded file."""
+        if not self.filter_header.filters.any_active():
+            return list(self.video_files)
+        visible = {id(vf) for row in range(self.table.rowCount())
+                   if not self.table.isRowHidden(row) and (vf := self._file_for_row(row)) is not None}
+        return [vf for vf in self.video_files if id(vf) in visible]
 
     # --- Loading files ---------------------------------------------------
 
@@ -1352,6 +1387,7 @@ class MainWindow(QMainWindow):
                         item.setForeground(fg)
                     self.table.setItem(row, col, item)
         self._reselect_files(selected_ids)
+        self._apply_column_filters()  # the rebuild showed every row again
 
     def _reselect_files(self, file_ids: list[int]) -> None:
         """Selects exactly the rows holding these VideoFiles (by id()),
@@ -1476,8 +1512,8 @@ class MainWindow(QMainWindow):
         files: list[VideoFile] = []
         seen_rows = set()
         for item in self.table.selectedItems():
-            if item.row() in seen_rows:
-                continue
+            if item.row() in seen_rows or self.table.isRowHidden(item.row()):
+                continue  # a row hidden by a column filter is never a target, even if Select All reached it
             seen_rows.add(item.row())
             filename_item = self.table.item(item.row(), 0)
             vf = filename_item.data(FILE_ROLE) if filename_item else None
@@ -2293,7 +2329,7 @@ class MainWindow(QMainWindow):
         gui/file_check_dialog.py and core/file_check.py."""
         from gui.file_check_dialog import run_check_and_repair
 
-        files = self._selected_video_files() or list(self.video_files)
+        files = self._selected_video_files() or self._visible_video_files()
         if not files:
             QMessageBox.information(self, "Check Files", OPEN_FILES_FIRST)
             return
@@ -2330,8 +2366,17 @@ class MainWindow(QMainWindow):
         if targets:
             title, question = "Redact", f"Redact the {len(targets)} selected file(s)?"
         else:
-            targets = list(self.video_files)
-            title, question = "Redact all files?", f"Nothing is selected. Redact all {len(targets)} loaded file(s)?"
+            targets = self._visible_video_files()  # the files a column filter shows (all loaded ones when none is active)
+            if not targets:
+                QMessageBox.information(self, "Redact", "No files are shown: the column filters hide them all.")
+                return [], None
+            if len(targets) == len(self.video_files):
+                title, question = "Redact all files?", f"Nothing is selected. Redact all {len(targets)} loaded file(s)?"
+            else:
+                title, question = "Redact the shown files?", (
+                    f"Nothing is selected. Redact the {len(targets)} file(s) shown by the column filters "
+                    f"({len(self.video_files) - len(targets)} hidden file(s) are left alone)?"
+                )
         if not convert_on:
             answer = QMessageBox.question(
                 self, title, question + "\n\n" + self._redact_fate_text(None),
@@ -3000,7 +3045,7 @@ class MainWindow(QMainWindow):
         failed to load are excluded; an empty list means "nothing to do"
         and the user has already been told why."""
         selected = self._selected_video_files()
-        targets = [vf for vf in (selected or self.video_files) if not vf.load_error]
+        targets = [vf for vf in (selected or self._visible_video_files()) if not vf.load_error]
         if not targets:
             QMessageBox.information(self, "No Files", f"Open some files first (File > Open Files or Open Folder), or select the ones to {verb}.")
         return targets

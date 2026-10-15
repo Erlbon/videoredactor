@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-10-15#02 -- Column filters in the table header; Include Subfolders on the toolbar
+
+- Changed: the "Filter by Content Type" row above the file list is gone. Filtering now lives in the column headers, like a spreadsheet: a small funnel sits at the right of every filterable header (Filename, Path, Status, Content Type, Resolution, Language, Title, Release Date, Season/Episode and the other text and tag columns; not Duration, Size or Bitrate). Click the funnel for a checklist of the values in that column (with Select all and Clear filter; text columns also have a "contains..." box), and the rows that do not match are hidden. A column that is filtering has a blue header and a filled funnel. Clicking the funnel does not sort or move the column; clicking anywhere else on the header sorts as before. Filters on several columns combine (all must match).
+- Clear All Filters: right-click a column header, or View > Clear All Filters. The status bar says "Showing N of M files (filtered by ...)".
+- The Content Type filter no longer changes which columns the table shows or which fields the side panel shows: both always follow Tools > Columns, as they did with "All (no filter)".
+- Hidden rows are never a target: Select All, Apply, Play, Redact, Remove from List, Rename and the other selection actions only reach visible rows (a selected row that a new filter hides is deselected). With nothing selected, Redact, Check Files and the batch edits take the files that are shown (all of them when no filter is active); Save All, Find Duplicates and Clear List still cover every loaded file. Filters are kept across refreshes and re-sorting, and start empty in a new session.
+- New: an "Include Subfolders" checkbox on the toolbar right after Open Folder, kept in step with File > Include Subfolders (one saved setting).
+- Requires redactor_common 2026-10-15-03.
+
 ## 2026-10-15#01 -- A large Play button under the thumbnail in the side panel
 
 - New: a large Play button sits directly under the thumbnail in the side panel. It does exactly what Media > Play does, and is enabled only when one file is selected and it loaded without error. Media > Play, the right-click entry and the toolbar button are unchanged.
