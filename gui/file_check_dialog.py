@@ -24,7 +24,6 @@ from PyQt6.QtWidgets import (
     QAbstractItemView,
     QDialog,
     QDialogButtonBox,
-    QHeaderView,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -34,6 +33,7 @@ from PyQt6.QtWidgets import (
 )
 from redactor_common.gui.background_call import call_in_background
 from redactor_common.gui.progress import run_with_progress
+from redactor_common.gui.table_columns import make_columns_resizable
 
 from core.file_check import quick_check, repair
 from core.video_file import VideoFile
@@ -74,16 +74,12 @@ class FileCheckResultsDialog(QDialog):
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.verticalHeader().setVisible(False)
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.table.setColumnWidth(0, 280)
         for row, vf in enumerate(reported):
             for col, text in enumerate((vf.path.name, vf.check.status, vf.check.summary())):
                 item = QTableWidgetItem(text)
                 item.setToolTip(text)
                 self.table.setItem(row, col, item)
+        make_columns_resizable(self.table, wide_column=2)
         layout.addWidget(self.table)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)

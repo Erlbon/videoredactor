@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-15#03 -- Every table column can be resized by dragging, in all dialogs
+
+- Changed: every table column can be resized by dragging, in all dialogs. Check Files no longer locks its Status column to its contents or stretches Findings; all three columns drag, and the last one still fills the width that is left. The main file list gets sensible starting widths from its contents, and your saved column widths still win; the column filter funnels keep working after a resize.
+- Requires redactor_common 2026-10-15-05.
+
 ## 2026-10-15#02 -- Column filters in the table header; Include Subfolders on the toolbar
 
 - Changed: the "Filter by Content Type" row above the file list is gone. Filtering now lives in the column headers, like a spreadsheet: a small funnel sits at the right of every filterable header (Filename, Path, Status, Content Type, Resolution, Language, Title, Release Date, Season/Episode and the other text and tag columns; not Duration, Size or Bitrate). Click the funnel for a checklist of the values in that column (with Select all and Clear filter; text columns also have a "contains..." box), and the rows that do not match are hidden. A column that is filtering has a blue header and a filled funnel. Clicking the funnel does not sort or move the column; clicking anywhere else on the header sorts as before. Filters on several columns combine (all must match).

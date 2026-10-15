@@ -83,6 +83,7 @@ from redactor_common.gui.move_runner import run_planned_moves
 from redactor_common.gui.folder_options import (
     add_include_subfolders_checkbox, attach_include_subfolders, include_subfolders_slot,
 )
+from redactor_common.gui.table_columns import make_columns_resizable
 from redactor_common.gui.column_filter import KIND_TEXT, KIND_VALUES, ColumnFilterHeader
 from redactor_common.gui.progress import run_busy, run_with_progress
 from redactor_common.gui.work_progress import run_work_with_progress
@@ -952,6 +953,20 @@ class MainWindow(QMainWindow):
             self._suppress_column_signals = False
 
         self._refresh_table_rows()
+        self._apply_resizable_columns()
+
+    def _apply_resizable_columns(self) -> None:
+        """Every column draggable (house rule) with sensible starting widths from the filled table; the user's
+        persisted widths still win over those starting widths, and nothing here is saved as a user choice."""
+        self._suppress_column_signals = True
+        try:
+            make_columns_resizable(self.table, wide_column=None)
+            widths = self._load_column_widths()
+            for idx, field_name in enumerate(self._column_order):
+                if field_name in widths and not self.table.isColumnHidden(idx):
+                    self.table.setColumnWidth(idx, widths[field_name])
+        finally:
+            self._suppress_column_signals = False
 
     # --- Column order / visibility / width persistence -------------------
     # Stored in settings.ini under [table] via core/config.py. Business
