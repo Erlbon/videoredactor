@@ -123,6 +123,10 @@ from gui.tool_settings_dialog import ToolSettingsDialog
 from gui.video_preferences import VideoPreferencesDialog
 from redactor_common.gui.preferences_dialog import preferences_menu_action
 from gui.vocabulary_editor_dialog import VocabularyEditorDialog
+from gui.notes_dialog import create_notes, scope_candidates, scope_question, title_folders
+from core import notes_settings
+from core.notes_flow import live_fetchers as live_notes_fetchers
+from redactor_common.core.notes_scope import merge_choices as merge_scope_choices
 from gui.api_keys_dialog import ApiKeysDialog
 from core import imdb_settings
 from core.controlled_vocab import (
@@ -381,6 +385,7 @@ class MainWindow(QMainWindow):
         # which is the right degrade for something this cosmetic.
 
         self.video_files: list[VideoFile] = []
+        self.notes_fetchers = None  # Create Notes: a callable returning core.notes_flow.Fetchers (None = the real services; tests inject)
         # In-memory edits (bulk edit, lookups, batch text operations) are
         # undoable, same as epub/mp3/cbz -- this project had no undo at
         # all before 2026-09-23. File operations on disk (rename, remux,
@@ -569,15 +574,20 @@ class MainWindow(QMainWindow):
                     MenuAction("compare_subtitles", "Co&mpare Subtitles…", self._on_compare_subtitles),
                 ]),
             ],
-            tools=_with_preferences(self._on_open_preferences, standard_tools_items(
-                api_keys=self._on_add_external_apis,
-                external_tools=self._on_locate_tools,
-                app_settings=[MenuAction("imdb_settings", "IMDb &Database…", self._on_open_imdb_settings)],
-                columns=self._on_open_column_visibility,
-                genres=self._on_open_genres,
-                languages=self._on_open_languages,
-                history=self._on_open_history,
-            )),
+            tools=_with_preferences(self._on_open_preferences, [
+                MenuAction("create_notes", "Cre&ate Notes…", self._on_create_notes,
+                           tooltip="Draft the series.md / about.md folder notes for the Pluteus media server"),
+                Separator(),
+                *standard_tools_items(
+                    api_keys=self._on_add_external_apis,
+                    external_tools=self._on_locate_tools,
+                    app_settings=[MenuAction("imdb_settings", "IMDb &Database…", self._on_open_imdb_settings)],
+                    columns=self._on_open_column_visibility,
+                    genres=self._on_open_genres,
+                    languages=self._on_open_languages,
+                    history=self._on_open_history,
+                ),
+            ]),
             help=standard_help_items(
                 APP_NAME, self._on_show_changelog, self._on_show_credits, self._on_show_about,
             ),
@@ -1571,6 +1581,7 @@ class MainWindow(QMainWindow):
                 self.actions_by_key["translate_subtitles"],
                 self.actions_by_key["compare_subtitles"],
             ]))
+            items.append(MenuAction("ctx_create_notes", "Create Notes for This Folder…", self._on_create_notes_for_selection))
             items.extend([Separator(), self.redact_action, Separator(), self.remove_from_list_action])
             return items
 
@@ -2357,6 +2368,44 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Check Files", OPEN_FILES_FIRST)
             return
         run_check_and_repair(self, files, _error_details)
+
+    # -- create notes ------------------------------------------------------
+
+    def _on_create_notes(self) -> None:
+        """Tools > Create Notes...: ALWAYS asks which folder first, as a short list (the folder you opened, the series or
+        film of the selected files, one level up, the last notes folder, Another folder...). The selected files are never
+        used silently: their folder is only the pre-ticked choice until Continue. Include subfolders in the dialog is
+        File > Include Subfolders (one saved setting). The review page is redactor_common's, run by gui/notes_dialog.py."""
+        choices = merge_scope_choices(scope_candidates(
+            [str(vf.path) for vf in self.video_files], [str(vf.path) for vf in self._selected_video_files()],
+            get_setting("general", "last_folder", ""), notes_settings.last_folder()))
+        folder, kinds, outdated = scope_question(
+            self, choices, _load_include_subfolders(), self.actions_by_key["include_subfolders"].setChecked,
+            notes_settings.last_folder() or get_setting("general", "last_folder", ""), notes_settings.kinds_text(notes_settings.kinds()))
+        if not folder:
+            return
+        notes_settings.set_last_folder(folder)
+        notes_settings.set_kinds(kinds)
+        self._run_create_notes([folder], _load_include_subfolders(), notes_settings.parse_kinds(kinds), outdated)
+
+    def _on_create_notes_for_selection(self) -> None:
+        """Right-click "Create Notes for This Folder...": the series or film folder of each selected file (a file in a
+        Season folder stands for its series). Only those folders themselves are looked at, whatever Include Subfolders says."""
+        files = self._selected_video_files()
+        if not files:
+            self.status_bar.showMessage("Select a file first, or use Tools > Create Notes.", 6000)
+            return
+        self._run_create_notes([str(f) for f in title_folders(vf.path for vf in files)], False)
+
+    def _run_create_notes(self, paths: list, include_subfolders: bool, kinds: tuple = notes_settings.ALL_KINDS,
+                          include_outdated: bool = False) -> None:
+        def remember_size(text: str) -> None:
+            notes_settings.set_dialog_size(text)
+
+        create_notes(
+            self, paths, include_subfolders, self.notes_fetchers or live_notes_fetchers,
+            size_text=notes_settings.dialog_size(), on_size=remember_size, kinds=kinds,
+            cache=notes_settings.default_cache(), include_outdated=include_outdated)
 
     def _on_find_duplicates(self) -> None:
         """Media > Find Duplicates...: groups the loaded files that

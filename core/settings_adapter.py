@@ -266,6 +266,11 @@ SECTIONS: dict[str, tuple[str, bool, list[Key]]] = {
         _key("url", "translation", "url", _str_codec()),
         _key("target", "translation", "target", _str_codec()),
     ]),
+    "notes": ("Create Notes: lookup cache, Wikipedia introduction and which notes to make", True, [
+        _key("cache", "notes", "cache", _bool_codec(True)),
+        _key("wikipedia", "notes", "wikipedia", _bool_codec(True)),
+        _key("kinds", "notes", "kinds", _str_codec()),
+    ]),
     "imdb_options": ("IMDb database build options", True, [
         _key("options", "imdb", "options", _imdb_options_codec()),
     ]),
@@ -281,6 +286,7 @@ SECTIONS: dict[str, tuple[str, bool, list[Key]]] = {
         _key("last_folder", "general", "last_folder", _str_codec()),
         _key("last_files_folder", "general", "last_files_folder", _str_codec()),
         _key("library_root", "rename", "library_root", _str_codec()),
+        _key("notes_last_folder", "notes", "last_folder", _str_codec()),
     ]),
 }
 

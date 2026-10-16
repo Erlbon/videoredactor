@@ -22,6 +22,13 @@ from redactor_common.core.lookup_client import build_request, fetch_bytes, fetch
 
 BASE_URL = "https://api.themoviedb.org/3"
 USER_AGENT = "TheVideoRedactor"
+# The wording TMDB prescribes, with "application" as the product word. Kept identical to the sentence in CREDITS.md and
+# ABOUT.md (a test checks that); the folder notes made from TMDB carry it too.
+TMDB_NOTICE = (
+    "This application uses TMDB and the TMDB APIs but is not endorsed, "
+    "certified, or otherwise approved by TMDB."
+)
+TMDB_URL = "https://www.themoviedb.org/"
 _STATUS_MESSAGES = {
     401: "TMDB rejected the API key (401 Unauthorized).",
     429: "TMDB rate limit hit -- try again shortly.",

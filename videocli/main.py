@@ -10,6 +10,7 @@ argument is a command; the window never starts):
     videoredactor move    PATH... -p "%show_title%/Season %season_number%/..." --root LIBRARY
     videoredactor check   PATH... [--repair] [--stamp] check for damage, optionally repair
     videoredactor redact  PATH...                      run the saved Redact recipe
+    videoredactor notes   PATH...  [--write]           draft series.md / about.md folder notes (TMDB + Wikipedia)
 
 Every command takes --json (one JSON document), --quiet and --output FILE (the result goes to a file: the
 reliable way to read it from a script, since a windowed exe cannot be waited for by an interactive shell),
@@ -22,7 +23,7 @@ from __future__ import annotations
 from core.version import APP_VERSION
 from redactor_common.cli.main_factory import make_main
 
-from videocli import COMMANDS, cmd_check, cmd_files, cmd_redact, cmd_tags
+from videocli import COMMANDS, cmd_check, cmd_files, cmd_notes, cmd_redact, cmd_tags
 
 PROG = "videoredactor"
 
@@ -30,6 +31,6 @@ build_parser, main = make_main(
     PROG, APP_VERSION,
     "The Video Redactor on the command line: inspect, tag, rename, check and redact video files.",
     [cmd_tags.add_info_parser, cmd_tags.add_set_parser, cmd_files.add_rename_parser,
-     cmd_files.add_move_parser, cmd_check.add_check_parser, cmd_redact.add_redact_parser],
+     cmd_files.add_move_parser, cmd_check.add_check_parser, cmd_redact.add_redact_parser, cmd_notes.add_notes_parser],
     commands=COMMANDS,
 )

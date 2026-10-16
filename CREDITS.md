@@ -53,3 +53,7 @@ system:
   synced lyrics, used as a subtitle source for music videos. The lyrics
   belong to their authors; LRCLIB's data is contributed by its users, and
   the app only fetches a song's lyrics when you ask for it.
+- **[Wikipedia](https://www.wikipedia.org/)** and **[Wikidata](https://www.wikidata.org/)** — Tools > Create Notes
+  adds the introduction of a title's Wikipedia article to a note, and credits it in the note itself. The text is
+  available under CC BY-SA 4.0; the article is the one Wikidata links to the title's IMDb id, never one found by
+  name. Wikidata's data is CC0.

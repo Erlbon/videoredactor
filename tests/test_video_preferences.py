@@ -36,7 +36,7 @@ def test_pages_and_defaults():
     dlg = VideoPreferencesDialog()
     # History is a shared PrefSection since 2026-10-14#04 (its Delete History... is a PrefAction), so it comes
     # before the app's own extra pages.
-    assert dlg.page_titles() == ["Filenames", "Transcode", "Duplicates", "Translation", "History", "Tools / Paths", "Conversion", "Library safety"]
+    assert dlg.page_titles() == ["Filenames", "Transcode", "Duplicates", "Translation", "Create Notes", "History", "Tools / Paths", "Conversion", "Library safety"]
     assert dlg.value("history_enabled") is False
     assert dlg.value("zero_pad_width") == 2 and dlg.value("crf") == 23
     assert dlg.value("audio_bitrate") == "128k" and dlg.value("threads") == 0

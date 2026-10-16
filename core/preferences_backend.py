@@ -15,6 +15,7 @@ way in, it never moves them:
   crf / audio_bitrate / threads   [transcode]
   duplicate_threshold  [duplicates] threshold
   history_enabled      [history] enabled (Tools > History, opt-in; core/history.py)
+  notes_cache / notes_wikipedia   [notes] cache / wikipedia (Tools > Create Notes; core/notes_settings.py)
 
 There is no default-language setting in this app (a video's language is read
 from its own tracks), so the shared language section is not offered.
@@ -36,7 +37,7 @@ from redactor_common.core.preferences import (
     filenames_section,
 )
 
-from core import config, history
+from core import config, history, notes_settings
 from core.transcode_settings import DEFAULT_AUDIO_BITRATE, DEFAULT_CRF, DEFAULT_THREADS
 from core.video_duplicates import HAMMING_THRESHOLD
 
@@ -45,6 +46,8 @@ KEY_AUDIO_BITRATE = "audio_bitrate"
 KEY_THREADS = "threads"
 KEY_DUPLICATE_THRESHOLD = "duplicate_threshold"
 KEY_HISTORY_ENABLED = "history_enabled"
+KEY_NOTES_CACHE = "notes_cache"
+KEY_NOTES_WIKIPEDIA = "notes_wikipedia"
 KEY_TRANSLATION_ENGINE = "translation_engine"
 KEY_TRANSLATION_URL = "translation_url"
 KEY_TRANSLATION_COMMAND = "translation_command"
@@ -61,6 +64,8 @@ INI_LOCATIONS: dict[str, tuple[str, str]] = {
     KEY_THREADS: ("transcode", "threads"),
     KEY_DUPLICATE_THRESHOLD: ("duplicates", "threshold"),
     KEY_HISTORY_ENABLED: (history.SETTINGS_SECTION, history.SETTINGS_KEY),
+    KEY_NOTES_CACHE: (notes_settings.SECTION, "cache"),
+    KEY_NOTES_WIKIPEDIA: (notes_settings.SECTION, "wikipedia"),
     KEY_TRANSLATION_ENGINE: ("translation", "engine"),
     KEY_TRANSLATION_URL: ("translation", "url"),
     KEY_TRANSLATION_COMMAND: ("tools", "argos-translate"),
@@ -97,6 +102,19 @@ def history_section(actions: tuple[PrefAction, ...] = ()) -> PrefSection:
     ), history_help_text(history.journal_path()), actions=actions)
 
 
+def notes_section(actions: tuple[PrefAction, ...] = ()) -> PrefSection:
+    """Preferences > Create Notes: the lookup cache and the Wikipedia introduction (Tools > Create Notes)."""
+    return PrefSection("notes", "Create Notes", (
+        PrefSpec(KEY_NOTES_CACHE, "Keep the answers of earlier lookups on disk (faster the next time)", "bool", True,
+                 help="TMDB and Wikipedia answers, kept for a month (a title that was not found, for a day), so a second "
+                      "run or a run that was cancelled does not ask again. Your TMDB key is never stored in it."),
+        PrefSpec(KEY_NOTES_WIKIPEDIA, "Add a Wikipedia introduction to the notes", "bool", True,
+                 help="Only the article that Wikidata links to the title's IMDb id is used, never one found by name. "
+                      "Off: the notes are made from TMDB alone (fewer requests)."),
+    ), f"Tools > Create Notes drafts series.md / about.md for the Pluteus media server from TMDB (your own key under "
+       f"Tools > API Keys) and Wikipedia. The cache file is {notes_settings.cache_path()}.", actions=actions)
+
+
 def translation_section(actions: tuple[PrefAction, ...] = ()) -> PrefSection:
     """Preferences > Translation: which engine translates subtitles (Media > Translate Subtitles to English).
     Nothing is bundled and nothing translates by itself."""
@@ -122,7 +140,8 @@ def translation_section(actions: tuple[PrefAction, ...] = ()) -> PrefSection:
 
 
 def build_sections(history_actions: tuple[PrefAction, ...] = (),
-                   translation_actions: tuple[PrefAction, ...] = ()) -> list[PrefSection]:
+                   translation_actions: tuple[PrefAction, ...] = (),
+                   notes_actions: tuple[PrefAction, ...] = ()) -> list[PrefSection]:
     """The shared dialog's pages. `history_actions`: the History page's buttons (the dialog passes its Qt
     Delete History... callback; this module stays Qt-free)."""
     return [
@@ -149,6 +168,7 @@ def build_sections(history_actions: tuple[PrefAction, ...] = (),
                      minimum=0, maximum=32),
         ), "Used by Media > Find Duplicates as its starting value."),
         translation_section(translation_actions),
+        notes_section(notes_actions),
         history_section(history_actions),
     ]
 

@@ -61,8 +61,8 @@ def test_other_menus_hold_what_the_spec_says(window):
         "Translate Subtitles to English…", "Compare Subtitles…",
     ]
     assert _labels(menus["Tools"]) == [
-        "Preferences…", "API Keys…", "External Tools…", "IMDb Database…", "Columns…", "Genres…", "Languages…",
-        "History…",
+        "Preferences…", "Create Notes…", "API Keys…", "External Tools…", "IMDb Database…", "Columns…", "Genres…",
+        "Languages…", "History…",
     ]
     assert _labels(menus["Help"]) == ["Changelog…", "Credits…", "About " + mw.APP_NAME]
 
@@ -284,17 +284,18 @@ def test_context_menu_follows_the_skeleton(window, monkeypatch):
         for item in items:
             if isinstance(item, mw.Separator):
                 out.append("-")
-            elif isinstance(item, mw.Submenu):
-                out.append(item.text)
+            elif isinstance(item, (mw.Submenu, mw.MenuAction)):
+                out.append(item.text.replace("&", ""))
             else:
                 out.append(item.text().replace("&", ""))
         return out
 
     assert shape(seen["single"]) == [
-        "-", "Rename File…", "-", "Play", "-", "Look Up", "Organize", "Subtitles", "-", "Redact", "-",
-        "Remove from List",
+        "-", "Rename File…", "-", "Play", "-", "Look Up", "Organize", "Subtitles", "Create Notes for This Folder…", "-",
+        "Redact", "-", "Remove from List",
     ]
-    assert shape(seen["multi"]) == ["-", "Look Up", "Organize", "Subtitles", "-", "Redact", "-", "Remove from List"]
+    assert shape(seen["multi"]) == ["-", "Look Up", "Organize", "Subtitles", "Create Notes for This Folder…", "-", "Redact", "-",
+                                    "Remove from List"]
     organize = next(i for i in seen["single"] if isinstance(i, mw.Submenu) and i.text == "Organize")
     assert organize.items[0] is reg["rename_export_move"]
     assert organize.items[1].text == "Number Episodes…"

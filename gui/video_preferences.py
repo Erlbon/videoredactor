@@ -33,7 +33,7 @@ from PyQt6.QtWidgets import (
 from redactor_common.core.preferences import PrefAction
 from redactor_common.gui.preferences_dialog import PreferencesDialog
 
-from core import conversion_plan, history, imdb_settings, library_safety
+from core import conversion_plan, history, imdb_settings, library_safety, notes_settings
 from core.preferences_backend import (  # noqa: F401 -- HISTORY_CHECKBOX / history_help_text re-exported
     HISTORY_CHECKBOX, KEY_AUDIO_BITRATE, KEY_HISTORY_ENABLED, bitrate_ok, build_sections, history_help_text,
     make_backend,
@@ -199,6 +199,18 @@ def delete_history_action(parent: QWidget) -> bool:
         return False
     QMessageBox.information(parent, "Delete History", "The history is in the Recycle Bin.")
     return True
+
+
+CLEAR_NOTES_CACHE_LABEL = "Clear the lookup cache"
+CLEAR_NOTES_CACHE_HELP = "Forgets the saved answers of earlier Create Notes lookups. The notes themselves are not touched."
+
+
+def clear_notes_cache_action(parent: QWidget) -> bool:
+    """Preferences > Create Notes' Clear the lookup cache button (a PrefAction): acts at once and says how much went."""
+    removed = notes_settings.clear_cache()
+    QMessageBox.information(parent, "Create Notes", f"{removed} saved answer{'s' if removed != 1 else ''} removed." if removed
+                            else "The lookup cache is already empty.")
+    return bool(removed)
 
 
 CHECK_ENGINE_LABEL = "Check the engine..."
@@ -396,8 +408,10 @@ class VideoPreferencesDialog(PreferencesDialog):
 
         actions = (PrefAction(DELETE_HISTORY_LABEL, delete_history_action, DELETE_HISTORY_HELP),)
         translation_actions = (PrefAction(CHECK_ENGINE_LABEL, check_engine_action, CHECK_ENGINE_HELP),)
+        notes_actions = (PrefAction(CLEAR_NOTES_CACHE_LABEL, clear_notes_cache_action, CLEAR_NOTES_CACHE_HELP),)
         super().__init__(
-            build_sections(history_actions=actions, translation_actions=translation_actions), make_backend(), parent,
+            build_sections(history_actions=actions, translation_actions=translation_actions, notes_actions=notes_actions),
+            make_backend(), parent,
             extra_pages=[
                 ("Tools / Paths", build_paths_page),
                 ("Conversion", deferred_page(ConversionPage)),

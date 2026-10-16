@@ -145,6 +145,7 @@ videoredactor move    PATH...  -p PATTERN [--root FOLDER] [--copy] [--zero-pad N
 videoredactor check   PATH...  [--repair] [--stamp] [--trash-dir FOLDER] [-n]
 videoredactor redact  [PATH...] [--recipe FILE] [--enable STEP] [--disable STEP] [--threshold N]
                                 [--trash-dir FOLDER] [--list-steps]
+videoredactor notes   PATH...  [--kind KIND] [--write] [--include-uncertain] [--update] [--no-wikipedia] [-n]
 ```
 
 The command line uses the same code as the window, so the results are the same. It reads the same settings file
@@ -307,6 +308,32 @@ repair is only automatic when a lossless remux fully fixes the file; a damaged f
 Exit code 1 if any file failed; files that need review are not failures. Rename and Move run last, after the
 file is saved, and also on a file that had nothing to save. A `--recipe` file that is not valid JSON or not a
 recipe is refused (exit code 2) rather than replaced by the default recipe.
+
+### notes
+
+`videoredactor notes PATH... [--kind KIND] [--update] [--update-legacy] [--no-cache] [--no-wikipedia] [--write] [--include-uncertain] [--show-drafts]`
+
+Drafts the Markdown notes the Pluteus media server shows beside a folder, the same as Tools > Create Notes: `series.md` in a
+series folder (episodes named `S01E02`, directly or in Season folders) and `about.md` in a film folder, from TMDB (your
+own key under Tools > API Keys, or `TMDB_API_KEY`) and, when Wikidata links the title's IMDb id to an article, a Wikipedia
+introduction. A report unless `--write` is given: every title folder is listed with how sure the match is and what would
+be written. `--write` writes the drafts (`status: draft`) of the confident matches only: TMDB has exactly one title with
+the folder's name (and year), and for a series the seasons and episode numbers in the folder fit it. A folder that already
+has `artist.md`, `author.md`, `series.md`, `album.md` or `about.md` (any letter case) is never touched, and a note is never
+overwritten. Uncertain and unmatched folders are listed with the reasons and the candidates and not written.
+
+| Option | Meaning |
+| --- | --- |
+| `--kind KIND` | Which notes: `series` (`series.md`), `movie` (`about.md` of a film folder) or `both` (the default); several can be joined by commas. |
+| `--update` | Also list the notes made by an older version of this program (stamped, an older format, nobody edited them) and, with `--write`, replace only those; the old note goes to the Recycle Bin. A note a person edited, or one this program did not write, is never touched. |
+| `--update-legacy` | With `--update --write`: also replace the notes of the first versions (no stamp, so it cannot be known whether they were edited; still the Recycle Bin, still never an edited or foreign note). |
+| `--no-cache` | Do not use the disk cache of earlier answers: everything is asked again. |
+| `--no-wikipedia` | No Wikipedia introduction in the notes (fewer requests). |
+| `--write` | Write the drafts of the confident matches (the default is a report only). |
+| `--include-uncertain` | With `--write`: also write an uncertain match whose top candidate fits the name and year on its own and has no equal; marked "from an uncertain match" in the report. |
+| `--show-drafts` | Print each draft note (text) or include it (`--json`). |
+
+Exit code 1 if a lookup failed (no key, no network); uncertain folders are not failures.
 
 ### JSON output
 

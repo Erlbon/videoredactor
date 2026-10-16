@@ -19,13 +19,8 @@ from PyQt6.QtWidgets import QHBoxLayout, QLabel, QWidget
 from core.app_paths import asset_path
 from redactor_common.gui.about_dialog import CreditsDialog
 
-# The wording TMDB prescribes, with "application" as the product word. Kept
-# identical to the sentence in CREDITS.md and ABOUT.md (a test checks that).
-TMDB_NOTICE = (
-    "This application uses TMDB and the TMDB APIs but is not endorsed, "
-    "certified, or otherwise approved by TMDB."
-)
-TMDB_URL = "https://www.themoviedb.org/"
+# The wording TMDB prescribes lives in core/tmdb_client.py (the folder notes carry it too): one definition.
+from core.tmdb_client import TMDB_NOTICE, TMDB_URL  # noqa: E402,F401
 
 # Small on purpose: TMDB wants its logo less prominent than the app's own.
 LOGO_HEIGHT = 14
