@@ -30,6 +30,7 @@ class FakeMkv:
         self.title, self.tags_xml = title, tags_xml
         self.attachments = list(attachments or [])  # dicts: file_name, content_type, data
         self.propedit_calls: list[list[str]] = []
+        self.deleted_selectors: list[str] = []
         self.next_id = 1
 
     # --- the three tools -------------------------------------------------------------------------------------------
@@ -98,8 +99,19 @@ class FakeMkv:
                 continue
             return subprocess.CompletedProcess(args, 2, "", f"Error: unknown option {a}")
         for selector in deletes:
-            assert selector.startswith("name:")
-            self.attachments = [x for x in self.attachments if x["file_name"] != selector[5:]]
+            # The documented selectors: an attachment ID (1-based, as `mkvmerge -J` lists them) or name:<exact name>.
+            # A selector that matches nothing fails the whole call with exit 2, like the real tool ("No attachment
+            # matched the selector"), and NOTHING of this call is applied.
+            if selector.isdigit():
+                hit = [k for k in range(len(self.attachments)) if k + 1 == int(selector)]
+            elif selector.startswith("name:"):
+                hit = [k for k, x in enumerate(self.attachments) if x["file_name"] == selector[5:]]
+            else:
+                hit = []
+            if not hit:
+                return subprocess.CompletedProcess(args, 2, "", f"Error: No attachment matched the selector '{selector}'.")
+            self.deleted_selectors.append(selector)
+            self.attachments = [x for k, x in enumerate(self.attachments) if k not in hit]
         self.attachments.extend(adds)
         return subprocess.CompletedProcess(args, 0, "", "")
 
@@ -167,7 +179,7 @@ def test_a_new_poster_replaces_the_old_cover_in_the_same_call(mkv_file):
     assert sorted(a["file_name"] for a in mkv_file.attachments) == ["cover.jpg", "font.ttf"]  # one cover, the font untouched
     assert vf.read_cover() == JPEG2
     command = mkv_file.propedit_calls[-1]
-    assert command[:2] == ["--delete-attachment", "name:cover.jpg"]
+    assert command[:2] == ["--delete-attachment", "1"]  # by the attachment id of the cover it detected
 
 
 def test_a_save_without_a_staged_poster_does_not_touch_attachments(mkv_file):

@@ -362,21 +362,30 @@ def read_mkv_cover(path: str) -> Optional[bytes]:
             os.remove(tmp_path)
 
 
-def write_mkv_cover(path: str, jpeg: bytes) -> subprocess.CompletedProcess:
-    """Embeds `jpeg` as the attachment cover.jpg. An attachment of that name already there is deleted in the same
-    mkvpropedit call (`--delete-attachment name:cover.jpg`, then `--attachment-name`/`--attachment-mime-type` and
-    `--add-attachment <file>`: the options come before the action they apply to, per the mkvpropedit manual;
-    --replace-attachment is not used because its `selector:filename` form is ambiguous with a Windows drive
-    letter). The caller reads it back (VideoFile does)."""
+def write_mkv_cover(path: str, image: bytes) -> subprocess.CompletedProcess:
+    """Embeds `image` as the cover attachment: cover.jpg, or cover.png (image/png) for a PNG, so the name and the
+    mime type tell the truth. The cover that is already there is the one _find_cover_attachment detects (any case,
+    cover.jpg/.jpeg/.png/.webp); it is deleted in the same mkvpropedit call BY ITS ATTACHMENT ID (`--delete-attachment
+    <id>`), falling back to its exact file name when the id is unknown: never the literal name cover.jpg, which
+    matches nothing when the old cover is called Cover.PNG or cover.jpeg and fails the whole call with exit 2. Then
+    `--attachment-name`/`--attachment-mime-type` and `--add-attachment <file>` (the options come before the action
+    they apply to, per the mkvpropedit manual; --replace-attachment is not used because its `selector:filename`
+    form is ambiguous with a Windows drive letter). The caller reads it back (VideoFile does)."""
+    from core.mp4_backend import cover_is_png  # noqa: PLC0415
+
+    png = cover_is_png(image)
+    name, mime = ("cover.png", "image/png") if png else (COVER_NAME, COVER_MIME)
     tmp_path = None
     try:
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as handle:
-            handle.write(jpeg)
+        with tempfile.NamedTemporaryFile(suffix=os.path.splitext(name)[1], delete=False) as handle:
+            handle.write(image)
             tmp_path = handle.name
         args: list[str] = []
-        if _find_cover_attachment(_identify(path)) is not None:
-            args += ["--delete-attachment", f"name:{COVER_NAME}"]
-        args += ["--attachment-name", COVER_NAME, "--attachment-mime-type", COVER_MIME, "--add-attachment", tmp_path]
+        old = _find_cover_attachment(_identify(path))
+        if old is not None:
+            selector = str(old["id"]) if isinstance(old.get("id"), int) else f"name:{old['file_name']}"
+            args += ["--delete-attachment", selector]
+        args += ["--attachment-name", name, "--attachment-mime-type", mime, "--add-attachment", tmp_path]
         return run_mkvpropedit(path, args)
     finally:
         if tmp_path and os.path.exists(tmp_path):
@@ -515,6 +524,15 @@ def write_mkv_metadata(path: str, meta: VideoMetadata) -> subprocess.CompletedPr
 
     results: list[subprocess.CompletedProcess] = []
 
+    # The cover goes FIRST: it is the step most likely to be refused, and when it fails nothing else has been
+    # written yet, so the user's retry starts from the same file instead of one with the title and tags already
+    # applied and a save that keeps reporting an error.
+    if getattr(meta, "cover_pending", None):
+        cover_result = write_mkv_cover(path, bytes(meta.cover_pending))
+        if cover_result.returncode not in (0, 1):
+            return cover_result
+        results.append(cover_result)
+
     if title:
         results.append(run_mkvpropedit(path, ["--edit", "info", "--set", f"title={title}"]))
     elif _current_native_title(path):
@@ -540,9 +558,6 @@ def write_mkv_metadata(path: str, meta: VideoMetadata) -> subprocess.CompletedPr
         finally:
             if tmp_xml_path and os.path.exists(tmp_xml_path):
                 os.remove(tmp_xml_path)
-
-    if getattr(meta, "cover_pending", None):
-        results.append(write_mkv_cover(path, bytes(meta.cover_pending)))
 
     if not results:
         return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")

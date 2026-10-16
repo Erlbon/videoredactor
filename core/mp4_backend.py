@@ -79,6 +79,14 @@ NATIVE_ATOM_MAP = {
     "comment": "\xa9cmt",
 }
 
+PNG_SIGNATURE = bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+
+
+def cover_is_png(data: bytes) -> bool:
+    """A PNG picture by its signature (a cover read from one file and put into another keeps its real format)."""
+    return bytes(data[:8]) == PNG_SIGNATURE
+
+
 # Atoms mutagen requires as a list of int, not a list of str -- writing
 # a string here is the confirmed root cause of TV season/episode tags
 # not persisting. Every OTHER atom in NATIVE_ATOM_MAP is a text atom
@@ -252,7 +260,8 @@ def _apply_mp4_tags(path: str, meta: VideoMetadata) -> None:
 
     # A staged poster (core.poster JPEG): the standard cover atom. Nothing staged leaves the existing cover alone.
     if getattr(meta, "cover_pending", None):
-        mp4.tags["covr"] = [MP4Cover(bytes(meta.cover_pending), imageformat=MP4Cover.FORMAT_JPEG)]
+        pending = bytes(meta.cover_pending)
+        mp4.tags["covr"] = [MP4Cover(pending, imageformat=MP4Cover.FORMAT_PNG if cover_is_png(pending) else MP4Cover.FORMAT_JPEG)]
 
     mp4.save()
 
@@ -277,7 +286,7 @@ def _apply_cover(path: str, image_bytes: bytes, is_png: bool = False) -> None:
     """The mutagen edit of write_mp4_cover, on `path` itself (a scratch copy)."""
     from mutagen.mp4 import MP4, MP4Cover
 
-    fmt = MP4Cover.FORMAT_PNG if is_png else MP4Cover.FORMAT_JPEG
+    fmt = MP4Cover.FORMAT_PNG if (is_png or cover_is_png(image_bytes)) else MP4Cover.FORMAT_JPEG
     mp4 = MP4(path)
     if mp4.tags is None:
         mp4.add_tags()

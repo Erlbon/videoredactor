@@ -175,6 +175,8 @@ def test_the_unplayable_codec_fallback_is_unchanged():
 
 
 def test_ffmpeg_args_map_streams_explicitly_and_drop_bitmap_subs_in_mp4():
+    """The cover picture is deliberately NOT mapped as a video stream (it is not video, and the muxers disagree on it):
+    conversion_run reads it before and restores it after, with a read-back (tests/test_conversion_cover.py)."""
     m = info(".mkv", size=300 * MB, h=480, w=640, subs=("subrip", "hdmv_pgs_subtitle"))
     m.streams.append(cp.StreamInfo(9, "video", "mjpeg", attached_pic=True))
 
@@ -182,7 +184,7 @@ def test_ffmpeg_args_map_streams_explicitly_and_drop_bitmap_subs_in_mp4():
         return [args[i + 1] for i, v in enumerate(args) if v == "-map"]
 
     a = cp.build_ffmpeg_args(m, cp.Plan(container=".mp4", reasons=["x"]), "in", "out.mp4")
-    assert "0:9" not in maps(a) and "0:2" in maps(a) and "0:3" not in maps(a)  # cover art and PGS dropped
+    assert "0:9" not in maps(a) and "0:2" in maps(a) and "0:3" not in maps(a)  # cover art is restored by conversion_run, PGS dropped
     assert a[a.index("-c:s") + 1] == "mov_text"
     mkv = cp.build_ffmpeg_args(m, cp.Plan(container=".mkv", reasons=["x"]), "in", "out.mkv")
     assert "0:3" in maps(mkv) and mkv[mkv.index("-c:s:0") + 1] == "copy" and mkv[mkv.index("-c:s:1") + 1] == "copy"

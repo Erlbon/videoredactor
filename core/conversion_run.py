@@ -29,6 +29,7 @@ from core import conversion_plan as cp
 from core import encoder_detect, history
 from core.ffmpeg_backend import _run_ffmpeg, probe_media
 from core import mt_registry
+from core.external_tools import MKVTOOLNIX, is_tool_available
 from core import subtitle_ingest as si
 from core.library_safety import KIND_CLEANUP, KIND_REMUXED, KIND_RESIZED, PART_MARKER, RESIZE_MARKER, SafeRun
 from core.video_file import SUPPORTED_EXTENSIONS, VideoFile
@@ -116,6 +117,7 @@ def convert_file(
     settings: cp.ConversionSettings,
     *,
     added: list[cp.AddedSub] | None = None,
+    cover: bytes | None = None,
     cancel_event=None,
     runner: Callable = _run_ffmpeg,
     probe: Callable[[str], cp.MediaInfo | None] = probe_media,
@@ -125,7 +127,10 @@ def convert_file(
     quarantine). `runner`/`probe`/`resolve_encoder` are injectable for tests. A bitrate re-encode uses the
     encoder settings.encoder resolves to (core/encoder_detect.py: "auto" = hevc_nvenc only when it works on
     this computer, else libx265); the GPU decode/scale attempt (then the software-scale retry) only with
-    settings.hw_decode on and nvenc."""
+    settings.hw_decode on and nvenc.
+
+    `cover` is the source's embedded poster (read_source_cover): ffmpeg does not carry it, so it is put back into
+    the new file BEFORE the swap and read back; when that fails the conversion fails and the original is kept."""
     added = added or []
     added_subtitles = len(added)
     if plan.skip_reason or not plan.container:
@@ -148,6 +153,10 @@ def convert_file(
             args = cp.build_ffmpeg_args(info, plan, src, temp, settings, cuda=cuda, added=added, encoder=encoder)
             code, stderr = runner(args, cancel_event=cancel_event, timeout=CONVERT_TIMEOUT_SECONDS)
             if code == 0:
+                if cover:
+                    problem = restore_cover(temp, cover)
+                    if problem:
+                        return False, f"the embedded poster could not be carried over ({problem})"
                 return True, ""
             message = (stderr or "").strip().splitlines()[-1] if (stderr or "").strip() else "ffmpeg failed"
             if code is None:  # cancelled or ffmpeg missing: no point retrying
@@ -156,10 +165,13 @@ def convert_file(
 
     def verify(src: str, temp: str) -> str:
         size = os.path.getsize(temp) if os.path.exists(temp) else None
-        return verify_result(
+        problem = verify_result(
             info, probe(temp), plan, settings, added_subtitles=added_subtitles, result_size=size,
             tolerance_seconds=run.tolerance_seconds, tolerance_fraction=run.tolerance_fraction,
         )
+        if not problem and cover:
+            problem = verify_cover(temp, cover)
+        return problem
 
     reason = "; ".join(plan.reasons)
     ok = run.convert(source, final, build, kind, reason, marker=marker, verify=verify)
@@ -184,6 +196,53 @@ def embedded_subtitle_texts(info: cp.MediaInfo, source: str) -> list[str]:
         if result is not None and result.returncode == 0 and result.stdout:
             texts.append(result.stdout)
     return texts
+
+
+def _cover_like_attachment(info: cp.MediaInfo) -> bool:
+    """An MKV attachment that looks like the poster (cover.jpg/png/webp, any case)."""
+    from core.mkv_backend import _COVER_NAME_RE  # noqa: PLC0415
+
+    return any(s.kind == "attachment" and _COVER_NAME_RE.match(s.filename or "") for s in info.streams)
+
+
+def read_source_cover(path: str, info: cp.MediaInfo) -> tuple[bytes | None, str]:
+    """(the embedded poster of an MP4/MKV, "") read BEFORE a conversion replaces the file, (None, "") when it has
+    none, or (None, what is wrong) when it has one that can't be read -- the conversion must then not go ahead,
+    because ffmpeg does not carry the picture and the original is about to be replaced. `info` (ffprobe) is the
+    witness that a picture exists: an attached picture stream (MP4) or a cover-named attachment (MKV)."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in SUPPORTED_EXTENSIONS:
+        return None, ""
+    known = any(s.attached_pic for s in info.streams) or (ext == ".mkv" and _cover_like_attachment(info))
+    try:
+        if ext == ".mkv" and not is_tool_available(MKVTOOLNIX):
+            raise RuntimeError(f"MKVToolNix is not installed ({MKVTOOLNIX.download_url})")
+        data = VideoFile(path=Path(path)).read_cover()
+    except Exception as exc:  # noqa: BLE001 -- unreadable: only a problem when a picture is known to be there
+        if known:
+            return None, f"the file has an embedded poster that could not be read ({exc}); converting would lose it"
+        return None, ""
+    if not data and known:
+        return None, "the file has an embedded poster that could not be read; converting would lose it"
+    return data or None, ""
+
+
+def restore_cover(path: str, cover: bytes) -> str:
+    """Puts `cover` into the converted file at `path` (MP4 covr atom or MKV cover attachment) and reads it back.
+    "" when it is there, else the problem."""
+    try:
+        return VideoFile(path=Path(path)).embed_cover_now(cover)
+    except Exception as exc:  # noqa: BLE001
+        return str(exc)
+
+
+def verify_cover(path: str, cover: bytes) -> str:
+    """"" when the file at `path` carries exactly `cover`, else a problem for the verification step."""
+    try:
+        found = VideoFile(path=Path(path)).read_cover()
+    except Exception as exc:  # noqa: BLE001
+        return f"the embedded poster could not be read back ({exc})"
+    return "" if found == cover else "the embedded poster is missing from the result"
 
 
 def read_source_tags(path: str):
@@ -264,6 +323,11 @@ def process_file(
         plan = cp.plan_conversion(info, settings, is_series=is_series, extra_subtitles=len(chosen))
     if not plan.does_something:
         return ConversionOutcome(False, message=plan.skip_reason or "nothing to do", notes=notes)
+    cover = None
+    if not run.dry_run:
+        cover, cover_problem = read_source_cover(source, info)
+        if cover_problem:
+            return ConversionOutcome(False, message=f"not converted, the file is untouched: {cover_problem}", notes=notes)
     if carry_tags and tags is None and not run.dry_run:
         tags = read_source_tags(source)
     with tempfile.TemporaryDirectory(prefix="videoredactor-subs-") as folder:
@@ -274,7 +338,7 @@ def process_file(
                 with open(path, "w", encoding="utf-8", newline="") as f:
                     f.write(s.text)
             added.append(cp.AddedSub(path, s.language, mt_registry.track_title(s.text, s.title), s.default, s.hearing_impaired))
-        outcome = convert_file(run, source, plan, info, settings, added=added, probe=probe, **convert_kwargs)
+        outcome = convert_file(run, source, plan, info, settings, added=added, cover=cover, probe=probe, **convert_kwargs)
     outcome.notes = notes + outcome.notes
     if outcome.converted and carry_tags and tags is not None and not run.dry_run:
         problem = write_tags(outcome.final_path, tags)

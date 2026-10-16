@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-16#06 -- Converting a video no longer loses its embedded poster; replacing an MKV cover works whatever it is called
+
+From the 2026-10-16 independent code review (data safety).
+- Fixed: a conversion (re-encode, MP4 to MKV, adding subtitles, any rule conversion, also from the Redact step) silently dropped the embedded poster, which is now the only copy since Embed Existing Poster Files moves the picture file to the Recycle Bin. The poster is read before the conversion, put back into the new file (MP4 cover atom or MKV `cover.jpg`/`cover.png` attachment) and read back before the original is replaced. If it cannot be read or restored, the original is kept and the report says why.
+- Fixed: saving a new poster into an MKV whose old cover is called `cover.png`, `cover.jpeg` or `Cover.JPG` failed with "No attachment matched" after the title and tags had already been written, and every retry failed again. The existing cover is now deleted by the attachment id the app found, and the cover is written first so a refusal leaves the title and tags untouched. A PNG poster is stored as `cover.png` with the PNG type (MKV) or as a PNG cover (MP4), not mislabelled as JPEG.
+- Tests: new tests/test_conversion_cover.py (real MP4 through the real process_file with real ffmpeg, read back with the app's reader and ffprobe), tests/test_mkv_cover_delete.py; the real-MP4 tests now generate their own 2-second sample clip when the maintainer's file is missing and skip only when ffmpeg is not installed.
+- Not proven: MKVToolNix is not installed on the development machine; the MKV delete-by-id command line (`mkvpropedit --delete-attachment <id>`) and the MP4 to MKV poster restore are tested against an in-memory model of the tools, not the real programs.
+
 ## 2026-10-16#05 -- Source ids kept inside the files, true posters embedded in the video, no more poster sidecars
 
 Owner rules (decided in conversation): the only sidecar files the app may create are Markdown notes and `.folder` marker tags; a poster is EMBEDDED in the file and must be a TRUE poster (portrait, from a poster-type picture of the source), never a video frame. Subtitle `.srt` sidecars are unchanged for now.

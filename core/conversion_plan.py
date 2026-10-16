@@ -80,6 +80,7 @@ class StreamInfo:
     hearing_impaired: bool = False
     attached_pic: bool = False  # cover art: "not video"
     duration: float | None = None  # the stream's own length, when ffprobe says
+    filename: str = ""  # an attachment stream's file name (an MKV's cover.jpg, a font), from the filename tag
 
 
 @dataclass
@@ -137,6 +138,7 @@ def parse_ffprobe(path: str, data: dict) -> MediaInfo:
             language=str(tags.get("language") or ""), title=str(tags.get("title") or ""),
             default=bool(disp.get("default")), hearing_impaired=bool(disp.get("hearing_impaired")),
             attached_pic=bool(disp.get("attached_pic")), duration=stream_duration,
+            filename=str(tags.get("filename") or ""),
         ))
     return MediaInfo(path=path, size_bytes=size, duration=duration, streams=streams)
 
