@@ -14,3 +14,6 @@ dist-linux/
 # File > Undo Last Rename's log (redactor_common's RenameLog) -- per-user data,
 # next to the settings like videoredactor_settings.ini.
 videoredactor_rename_log.json
+
+# Tools > Create Notes' lookup cache -- per-user data, next to the settings.
+videoredactor_notes_cache.sqlite*

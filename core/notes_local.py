@@ -38,6 +38,7 @@ NOTE_KIND_OF = {KIND_SERIES: "series", KIND_MOVIE: "about"}  # the note file's k
 MAX_MOVIE_FILES = 4  # the film, its parts, a trailer: more than that is a folder of films, not one film
 
 _SEASON_FOLDER = re.compile(r"^(?:season|series|saison|sesong|staffel|s)\s*[-_. ]?\s*(\d{1,2})\b|^specials?$", re.IGNORECASE)
+_AIR_DATE = re.compile(r"(?<!\d)((?:19|20)\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01]))(?!\d)")  # 'Currahee (2001-09-09)'
 _YEAR_SUFFIX = re.compile(r"\s*[(\[]\s*((?:19|20)\d{2})\s*[)\]]\s*$")
 _SERIES_WORDS = re.compile(r"\s*[(\[]\s*(?:us|uk|au|ca|nz|[a-z]{2,3}\s+series|tv series)\s*[)\]]\s*$", re.IGNORECASE)
 # Folders that are a place to keep video in, not a title.
@@ -83,6 +84,7 @@ class LocalSeries:
     year: str = ""
     seasons: dict[int, list[str]] = field(default_factory=dict)  # season -> episode file names, sorted
     episodes: dict[int, list[int]] = field(default_factory=dict)  # season -> episode numbers found in the names
+    dates: dict[int, dict[int, str]] = field(default_factory=dict)  # season -> {episode: 'YYYY-MM-DD' written in the file name}
 
     @property
     def episode_count(self) -> int:
@@ -170,6 +172,9 @@ def read_series(folder: Path) -> LocalSeries:
             series.seasons.setdefault(number, []).append(video.name)
             if episode is not None:
                 series.episodes.setdefault(number, []).append(episode)
+                date = _AIR_DATE.search(video.stem)
+                if date:
+                    series.dates.setdefault(number, {}).setdefault(episode, date.group(1))
                 for extra in parse_release_name(video.stem).extra_episodes:
                     series.episodes[number].append(extra)
 

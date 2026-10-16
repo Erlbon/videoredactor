@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-16#02 -- Create Notes tells two series with one name apart by their air dates and episode counts
+
+Found on a real library: a folder called "Band of Brothers" matched two TMDB series (the 2001 HBO miniseries and a 2008 Korean music show) and was left as uncertain.
+- New: when several TMDB series have the folder's name (and year), the engine now checks the folder against each: (1) the **air dates written in the file names** (`Currahee (2001-09-09)`) against TMDB's air dates of each season, and failing that (2) whether every season holds **exactly** as many episodes as TMDB says. A series wins only when it is the ONLY one that fits and every other candidate was checked too; two that fit equally well, or one TMDB would not answer for, stay uncertain for you to pick. The reason says which check decided and the numbers ("season 1: 10 of 10 air dates match").
+- The candidate list of an uncertain match shows the same evidence under each candidate and ranks the better fit first. The extra TMDB requests (one per dated season and candidate) are only made when titles compete, and are kept in the lookup cache.
+- Fixed: the lookup cache file (`videoredactor_notes_cache.sqlite`) is in .gitignore like the other per-user files.
+- Tests: tests/test_notes_flow.py (dates decide, counts decide, a tie, an unchecked candidate, a wrong date), tests/test_notes_local.py (dates read from file names).
+
 ## 2026-10-16#01 -- Create Notes: series.md and about.md for the Pluteus media server, from TMDB and Wikipedia
 
 The same Tools > Create Notes as mp3redactor, for video folders. It drafts the Markdown note Pluteus shows beside a folder, and writes nothing you have not said yes to.

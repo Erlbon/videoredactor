@@ -237,3 +237,90 @@ def test_undo_moves_a_created_note_to_the_bin_only_while_unchanged(tmp_path):
         handle.write(b"edited\n")
     assert "changed" in undo_note_entry(Entry, Journal())
     assert record_note_created and history and text_sha  # the journal hook and the hash are the shared ones
+
+
+# ---- two series with one name: the air dates in the file names, then the episode counts -------------------------------
+
+BAND_DATES = ["2001-09-09", "2001-09-09", "2001-09-16", "2001-09-23", "2001-09-30", "2001-10-07", "2001-10-14", "2001-10-21",
+              "2001-10-28", "2001-11-04"]
+
+
+def band_folder(root, dated=True, count=10):
+    from tests.notes_helpers import touch
+
+    for number in range(1, count + 1):
+        date = f" ({BAND_DATES[number - 1]})" if dated else ""
+        touch(root / "Band of Brothers" / f"Band of Brothers - S01E{number:02d} - Episode{date}.mp4")
+    return root / "Band of Brothers"
+
+
+def band_fetchers(korean_episodes=10, korean_dates=None, korean_details=True, key="TEST-KEY"):
+    seasons = lambda n: [{"season_number": 1, "episode_count": n, "name": "Season 1"}]
+    hbo = dict(BREAKING_BAD, id=4613, name="Band of Brothers", original_name="Band of Brothers", first_air_date="2001-09-09",
+               seasons=seasons(10), external_ids={"imdb_id": "tt0185906"})
+    korean = dict(BREAKING_BAD, id=70000, name="Band of Brothers", original_name="Band of Brothers", first_air_date="2008-03-01",
+                  seasons=seasons(korean_episodes), external_ids={"imdb_id": ""})
+    extra = [
+        (r"/search/tv\?", {"results": [hit("tv", 4613, "Band of Brothers", "2001-09-09", "Easy Company"),
+                                       hit("tv", 70000, "Band of Brothers", "2008-03-01", "A Korean music show")]}),
+        (r"/tv/4613/season/1\?", {"episodes": [{"episode_number": n, "air_date": d} for n, d in enumerate(BAND_DATES, start=1)]}),
+        (r"/tv/70000/season/1\?", {"episodes": [{"episode_number": n, "air_date": d}
+                                                for n, d in enumerate(korean_dates or ["2008-03-%02d" % n for n in range(1, 11)], start=1)]}),
+        (r"/tv/4613\?", hbo),
+    ] + ([(r"/tv/70000\?", korean)] if korean_details else [])
+    return fake_fetchers(tmdb_extra=extra, key=key)
+
+
+def test_the_air_dates_in_the_file_names_pick_the_right_one_of_two_series_with_one_name(tmp_path):
+    band_folder(tmp_path)
+    [p] = build_proposals(scan([tmp_path]).targets, band_fetchers())  # both have exactly 10 episodes: only the dates tell
+    assert p.confidence == Confidence.CONFIDENT and p.tmdb_id == 4613
+    assert any("only the one from 2001 fits the folder: the air dates in the file names match" in r and "10 of 10 air dates match" in r
+               for r in p.reasons)
+
+
+def test_without_dates_the_exact_episode_count_picks_the_right_one(tmp_path):
+    band_folder(tmp_path, dated=False)
+    [p] = build_proposals(scan([tmp_path]).targets, band_fetchers(korean_episodes=20))
+    assert p.confidence == Confidence.CONFIDENT and p.tmdb_id == 4613
+    assert any("every season has exactly the folder's number of episodes" in r for r in p.reasons)
+
+
+def test_two_series_that_fit_equally_well_stay_uncertain(tmp_path):
+    band_folder(tmp_path, dated=False)  # no dates, both have exactly 10 episodes
+    [p] = build_proposals(scan([tmp_path]).targets, band_fetchers())
+    assert p.confidence == Confidence.UNCERTAIN and p.note_text == "" and any("2 titles are called" in r for r in p.reasons)
+
+
+def test_a_candidate_that_could_not_be_checked_stops_the_guess(tmp_path):
+    band_folder(tmp_path)
+    [p] = build_proposals(scan([tmp_path]).targets, band_fetchers(korean_details=False))
+    assert p.confidence == Confidence.UNCERTAIN  # the unchecked one might fit too
+
+
+def test_the_candidate_list_shows_the_evidence_and_ranks_the_fitting_series_first(tmp_path):
+    band_folder(tmp_path, dated=False)
+    fetchers = band_fetchers(korean_episodes=20)
+    [p] = build_proposals(scan([tmp_path]).targets, fetchers)
+    assert p.confidence == Confidence.CONFIDENT
+    # a half-dated folder where the dates are not enough: both candidates are listed, the better fit first
+    folder = tmp_path / "Band of Brothers"
+    for number in (1, 2):
+        (folder / f"Band of Brothers - S01E{number:02d} - Episode.mp4").rename(folder / f"Band of Brothers - S01E{number:02d} - Episode ({BAND_DATES[number - 1]}).mp4")
+    [q] = build_proposals(scan([tmp_path]).targets, band_fetchers(korean_dates=BAND_DATES))
+    # both series have these air dates and the same count: a tie stays with the person, who sees the evidence
+    assert q.confidence == Confidence.UNCERTAIN
+    assert [c.id for c in q.candidates[:2]] == ["4613", "70000"] or [c.id for c in q.candidates[:2]] == ["70000", "4613"]
+    assert all(any("2 of 2 air dates match" in h for h in c.hits) for c in q.candidates[:2])
+
+
+def test_a_wrong_air_date_rules_a_series_out(tmp_path):
+    band_folder(tmp_path)
+    wrong = ["1999-01-01"] * 10
+    [p] = build_proposals(scan([tmp_path]).targets, band_fetchers(korean_dates=wrong))
+    assert p.tmdb_id == 4613 and p.confidence == Confidence.CONFIDENT
+    # both wrong: nothing fits, so nothing is guessed
+    fetchers = band_fetchers(korean_dates=wrong)
+    fetchers.tmdb.routes.insert(0, (r"/tv/4613/season/1\?", {"episodes": [{"episode_number": n, "air_date": "1990-01-01"} for n in range(1, 11)]}))
+    [q] = build_proposals(scan([tmp_path]).targets, fetchers)
+    assert q.confidence == Confidence.UNCERTAIN

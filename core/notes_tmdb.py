@@ -174,3 +174,9 @@ class Tmdb:
             homepage=str(data.get("homepage") or ""),
         )
         return details
+
+    def season_air_dates(self, tmdb_id: int, season: int) -> dict[int, str]:
+        """{episode number: air date 'YYYY-MM-DD'} of one season of a series (one request; {} when TMDB has none)."""
+        data = self._get(f"/tv/{tmdb_id}/season/{season}", {})
+        return {int(e["episode_number"]): str(e.get("air_date") or "") for e in data.get("episodes") or []
+                if isinstance(e, dict) and "episode_number" in e}

@@ -140,6 +140,53 @@ def structure(local: LocalSeries, details: TitleDetails) -> tuple[list[str], lis
     return matched, mismatched
 
 
+DATE_FIT_SHARE = 0.8  # this share of the dated episodes in the folder must have exactly that air date at TMDB
+MIN_DATED_EPISODES = 2  # fewer dates than this say nothing
+
+
+@dataclass
+class Evidence:
+    """How well one TMDB series fits the folder beyond its name: the air dates written in the file names against TMDB's, and
+    whether each season holds exactly as many episodes as TMDB says (point 1 and 2 of telling two series of one name apart)."""
+
+    counts_exact: int = 0  # local seasons whose number of episodes is TMDB's number
+    counts_total: int = 0
+    dates_match: int = 0  # dated local episodes whose air date is TMDB's
+    dates_total: int = 0
+    notes: list[str] = field(default_factory=list)
+
+    @property
+    def date_fit(self) -> bool:
+        return self.dates_total >= MIN_DATED_EPISODES and self.dates_match / self.dates_total >= DATE_FIT_SHARE
+
+    @property
+    def count_fit(self) -> bool:
+        return self.counts_total > 0 and self.counts_exact == self.counts_total
+
+
+def evidence(local: LocalSeries, details: TitleDetails, season_dates: Callable[[int], dict[int, str]]) -> Evidence:
+    """The evidence of `details` against the folder. `season_dates(season)` gives TMDB's {episode: air date} of a season (only
+    asked for the seasons whose file names carry dates)."""
+    known = {s.number: s.episodes for s in details.seasons}
+    out = Evidence()
+    for season, files in sorted(local.seasons.items()):
+        count = known.get(season)
+        if count is None:
+            continue
+        out.counts_total += 1
+        if len(files) == count:
+            out.counts_exact += 1
+            out.notes.append(f"season {season}: exactly {count} episodes")
+        dated = local.dates.get(season, {})
+        if dated:
+            tmdb = season_dates(season)
+            matched = sum(1 for episode, date in dated.items() if tmdb.get(episode) == date)
+            out.dates_total += len(dated)
+            out.dates_match += matched
+            out.notes.append(f"season {season}: {matched} of {len(dated)} air dates match")
+    return out
+
+
 # ---- the engine ------------------------------------------------------------------------------------------------------
 
 class NotesEngine:
@@ -155,6 +202,8 @@ class NotesEngine:
         self._wiki = CachedFetch(self.fetchers.wiki or _default_wiki_fetch(), "wiki", cache, self.stats, self.phases, WIKIPEDIA)
         self.tmdb = Tmdb(self._tmdb_fetch, self.fetchers.key)
         self._details: dict[tuple[str, int], Optional[TitleDetails]] = {}
+        self._season_dates: dict[tuple[int, int], dict[int, str]] = {}
+        self._evidence: dict[int, Evidence] = {}
         self._fatal = ""  # a problem every later folder would hit too (no key, a rejected key): said once
 
     def close(self) -> None:
@@ -202,6 +251,41 @@ class NotesEngine:
             self._details[key] = self.tmdb.details(kind, tmdb_id)
         return self._details[key]
 
+    def _dates_of(self, tmdb_id: int, season: int) -> dict[int, str]:
+        key = (tmdb_id, season)
+        if key not in self._season_dates:
+            self._season_dates[key] = self.tmdb.season_air_dates(tmdb_id, season)
+        return self._season_dates[key]
+
+    def _evidence_of(self, local: LocalSeries, details: TitleDetails) -> Evidence:
+        """The air-date and episode-count evidence of one TMDB series against the folder (asked once per series)."""
+        if details.id not in self._evidence:
+            self._evidence[details.id] = evidence(local, details, lambda season: self._dates_of(details.id, season))
+        return self._evidence[details.id]
+
+    def _tell_apart(self, proposal: Proposal, local: LocalSeries, pool: list[TitleHit]) -> Optional[TitleDetails]:
+        """Several series have the folder's name: the one whose episodes' AIR DATES (written in the file names) are TMDB's
+        wins; failing that, the one whose seasons hold EXACTLY as many episodes as the folder. Only when it is the only one
+        that fits and every other candidate was looked at too (a candidate that could not be checked might fit as well)."""
+        checked: list[tuple[TitleHit, TitleDetails, Evidence]] = []
+        for hit in pool:
+            details = self._timed_details("tv", hit.id)
+            if details is None:
+                return None
+            matched, mismatched = structure(local, details)
+            if mismatched:
+                continue  # its seasons are not the folder's: it is out of the running
+            checked.append((hit, details, self._evidence_of(local, details)))
+        for fits, how in ((lambda e: e.date_fit, "the air dates in the file names match"),
+                          (lambda e: e.count_fit, "every season has exactly the folder's number of episodes")):
+            winners = [(hit, details, ev) for hit, details, ev in checked if fits(ev)]
+            if len(winners) == 1:
+                hit, details, ev = winners[0]
+                proposal.reasons.append(f"{len(pool)} titles are called '{details.name}', but only the one from {details.year or hit.year} "
+                                        f"fits the folder: {how} (" + "; ".join(ev.notes) + ")")
+                return details
+        return None
+
     def _build(self, target: Target, force: Optional[Candidate] = None) -> Proposal:
         series = target.kind == KIND_SERIES
         local: LocalSeries | LocalMovie = read_series(target.folder) if series else read_movie(target.folder)
@@ -237,7 +321,7 @@ class NotesEngine:
             return proposal
         exact = [h for h in hits if _names_match(title, h)]
         strong = [h for h in exact if (_year_gap(year, h) in (None, 0))]
-        candidates = self._candidates(proposal, kind, hits, title, year)
+        candidates = self._candidates(proposal, kind, hits, title, year, with_evidence=len(strong or exact) > 1)
         proposal.candidates = candidates
         if len(strong) == 1:
             hit = strong[0]
@@ -257,6 +341,10 @@ class NotesEngine:
             else:
                 proposal.reasons.append(f"the only TMDB film called '{details.name}'" + (f" from {year}" if year else ""))
             return self._finish(proposal, details, Confidence.CONFIDENT)
+        if isinstance(local, LocalSeries) and len(strong or exact) > 1:
+            winner = self._tell_apart(proposal, local, strong or exact)
+            if winner is not None:
+                return self._finish(proposal, winner, Confidence.CONFIDENT)
         if len(exact) > 1 or len(strong) > 1:
             proposal.reasons.append(f"{len(strong) or len(exact)} titles are called '{title}'"
                                     + ("" if year else " and the folder has no year") + ": pick the right one")
@@ -268,7 +356,8 @@ class NotesEngine:
         proposal.confidence = Confidence.UNCERTAIN
         return proposal
 
-    def _candidates(self, proposal: Proposal, kind: str, hits: list[TitleHit], title: str, year: str) -> list[Candidate]:
+    def _candidates(self, proposal: Proposal, kind: str, hits: list[TitleHit], title: str, year: str,
+                    with_evidence: bool = False) -> list[Candidate]:
         local = proposal.local
         out: list[Candidate] = []
         for hit in hits[:MAX_CANDIDATES]:
@@ -279,6 +368,10 @@ class NotesEngine:
                 if details is not None:
                     found, mismatched = structure(local, details)
                     score += 0.2 if not mismatched else 0.0
+                    if not mismatched and with_evidence:  # air dates cost a request per season: only when titles compete
+                        ev = self._evidence_of(local, details)
+                        score += (0.3 if ev.date_fit else 0.0) + (0.1 if ev.count_fit else 0.0)
+                        found = [n for n in ev.notes if "air dates" in n] + found
             blurb = hit.overview[:90] + ("..." if len(hit.overview) > 90 else "")
             out.append(Candidate("tmdb", str(hit.id), hit.name, ", ".join(x for x in (hit.year, blurb) if x), found, score))
         return sorted(out, key=lambda c: -c.score)

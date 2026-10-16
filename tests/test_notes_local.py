@@ -114,3 +114,13 @@ def test_count_targets_counts_series_and_movies(tmp_path):
 def test_app_temp_files_do_not_count_as_videos(tmp_path):
     touch(tmp_path / "Film (2001)" / ".Film.abcd1234.redact-part.mkv")
     assert scan([tmp_path]).targets == []
+
+
+def test_air_dates_written_in_the_file_names_are_read_per_episode(tmp_path):
+    show = tmp_path / "Band of Brothers"
+    for number, date in ((1, "2001-09-09"), (2, "2001-09-16")):
+        touch(show / f"Band of Brothers - S01E{number:02d} - Episode ({date}).mp4")
+    touch(show / "Band of Brothers - S01E03 - No date.mp4")
+    touch(show / "Band of Brothers - S01E04 - Almost (2001-13-45).mp4")  # not a date
+    series = read_series(show)
+    assert series.dates == {1: {1: "2001-09-09", 2: "2001-09-16"}} and series.episodes == {1: [1, 2, 3, 4]}
