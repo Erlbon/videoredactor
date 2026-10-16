@@ -53,7 +53,7 @@ def test_the_cache_lives_next_to_the_settings_file_never_in_a_library(monkeypatc
     assert notes_settings.cache_path() == tmp_path / notes_settings.CACHE_FILE_NAME
     monkeypatch.setattr(shared, "_default", None)
     cache = notes_settings.default_cache(True)
-    cache.put("k", b"v")
+    cache.put("k", b'"v"')
     assert (tmp_path / notes_settings.CACHE_FILE_NAME).is_file() and notes_settings.clear_cache() == 1
     assert notes_settings.default_cache(False) is None
     cache.close()
@@ -70,7 +70,7 @@ def test_the_preferences_page_has_the_two_switches_and_a_clear_button(monkeypatc
     from gui.video_preferences import clear_notes_cache_action
 
     assert CLEAR_NOTES_CACHE_LABEL and clear_notes_cache_action(dlg) is False and "already empty" in said[-1]
-    notes_settings.default_cache(True).put("k", b"v")
+    notes_settings.default_cache(True).put("k", b'"v"')
     assert clear_notes_cache_action(dlg) is True and "1 saved answer removed" in said[-1]
 
 
