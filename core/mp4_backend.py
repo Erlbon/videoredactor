@@ -50,6 +50,7 @@ from typing import Optional
 
 from redactor_common.core.os_utils import replace_with_retry, retry_on_lock
 
+from core.file_access import make_scratch_writable, remove_scratch, require_writable
 from core.poster import describe_cover
 from core.video_metadata import SOURCE_FIELDS, VideoMetadata, ContentType
 
@@ -201,20 +202,19 @@ def write_mp4_metadata(path: str, meta: VideoMetadata) -> None:
 def _edit_via_scratch(path: str, apply) -> None:
     """Runs `apply(scratch_path)` on a copy of the video and swaps the copy in only when it still parses."""
     target = os.path.realpath(path)
+    require_writable(target)  # a read-only video is refused up front, not half-way through
     fd, scratch = tempfile.mkstemp(prefix=".videoredactor-", suffix=".tmp", dir=os.path.dirname(target))
     os.close(fd)
     try:
-        retry_on_lock(shutil.copy2, target, scratch)  # keeps the permissions
+        retry_on_lock(shutil.copy2, target, scratch)  # keeps the permissions...
+        make_scratch_writable(scratch)  # ...but not a read-only attribute: the copy is ours to edit and to delete
         apply(scratch)
         from mutagen.mp4 import MP4
 
         MP4(scratch)  # the edited copy must still parse before it replaces anything
         replace_with_retry(scratch, target)
     except BaseException:
-        try:
-            os.remove(scratch)
-        except OSError:
-            pass
+        remove_scratch(scratch)
         raise
 
 

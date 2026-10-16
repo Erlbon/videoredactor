@@ -70,7 +70,7 @@ from redactor_common.core.trash import move_to_trash
 from core import imdb_import, imdb_local, lyrics_subtitles, opensubtitles_client, scene_lookup, stashdb_client
 from core import theporndb_client, tmdb_client, tvdb_client
 from core import subtitle_translation, translation_settings
-from core import conversion_plan, conversion_run, history, library_safety
+from core import conversion_plan, conversion_run, file_access, history, library_safety
 from core.config import get_setting, set_setting
 from core.ffmpeg_backend import _run, remux_to_mp4, verify_remux
 from core.file_check import RepairError, build_repaired_copy, quick_check
@@ -257,10 +257,14 @@ class VideoCtx:
         if final != self.original and os.path.lexists(final):
             self.save_failed = True
             return StepResult.failed(f"NOT SAVED, the original is untouched: {os.path.basename(final)} already exists")
+        if file_access.is_read_only(self.original):  # before any working copy exists: nothing to clean up
+            self.save_failed = True
+            return StepResult.failed(f"NOT SAVED, the original is untouched: {file_access.read_only_message(self.original)}")
         try:
             if self.current == self.original:
                 scratch = self.new_scratch(original_ext)
                 self.bg(shutil.copy2, self.original, scratch)  # keeps the permissions
+                file_access.make_scratch_writable(scratch)  # ...but not a read-only attribute
             else:
                 scratch = self.current
         except OSError as exc:
@@ -345,10 +349,7 @@ def finalize_file(ctx: VideoCtx, _report: FileReport) -> StepResult | None:
 
 
 def _remove_quietly(path: str) -> None:
-    try:
-        os.remove(path)
-    except OSError:
-        pass
+    file_access.remove_scratch(path)  # retries once past a read-only attribute
 
 
 def _norm(text: str) -> str:

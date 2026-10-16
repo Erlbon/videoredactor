@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-16#07 -- A read-only video is refused clearly and leaves no temp copy behind
+
+From the 2026-10-16 independent code review (data safety).
+- Fixed: saving tags or a poster into a read-only MP4 failed half-way and left a hidden, full-size `.videoredactor-*.tmp` copy of the movie beside it (the copy inherited the read-only flag, so the cleanup was refused). A read-only file is now refused up front with "<name> is read-only, so it was not changed. Clear "Read-only" in the file's Properties ... and try again", before anything is copied; the same for MKV, for Embed Existing Poster Files and for the Redact save (which no longer makes a working copy at all). Scratch copies are made writable as soon as they exist and are removed even when the read-only flag was set, so nothing is left behind.
+- Tests: tests/test_read_only_files.py (a real read-only MP4 through VideoFile.save, the poster embed and the Redact save: clear message, original untouched, folder unchanged).
+
 ## 2026-10-16#06 -- Converting a video no longer loses its embedded poster; replacing an MKV cover works whatever it is called
 
 From the 2026-10-16 independent code review (data safety).

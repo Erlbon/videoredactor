@@ -23,6 +23,7 @@ from redactor_common.core.journal import KIND_SAVE
 
 from core import history
 from core.video_metadata import VideoMetadata, EDITABLE_FIELDS, SOURCE_FIELDS, ContentType
+from core.file_access import ReadOnlyFileError, require_writable
 from core.mp4_backend import read_mp4_cover, read_mp4_metadata, write_mp4_cover, write_mp4_metadata
 from core.mkv_backend import read_mkv_cover, read_mkv_metadata, write_mkv_cover, write_mkv_metadata
 from core.ffmpeg_backend import IMPORTABLE_EXTENSIONS, extract_thumbnail, probe_technical_info
@@ -270,6 +271,7 @@ class VideoFile:
         """save()'s write + read-back verification; sets save_error / dirty."""
         write_diagnostic = ""
         try:
+            require_writable(str(self.path))  # a read-only file is refused before anything is copied or written
             if self.is_mkv:
                 result = write_mkv_metadata(str(self.path), self.metadata)
                 # 1 = finished with warnings (restore_app_metadata accepts
@@ -289,6 +291,9 @@ class VideoFile:
             else:
                 self.save_error = f"Unsupported extension: {self.extension}"
                 return
+        except ReadOnlyFileError as e:
+            self.save_error = str(e)
+            return
         except OSError as e:
             self.save_error = f"File error: {describe_save_error(e)}"
             return
@@ -328,6 +333,7 @@ class VideoFile:
         then reads it back. Returns "" on success or the problem. Used by Embed Existing Poster Files, which must
         know the embed worked before it moves a sidecar to the Recycle Bin."""
         try:
+            require_writable(str(self.path))
             if self.is_mkv:
                 if not is_tool_available(MKVTOOLNIX):
                     return f"MKVToolNix (mkvpropedit) not found -- install it from {MKVTOOLNIX.download_url}."
@@ -340,6 +346,8 @@ class VideoFile:
                 return f"Unsupported extension: {self.extension}"
             if self.read_cover() != jpeg:
                 return "the poster is not in the file after writing it"
+        except ReadOnlyFileError as e:
+            return str(e)
         except OSError as e:
             return f"File error: {describe_save_error(e)}"
         except Exception as e:  # noqa: BLE001
