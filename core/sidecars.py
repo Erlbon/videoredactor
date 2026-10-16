@@ -10,7 +10,11 @@ Pure file-system logic, no Qt.
 
 Matching is exact on purpose: what follows the video's stem must be
 one of those shapes, so "Show S01E01.mkv" never claims the files of
-"Show S01E010.mkv".
+"Show S01E010.mkv". A subtitle is `<stem>.srt` or `<stem>.<language>[.<flag>...].srt`: the language must be a real
+one (core/subtitle_ingest's table: en, eng, English, pt-BR...; flags alone are fine) and the flags are the ingest's own (forced, sdh, default,
+hi, cc...), so "Movie.Extended.srt" -- the subtitle of Movie.Extended.mkv -- is never taken by Movie.mkv. And when
+another video's stem equals the subtitle's name up to a dot ("Movie.en" for Movie.en.srt), the subtitle is that
+video's, never this one's (2026-10-16 review).
 """
 
 from __future__ import annotations
@@ -20,7 +24,40 @@ import re
 
 from redactor_common.core.move_plan import PlannedMove
 
-_SUFFIX_RE = re.compile(r"(?:-poster\.(?:jpe?g|png)|(?:\.[A-Za-z-]{2,8})?\.srt)", re.IGNORECASE)
+from core.ffmpeg_backend import IMPORTABLE_EXTENSIONS
+from core.subtitle_ingest import _IGNORED_TAGS, _SDH_TAGS, language_code
+
+_POSTER_SUFFIX_RE = re.compile(r"-poster\.(?:jpe?g|png)", re.IGNORECASE)
+_VIDEO_EXTENSIONS = frozenset({".mp4", ".m4v", ".mkv"}) | IMPORTABLE_EXTENSIONS
+_SUBTITLE_FLAGS = _SDH_TAGS | (_IGNORED_TAGS - {"srt"})
+
+
+def _subtitle_middle_ok(middle: str) -> bool:
+    """`middle` of <stem>.<middle>.srt is a language code/name, then only flags (forced, sdh, default...)."""
+    tokens = middle.split(".")
+    rest = tokens[1:] if language_code(tokens[0]) else tokens  # "forced.srt" has no language: flags alone are fine
+    return all(t.lower() in _SUBTITLE_FLAGS for t in rest)
+
+
+def _claimed_by_another_video(stem: str, middle: str, own_name: str, names: list[str]) -> bool:
+    """Another video of the folder has the stem `<stem>.<first k tokens of the middle>`: that video owns the subtitle."""
+    tokens = middle.split(".")
+    candidates = {(stem + "." + ".".join(tokens[:k])).lower() for k in range(1, len(tokens) + 1)}
+    for other in names:
+        base, ext = os.path.splitext(other)
+        if ext.lower() in _VIDEO_EXTENSIONS and other != own_name and base.lower() in candidates:
+            return True
+    return False
+
+
+def _is_sidecar(rest: str, stem: str, own_name: str, names: list[str]) -> bool:
+    """`rest` = what follows the video's stem in some file name of the folder."""
+    if _POSTER_SUFFIX_RE.fullmatch(rest) or rest.lower() == ".srt":
+        return True
+    if not (rest.startswith(".") and rest.lower().endswith(".srt")):
+        return False
+    middle = rest[1:-4]
+    return _subtitle_middle_ok(middle) and not _claimed_by_another_video(stem, middle, own_name, names)
 
 
 def sidecar_suffixes(video_path: str) -> list[str]:
@@ -34,7 +71,7 @@ def sidecar_suffixes(video_path: str) -> list[str]:
         return []
     found = []
     for other in names:
-        if other.startswith(stem) and _SUFFIX_RE.fullmatch(other[len(stem):]) and other != name:
+        if other.startswith(stem) and other != name and _is_sidecar(other[len(stem):], stem, name, names):
             if os.path.isfile(os.path.join(folder, other)):
                 found.append(other[len(stem):])
     return sorted(found)
@@ -74,7 +111,7 @@ def with_sidecars(planned: list[PlannedMove]) -> list[PlannedMove]:
     return out
 
 
-_POSTER_RE = re.compile(r"-poster\.(?:jpe?g|png)", re.IGNORECASE)
+_POSTER_RE = _POSTER_SUFFIX_RE
 
 
 def poster_sidecars(video_path: str) -> list[str]:

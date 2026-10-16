@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-16#08 -- Renaming or moving a video no longer takes another video's subtitle
+
+From the 2026-10-16 independent code review (data safety).
+- Fixed: renaming or moving `Movie.mkv` also renamed or moved `Movie.Extended.srt`, the subtitle of `Movie.Extended.mkv` (any word between the name and `.srt` was taken for a language). A subtitle now belongs to a video only as `<name>.srt` or `<name>.<language>[.forced/.sdh/.default...].srt` with a real language (en, eng, English, pt-BR...), and never when another video in the folder has the subtitle's name as its own (`Movie.en.srt` next to `Movie.en.mkv`). The same rule serves Rename, Move into Folders, the Redact rename and move steps and the command line, and now matches what the subtitle import reads.
+- Tests: tests/test_sidecar_belonging.py.
+
 ## 2026-10-16#07 -- A read-only video is refused clearly and leaves no temp copy behind
 
 From the 2026-10-16 independent code review (data safety).
