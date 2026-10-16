@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-10-16#10 -- Progress boxes appear in time and block the window; Cancel keeps the box up
+
+From the 2026-10-16 independent code review (shared progress dialogs and threading); the fixes are in redactor_common 2026-10-16#07.
+- Fixed: **the progress box now appears after about a third of a second** (it used to take about 4 seconds), and **the window cannot be clicked, typed in or used from a menu while a slow lookup, scan or save is running**, not even before the box shows (before, a second click could start a second, nested run). The window greys out only when the box actually appears, so quick actions do not flash. After the run the window, its keyboard focus and the cursor come back as they were, also after an error.
+- Fixed: **Cancel on a counted progress box no longer hides it while the work is still running**: it stays up, reading "Cancelling...", until the work has really stopped.
+- Fixed: small leaks: every progress box, filter menu and finished Create Notes page was left behind (hidden) on the window until it was closed.
+- Fixed: subtitle translation: Cancel keeps the progress box up until the engine has really stopped.
+- Fixed: Create Notes (shared review page): a note rebuilt after a candidate pick lands on the row it was started for, not on a row selected meanwhile; the "Only uncertain or not found" filter keeps a current row.
+- Tests: tests/test_busy_blocking.py (Cancel on the subtitle translation, the lookup helpers keep their previous enabled state).
+
 ## 2026-10-16#09 -- Remux, transcode and repair can no longer delete or overwrite a file of yours
 
 From the 2026-10-16 independent code review (data safety).
