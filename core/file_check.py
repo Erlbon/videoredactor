@@ -52,6 +52,7 @@ from redactor_common.core.trash import TrashError, move_to_trash
 
 from core.external_tools import MKVTOOLNIX, is_tool_available
 from core.ffmpeg_backend import REMUX_TIMEOUT_SECONDS, _run
+from core.file_access import remove_scratch, unique_temp_path
 
 DAMAGED = "damaged"      # the content itself is incomplete or unreadable
 REPAIRABLE = "repairable"  # fixed by a lossless remux
@@ -396,9 +397,11 @@ def restore_app_metadata(original: str, repaired: str) -> str:
 
 
 def repair_path(path: str) -> str:
-    """Where the repaired copy is written before it replaces the original."""
-    p = Path(path)
-    return str(p.with_name(f"{p.stem}.repairing{p.suffix}"))
+    """Where the repaired copy is written before it replaces the original: a hidden random name in the family's temp
+    convention (".<stem>.redact-<8 hex><ext>"), never a name a user's own file could have (it used to be
+    "<stem>.repairing<ext>", which refused to repair when such a file existed and was deleted by a cleanup when it
+    did not exist yet at check time). Leftovers of the old name are still recognised by redactor_common's temp_names."""
+    return unique_temp_path(path)
 
 
 @dataclass
@@ -440,7 +443,7 @@ def build_repaired_copy(
         extra += ["-t", f"{cut:.3f}"]
 
     def remux(maps: list[str]) -> Optional[str]:
-        done = run(["ffmpeg", "-v", "error", "-y", "-i", path, *maps, "-c", "copy", "-map_metadata", "0",
+        done = run(["ffmpeg", "-v", "error", "-n", "-i", path, *maps, "-c", "copy", "-map_metadata", "0",
                     *extra, target], timeout=REMUX_TIMEOUT_SECONDS)
         if done is None:
             return "ffmpeg isn't available (or stopped responding)"
@@ -462,7 +465,7 @@ def build_repaired_copy(
         problem = None
         for maps in attempts:
             if os.path.exists(target):
-                os.remove(target)
+                remove_scratch(target)  # the failed attempt before: ours (the target did not exist when we started)
             problem = remux(maps)
             if not problem:
                 break
@@ -485,7 +488,7 @@ def build_repaired_copy(
             )
     except BaseException:
         if os.path.exists(target):
-            os.remove(target)
+            remove_scratch(target)
         raise
     return RepairOutcome(check=after, note=note)
 
@@ -510,7 +513,7 @@ def repair(
             raise RepairError(str(exc)) from exc
     except BaseException:
         if os.path.exists(target):
-            os.remove(target)
+            remove_scratch(target)
         raise
     try:
         os.replace(target, path)

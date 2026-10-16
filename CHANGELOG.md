@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-16#09 -- Remux, transcode and repair can no longer delete or overwrite a file of yours
+
+From the 2026-10-16 independent code review (data safety).
+- Fixed: a remux, transcode or repair wrote to `<name>.partial.<ext>` / `<name>.repairing.<ext>` and removed or overwrote whatever it found there; a real file of yours called `Movie.partial.mp4` or `Movie.Partial.mp4` (Windows ignores the case) next to `Movie.mkv` was destroyed by a remux, and a file called `Movie.repairing.mp4` made the repair refuse. The temp file is now a hidden file with a random name in the Redactor family's convention (`.Movie.redact-1a2b3c4d.mp4`), ffmpeg is told never to overwrite (`-n`), and only files the run itself created are ever removed. Leftovers under the old names are still recognised and kept out of the file list.
+- Tests: tests/test_temp_name_safety.py (real ffmpeg: remux to MP4 and MKV, transcode and repair with real files named like the old temp names next to them).
+- Unchanged on purpose: the rules conversion (`.redact-part`) already refused to start when its temp name existed.
+
 ## 2026-10-16#08 -- Renaming or moving a video no longer takes another video's subtitle
 
 From the 2026-10-16 independent code review (data safety).

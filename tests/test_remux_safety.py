@@ -106,7 +106,7 @@ def test_cancel_removes_the_partial_file(fn, tmp_path):
     out = tmp_path / "x.mp4"
     cancel = threading.Event()
     cancel.set()
-    with mock.patch("core.ffmpeg_backend.subprocess.Popen", side_effect=lambda *a, **k: _Slow(fb.partial_path(str(out)))):
+    with mock.patch("core.ffmpeg_backend.subprocess.Popen", side_effect=lambda args, **k: _Slow(args[-1])):
         ok, message = fn("in.mkv", str(out), cancel_event=cancel)
     assert (ok, message) == (False, "Cancelled")
     assert list(tmp_path.iterdir()) == []
@@ -114,7 +114,7 @@ def test_cancel_removes_the_partial_file(fn, tmp_path):
 
 def test_hung_remux_is_killed_after_the_timeout_and_leaves_nothing(tmp_path):
     out = tmp_path / "x.mp4"
-    with mock.patch("core.ffmpeg_backend.subprocess.Popen", side_effect=lambda *a, **k: _Slow(fb.partial_path(str(out)))),             mock.patch.object(fb, "REMUX_TIMEOUT_SECONDS", 0.5):
+    with mock.patch("core.ffmpeg_backend.subprocess.Popen", side_effect=lambda args, **k: _Slow(args[-1])),             mock.patch.object(fb, "REMUX_TIMEOUT_SECONDS", 0.5):
         ok, message = fb.remux_to_mp4("in.mkv", str(out))
     assert ok is False and "ffmpeg" in message and list(tmp_path.iterdir()) == []
 
@@ -136,7 +136,10 @@ def test_ffmpeg_writes_to_a_temp_name_and_renames_on_success(tmp_path):
 
     with mock.patch("core.ffmpeg_backend.subprocess.Popen", side_effect=fake_popen):
         ok, _ = fb.remux_to_mp4("in.mkv", str(out))
-    assert ok and seen == [str(tmp_path / "x.partial.mp4")]
+    from redactor_common.core.temp_names import is_app_temp_name
+
+    assert ok and len(seen) == 1 and os.path.dirname(seen[0]) == str(tmp_path)
+    assert is_app_temp_name(os.path.basename(seen[0])) and seen[0] != str(out)  # a hidden family temp name, not "x.partial.mp4"
     assert out.read_bytes() == b"done" and [p.name for p in tmp_path.iterdir()] == ["x.mp4"]
 
 

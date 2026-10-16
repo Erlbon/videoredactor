@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Optional
 
 from core.external_tools import get_executable_path
+from core.file_access import remove_scratch, unique_temp_path
 from redactor_common.core.os_utils import rename_no_clobber
 from redactor_common.core.subprocess_utils import popen_tool, run_tool
 
@@ -130,19 +131,19 @@ def extract_thumbnail(
 
 def partial_path(output_path: str) -> str:
     """The temporary name ffmpeg writes to before the finished file takes
-    `output_path`'s name ("a.mp4" -> "a.partial.mp4"; the real extension
-    stays last so ffmpeg still picks the MP4 muxer). A crash, failure or
+    `output_path`'s name ("a.mp4" -> ".a.redact-1a2b3c4d.mp4": hidden, random, the family's temp convention; the real
+    extension stays last so ffmpeg still picks the muxer). A crash, failure or
     cancel then never leaves a half-written file under the final name,
-    where it would be mistaken for a finished one ("already exists")."""
-    p = Path(output_path)
-    return str(p.with_name(f"{p.stem}.partial{p.suffix}"))
+    where it would be mistaken for a finished one ("already exists"), and the
+    name can never be one of the user's own files (it used to be "a.partial.mp4",
+    which a remux then deleted and overwrote if it was a real file). A leftover of
+    the old names is still recognised by redactor_common's temp_names."""
+    return unique_temp_path(output_path)
 
 
 def _remove_quietly(path: str) -> None:
-    try:
-        os.remove(path)
-    except OSError:
-        pass
+    """Removes a file THIS module's run created (a temp name from partial_path); never called on any other path."""
+    remove_scratch(path)
 
 
 def _run_ffmpeg(
@@ -285,10 +286,11 @@ def remux_to_mp4(
     temp = partial_path(output_path)
     message = ""
     try:
-        for maps in _REMUX_ATTEMPTS:
-            _remove_quietly(temp)
+        for attempt, maps in enumerate(_REMUX_ATTEMPTS):
+            if attempt:
+                _remove_quietly(temp)  # the half-written file of the attempt before: ours, from this run
             code, stderr = _run_ffmpeg(
-                ["ffmpeg", "-y", "-i", input_path, *maps, "-c", "copy", temp],
+                ["ffmpeg", "-n", "-i", input_path, *maps, "-c", "copy", temp],
                 cancel_event=cancel_event, timeout=REMUX_TIMEOUT_SECONDS,
             )
             if code is None:
@@ -318,7 +320,7 @@ def remux_to_mkv(
     temp = partial_path(output_path)
     try:
         code, stderr = _run_ffmpeg(
-            ["ffmpeg", "-y", "-fflags", "+genpts", "-i", input_path,
+            ["ffmpeg", "-n", "-fflags", "+genpts", "-i", input_path,
              "-map", "0", "-c", "copy", temp],
             cancel_event=cancel_event, timeout=REMUX_TIMEOUT_SECONDS,
         )
@@ -413,7 +415,7 @@ def transcode_to_mp4(
     """
     temp = partial_path(output_path)
     args = [
-        "ffmpeg", "-y", "-i", input_path,
+        "ffmpeg", "-n", "-i", input_path,
         "-c:v", "libx264", "-crf", str(crf),
         "-c:a", "aac", "-b:a", audio_bitrate,
     ]

@@ -70,3 +70,20 @@ def remove_scratch(path: str) -> bool:
         except OSError:
             return False
     return False
+
+
+def unique_temp_path(path: str) -> str:
+    """A hidden, random temp name beside `path` in the family's convention (redactor_common.core.temp_names:
+    ".<stem>.redact-<8 hex><ext>"; the real extension stays last so ffmpeg still picks the muxer). Never an existing
+    path, and never a name a user's own file would have, unlike the old "<stem>.partial<ext>" / "<stem>.repairing<ext>",
+    which on a case-insensitive disk could be a real "Movie.Partial.mp4" that then got deleted or overwritten. The file
+    is not created: ffmpeg is run with -n (never overwrite) onto it, so a clash fails instead of destroying anything."""
+    import uuid  # noqa: PLC0415
+
+    folder, name = os.path.split(path)
+    stem, ext = os.path.splitext(name)
+    lead = "" if stem.startswith(".") else "."
+    while True:
+        candidate = os.path.join(folder, f"{lead}{stem}.redact-{uuid.uuid4().hex[:8]}{ext}")
+        if not os.path.lexists(candidate):
+            return candidate
