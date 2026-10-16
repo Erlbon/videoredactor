@@ -146,8 +146,10 @@ class Tmdb:
             return None
         credits = data.get("credits") or {}
         crew = [c for c in credits.get("crew") or [] if isinstance(c, dict)]
-        cast = [CastMember(str(c.get("name") or ""), str(c.get("character") or ""))
-                for c in (credits.get("cast") or [])[:CAST_LIMIT] if isinstance(c, dict) and c.get("name")]
+        # in BILLING order (TMDB's own `order`), the lead first: the list comes back in no promised order
+        billed = sorted((c for c in credits.get("cast") or [] if isinstance(c, dict) and c.get("name")),
+                        key=lambda c: c.get("order") if isinstance(c.get("order"), int) else 10_000)
+        cast = [CastMember(str(c.get("name")), str(c.get("character") or "")) for c in billed[:CAST_LIMIT]]
         is_tv = kind == "tv"
         runtimes = data.get("episode_run_time") or []
         details = TitleDetails(

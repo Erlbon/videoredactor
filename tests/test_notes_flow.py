@@ -31,7 +31,7 @@ def test_a_series_that_fits_its_only_exact_tmdb_match_is_confident_and_written_a
     assert meta["genres"] == ["drama", "crime"] and meta["generator"].startswith("videoredactor ")
     assert "https://www.themoviedb.org/tv/1396" in meta["links"] and "https://en.wikipedia.org/wiki/Breaking_Bad" in meta["links"]
     assert "It ran for five seasons." in body and "**Network:** AMC" in body and "- Bryan Cranston as Walter White" in body
-    assert "- Season 1 (7 episodes)" in body and "- Specials (9 episodes)" in body
+    assert "- Season 1 (7 episodes)" in body and "Specials" not in body  # the specials are no season of the show
     assert "is not endorsed, certified, or otherwise approved by TMDB" in body and "CC BY-SA" in body and "api_key" not in p.note_text
     result = write_proposal(p)
     assert result.ok and (show / "series.md").read_text(encoding="utf-8") == p.note_text.replace("\r\n", "\n")
@@ -324,3 +324,14 @@ def test_a_wrong_air_date_rules_a_series_out(tmp_path):
     fetchers.tmdb.routes.insert(0, (r"/tv/4613/season/1\?", {"episodes": [{"episode_number": n, "air_date": "1990-01-01"} for n in range(1, 11)]}))
     [q] = build_proposals(scan([tmp_path]).targets, fetchers)
     assert q.confidence == Confidence.UNCERTAIN
+
+
+def test_the_cast_is_in_billing_order_the_lead_first_whatever_order_tmdb_sends_it(tmp_path):
+    make_series(tmp_path)
+    shuffled = dict(BREAKING_BAD, credits={"cast": [
+        {"name": "Zed Last", "character": "Extra", "order": 9}, {"name": "Aaron Second", "character": "B", "order": 1},
+        {"name": "Mary Lead", "character": "A", "order": 0}, {"name": "No Order", "character": "C"}], "crew": []})
+    fetchers = fake_fetchers(tmdb_extra=[(r"/tv/1396\?", shuffled)])
+    [p] = build_proposals(scan([tmp_path]).targets, fetchers)
+    cast = p.note_text.split("## Cast")[1].split("##")[0].strip().splitlines()
+    assert cast == ["- Mary Lead as A", "- Aaron Second as B", "- Zed Last as Extra", "- No Order as C"]

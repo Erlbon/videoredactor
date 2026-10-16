@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-16#03 -- Create Notes: the cast in billing order, and no Specials in the seasons list
+
+Found on the first live run (Band of Brothers).
+- Fixed: the cast came out in the order TMDB happened to send it (alphabetical by surname); it is now in billing order, the lead first (TMDB's own `order`).
+- Changed: the Seasons list of a series note no longer lists the Specials (season 0): they are not a season of the show, and the folder often has none.
+- Tests: tests/test_notes_flow.py (billing order; no Specials).
+
 ## 2026-10-16#02 -- Create Notes tells two series with one name apart by their air dates and episode counts
 
 Found on a real library: a folder called "Band of Brothers" matched two TMDB series (the 2001 HBO miniseries and a 2008 Korean music show) and was left as uncertain.

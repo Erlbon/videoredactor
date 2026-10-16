@@ -83,7 +83,7 @@ def render_series_note(
     ]
     seasons = "\n".join(
         f"- {'Specials' if s.number == 0 else 'Season ' + str(s.number)} ({_plural(s.episodes, 'episode')})"
-        for s in details.seasons if s.episodes > 0)
+        for s in details.seasons if s.episodes > 0 and s.number > 0)  # the specials are not a season of the show
     front = NoteFrontMatter(title=details.name, years=years_text(details), genres=[g.lower() for g in details.genres],
                             links=list(links), generator=generator_text(), note_format=CURRENT_NOTE_FORMAT)
     body = join_blocks(
