@@ -34,6 +34,19 @@ into files one at a time.
   clearly flagged as sync-not-guaranteed. For music videos the same
   dialog can fetch time-synced lyrics from LRCLIB and write them as an
   .srt (with an offset control).
+- **ThePornDB and StashDB lookups** (Metadata > Look Up > ThePornDB… / StashDB…) — optional scene
+  metadata sources for files you own: title, date, studio (and its parent), performers as credited,
+  tags, description, director and the cover. The dialog first asks the service for the exact file by its
+  fingerprint (the OSHASH, the same 64-bit hash as OpenSubtitles; the MD5 only if Tools > Preferences >
+  Look Up allows it, as it reads the whole file) and highlights a **file match**; anything found by title is
+  flagged "match by title: check it". You pick one result, then the usual per-field review shows what
+  would change before anything is written. A cover is saved (as `<name>-poster.jpg`) only when you tick
+  "Save the cover as a sidecar". Both need your own key (Tools > API Keys, with a "Check the key"
+  button; the StashDB address is a setting, so other stash-box servers work). **Privacy:** only a file hash
+  and/or the search text you see leave this computer, together with your key to that service; no file name,
+  path or other tag, and no image is downloaded unless you ask. Data courtesy of
+  [ThePornDB](https://theporndb.net) and [StashDB](https://stashdb.org); their data is user-contributed,
+  check a match before relying on it. Not included yet: perceptual-hash (PHASH) matching.
 - **Offline IMDb database** (Tools > IMDb Database…) — builds a small
   local database from IMDb's free datasets, which you download
   yourself (datasets.imdbws.com: `title.basics`, and optionally
@@ -146,12 +159,13 @@ videoredactor check   PATH...  [--repair] [--stamp] [--trash-dir FOLDER] [-n]
 videoredactor redact  [PATH...] [--recipe FILE] [--enable STEP] [--disable STEP] [--threshold N]
                                 [--trash-dir FOLDER] [--list-steps]
 videoredactor notes   PATH...  [--kind KIND] [--write] [--include-uncertain] [--update] [--no-wikipedia] [-n]
+videoredactor lookup-check  theporndb|stashdb  [--endpoint URL]
 ```
 
 The command line uses the same code as the window, so the results are the same. It reads the same settings file
 (`videoredactor_settings.ini` next to the exe: the saved Redact recipe, the library root, the offline IMDb
 database) and the same secret store for the API keys (or the `TMDB_API_KEY`, `TVDB_API_KEY` and
-`OPENSUBTITLES_API_KEY` environment variables). FFmpeg is needed for most things and MKVToolNix for MKV files,
+`OPENSUBTITLES_API_KEY` environment variables; `THEPORNDB_API_KEY` and `STASHDB_API_KEY` for the two scene sources). FFmpeg is needed for most things and MKVToolNix for MKV files,
 exactly as in the window. Not every window function is available from the command line; the commands above are
 what is.
 
@@ -302,7 +316,9 @@ Guesses below the confidence threshold are listed under "needs review" and not a
 | `--trash-dir FOLDER` | Move originals into this folder (created if needed) instead of the Recycle Bin, for a machine or a task that has none. |
 | `--list-steps` | Show the steps and whether the recipe has each on, then stop (no `PATH` needed). |
 
-Steps: `check_repair`, `filename_tags`, `path_tags`, `lookup`, `subtitles`, `translate_subtitles`, `remux_mkv_to_mp4`, `convert_library`,
+Steps: `check_repair`, `filename_tags`, `path_tags`, `lookup`, `scene_lookup` (off by default: asks ThePornDB and
+StashDB about the file's own fingerprint and only ever produces a "needs review" suggestion, whatever the
+threshold), `subtitles`, `translate_subtitles`, `remux_mkv_to_mp4`, `convert_library`,
 `rename`, `move_into_folders`. Without `--recipe` the recipe saved in the app is used (the defaults if none was saved). A
 repair is only automatic when a lossless remux fully fixes the file; a damaged file is reported and left alone.
 Exit code 1 if any file failed; files that need review are not failures. Rename and Move run last, after the
@@ -335,6 +351,19 @@ overwritten. Uncertain and unmatched folders are listed with the reasons and the
 
 Exit code 1 if a lookup failed (no key, no network); uncertain folders are not failures.
 
+### lookup-check
+
+`videoredactor lookup-check theporndb|stashdb [--endpoint URL]`
+
+Makes one small authenticated request to the service with the saved key (or `THEPORNDB_API_KEY` /
+`STASHDB_API_KEY`) and prints `OK: ...` or `FAILED: <the exact reason>` (no key, HTTP 401, server unreachable).
+Exit code 0 when the key was accepted, 1 otherwise. Nothing about any file is sent. `--endpoint` tries another
+stash-box server (StashDB only) for this run; the saved address is under Tools > API Keys.
+
+| Option | Meaning |
+| --- | --- |
+| `--endpoint URL` | StashDB only: check another stash-box server's GraphQL address for this run. |
+
 ### JSON output
 
 `--json` prints one document: `{"results": [...], <summary fields>, "warnings": [...], "errors": [...]}`. It is ASCII-only (a non-ASCII character in a path is a `\uXXXX` escape, which any JSON reader decodes). If a command fails or is interrupted after it started, the document is still printed, with what was done so far and an `error` entry, so a script reading `--output FILE` never finds an empty or half-written file.
@@ -346,6 +375,7 @@ Exit code 1 if a lookup failed (no key, no network); uncertain folders are not f
 | `rename`, `move` | `path`, `status`, `new_path`, `message` | `files`, `failed`, `dry_run`, and `pattern` or `root` |
 | `check` | `path`, `status`, `problem`, `findings` (code, severity, message), `declared_seconds`, `readable_seconds`, `repaired`, `stamped`, `message` | `files`, `problems`, `repair`, `stamp`, `dry_run` |
 | `redact` | `file`, `path`, `status`, `applied`, `needs_review` (step, value, confidence, reason), `failures`, `notes`, `skipped`, `not_saved` | `files`, `failed`, `needs_review`, `cancelled`, `confidence_threshold`, `run_notes` |
+| `lookup-check` | `service`, `ok`, `message` | `service`, `ok` |
 | `redact --list-steps` | `step`, `label`, `enabled` | `confidence_threshold` |
 
 ### Exit codes

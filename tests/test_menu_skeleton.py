@@ -54,7 +54,7 @@ def test_other_menus_hold_what_the_spec_says(window):
     look_up = next(a for a in menus["Metadata"].actions() if a.menu()).menu()
     assert _labels(look_up) == [
         "TMDB (Movie)…", "TMDB (TV Show)…", "TheTVDB (TV Show)…", "IMDb (Local Database)…",
-        "Subtitles (OpenSubtitles, Lyrics)…",
+        "ThePornDB…", "StashDB…", "Subtitles (OpenSubtitles, Lyrics)…",
     ]
     assert _labels(menus["Media"]) == [
         "Play", "Remux to MP4…", "Convert to MP4 (H.264)…", "Convert to MP4/MKV (Rules)…", "Check Files…", "Find Duplicates…",

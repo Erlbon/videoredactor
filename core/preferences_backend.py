@@ -16,6 +16,7 @@ way in, it never moves them:
   duplicate_threshold  [duplicates] threshold
   history_enabled      [history] enabled (Tools > History, opt-in; core/history.py)
   notes_cache / notes_wikipedia   [notes] cache / wikipedia (Tools > Create Notes; core/notes_settings.py)
+  scene_md5            [scene_lookup] md5 (ThePornDB / StashDB lookups; core/scene_lookup.py)
 
 There is no default-language setting in this app (a video's language is read
 from its own tracks), so the shared language section is not offered.
@@ -37,7 +38,7 @@ from redactor_common.core.preferences import (
     filenames_section,
 )
 
-from core import config, history, notes_settings
+from core import config, history, notes_settings, scene_lookup
 from core.transcode_settings import DEFAULT_AUDIO_BITRATE, DEFAULT_CRF, DEFAULT_THREADS
 from core.video_duplicates import HAMMING_THRESHOLD
 
@@ -48,6 +49,7 @@ KEY_DUPLICATE_THRESHOLD = "duplicate_threshold"
 KEY_HISTORY_ENABLED = "history_enabled"
 KEY_NOTES_CACHE = "notes_cache"
 KEY_NOTES_WIKIPEDIA = "notes_wikipedia"
+KEY_SCENE_MD5 = "scene_md5"
 KEY_TRANSLATION_ENGINE = "translation_engine"
 KEY_TRANSLATION_URL = "translation_url"
 KEY_TRANSLATION_COMMAND = "translation_command"
@@ -66,6 +68,7 @@ INI_LOCATIONS: dict[str, tuple[str, str]] = {
     KEY_HISTORY_ENABLED: (history.SETTINGS_SECTION, history.SETTINGS_KEY),
     KEY_NOTES_CACHE: (notes_settings.SECTION, "cache"),
     KEY_NOTES_WIKIPEDIA: (notes_settings.SECTION, "wikipedia"),
+    KEY_SCENE_MD5: (scene_lookup.SECTION, "md5"),
     KEY_TRANSLATION_ENGINE: ("translation", "engine"),
     KEY_TRANSLATION_URL: ("translation", "url"),
     KEY_TRANSLATION_COMMAND: ("tools", "argos-translate"),
@@ -113,6 +116,24 @@ def notes_section(actions: tuple[PrefAction, ...] = ()) -> PrefSection:
                       "Off: the notes are made from TMDB alone (fewer requests)."),
     ), f"Tools > Create Notes drafts series.md / about.md for the Pluteus media server from TMDB (your own key under "
        f"Tools > API Keys) and Wikipedia. The cache file is {notes_settings.cache_path()}.", actions=actions)
+
+
+SCENE_PRIVACY_TEXT = (
+    "Metadata > Look Up > ThePornDB and StashDB send ONLY a file's hash (the OSHASH, which reads 128 KB of the file) "
+    "and/or the search text shown in the dialog, together with your own key to that service. No file name, path or "
+    "other tag leaves this computer, and no image is downloaded unless you apply a result and tick Save the cover as "
+    "a sidecar. The services see your key and your IP address. The StashDB address and the keys are under "
+    "Tools > API Keys."
+)
+
+
+def scene_lookup_section() -> PrefSection:
+    """Preferences > Look Up: the one option of the ThePornDB / StashDB lookups (and what leaves the machine)."""
+    return PrefSection("scene_lookup", "Look Up (ThePornDB, StashDB)", (
+        PrefSpec(KEY_SCENE_MD5, "Also look files up by their MD5 (StashDB; reads the whole file)", "bool", False,
+                 help="Off by default: the MD5 needs every byte of the file (minutes for a large video, with a progress "
+                      "window and Cancel). The OSHASH, which reads only 128 KB, is always used."),
+    ), SCENE_PRIVACY_TEXT)
 
 
 def translation_section(actions: tuple[PrefAction, ...] = ()) -> PrefSection:
@@ -169,6 +190,7 @@ def build_sections(history_actions: tuple[PrefAction, ...] = (),
         ), "Used by Media > Find Duplicates as its starting value."),
         translation_section(translation_actions),
         notes_section(notes_actions),
+        scene_lookup_section(),
         history_section(history_actions),
     ]
 

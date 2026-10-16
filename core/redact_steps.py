@@ -67,7 +67,8 @@ from redactor_common.core.local_db import year_gap
 from redactor_common.core.rename_pattern import render_filename, unique_path, zero_pad_numeric_value
 from redactor_common.core.trash import move_to_trash
 
-from core import imdb_import, imdb_local, lyrics_subtitles, opensubtitles_client, tmdb_client, tvdb_client
+from core import imdb_import, imdb_local, lyrics_subtitles, opensubtitles_client, scene_lookup, stashdb_client
+from core import theporndb_client, tmdb_client, tvdb_client
 from core import subtitle_translation, translation_settings
 from core import conversion_plan, conversion_run, history, library_safety
 from core.config import get_setting, set_setting
@@ -102,6 +103,9 @@ LOOKUP_EXACT = 0.95
 LOOKUP_TITLE_ONLY = 0.8
 LOOKUP_AMBIGUOUS = 0.6
 LOOKUP_CLOSEST = 0.4
+# ThePornDB / StashDB: a file's fingerprint matched. Shown with this confidence, but the step's suggestion is
+# review_only: whatever the recipe's threshold, it is never applied by itself.
+SCENE_FILE_CONFIDENCE = 0.95
 # OpenSubtitles: a hash match syncs by construction; a text match may not.
 SUBTITLE_HASH_CONFIDENCE = 0.95
 SUBTITLE_TEXT_CONFIDENCE = 0.6
@@ -1097,6 +1101,82 @@ class LookupStep(VideoStep):
         return [f"from {fill.source} '{fill.label}'"] + lines
 
 
+# --- step 3b: ThePornDB / StashDB, file match only -------------------------------------------------------------------
+
+
+class SceneLookupStep(VideoStep):
+    key = "scene_lookup"
+    label = "Fill from ThePornDB/StashDB (file match only)"
+    description = (
+        "Asks ThePornDB and StashDB (the ones you have a key for, Tools > API Keys) whether they know THIS file, by "
+        "its fingerprint (the OSHASH: only that hash leaves the computer, never the name; the MD5 only when "
+        "Preferences > Look Up allows it). A file match fills the fields that are still EMPTY (title, date, "
+        "studio, performers, tags, description) as a SUGGESTION: it always goes to Needs review, whatever the "
+        "confidence threshold is, and nothing is written until you have looked at it (Metadata > Look Up shows the "
+        "same record with a per-field review). A title match is never used here. Off by default."
+    )
+    default_enabled = False
+    options = (
+        OptionSpec("theporndb", "Ask ThePornDB", "bool", True),
+        OptionSpec("stashdb", "Ask StashDB", "bool", True),
+    )
+
+    def execute(self, ctx: VideoCtx) -> StepResult:
+        opts = self.options_for(ctx)
+        clients = [(name, client) for name, client, wanted in (
+            ("ThePornDB", theporndb_client, opts["theporndb"]), ("StashDB", stashdb_client, opts["stashdb"]),
+        ) if wanted and client.get_api_key()]
+        if not clients:
+            return StepResult.nothing(note="no ThePornDB or StashDB key is set (Tools > API Keys)")
+        if not any(_is_empty(ctx, f) for f in scene_lookup.FILL_FIELDS):
+            return StepResult.nothing()
+        try:
+            hashes = ctx.bg(scene_lookup.file_hashes, ctx.original, scene_lookup.md5_enabled(), ctx.env.cancel_event)
+        except OSError as exc:
+            return StepResult.nothing(note=f"the file could not be hashed ({exc})")
+        if not hashes.oshash:
+            return StepResult.nothing(note="the file is under 128 KB, too small for a fingerprint match")
+        notes: list[str] = []
+        for name, client in clients:
+            try:
+                if client is stashdb_client:
+                    found = ctx.bg(client.search_by_hash, hashes.oshash, hashes.md5)
+                else:
+                    found = ctx.bg(client.search_by_hash, hashes.oshash)
+            except scene_lookup.SceneLookupError as exc:
+                notes.append(f"{name} unavailable: {exc}")
+                continue
+            found = [r for r in found if r.is_file_match]
+            if not found:
+                notes.append(f"{name} has no record with this file's fingerprint")
+                continue
+            if len(found) > 1:
+                notes.append(f"{name}: {len(found)} records share this fingerprint; choose one in Metadata > Look Up")
+                continue
+            result = found[0]
+            fields = {k: v for k, v in scene_lookup.scene_fields(result, ctx.work.metadata.comment).items()
+                      if _is_empty(ctx, k)}
+            if not fields and ctx.work.metadata.content_type is not ContentType.UNSET:
+                return StepResult.nothing(note=f"{name} matched the file, but every field it could fill is already set")
+            fill = LookupFill(name, result.title or "(untitled)", fields, scene_lookup.CONTENT_TYPE, result.year)
+            suggestion = StepResult.suggestion(
+                fill, SCENE_FILE_CONFIDENCE, f"file match: {name} has this file's fingerprint (id {result.external_id})",
+                review_only=True,
+            )
+            return _with_note(suggestion, "; ".join(notes))
+        return StepResult.nothing(note="; ".join(notes))
+
+    def apply_suggestion(self, ctx: VideoCtx, result: StepResult) -> list[str]:
+        fill: LookupFill = result.value
+        lines = []
+        if ctx.work.metadata.content_type is ContentType.UNSET:
+            ctx.work.metadata.content_type = fill.content_type
+            ctx.work.dirty = True
+            lines.append(f"content_type = {fill.content_type.value!r}")
+        lines += _set_fields(ctx, fill.fields)
+        return [f"from {fill.source} '{fill.label}'"] + lines
+
+
 # --- step 4: subtitles ----------------------------------------------------------------
 
 
@@ -1643,6 +1723,7 @@ def build_catalogue(
         FilenameTagsStep(env=env, sample=sample),
         PathTagsStep(env=env, sample=sample),
         LookupStep(),
+        SceneLookupStep(),
         SubtitlesStep(),
         SubtitleTranslateStep(),
         RemuxStep(),

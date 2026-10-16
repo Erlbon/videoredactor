@@ -491,6 +491,8 @@ class MainWindow(QMainWindow):
             entry("tmdb_tv", "TMDB (&TV Show)…", lambda: self._on_import_tmdb("tv"), "Ctrl+T"),
             entry("tvdb", "TheTVDB (T&V Show)…", self._on_import_tvdb, "Ctrl+Shift+T"),
             entry("imdb_local", "IMDb (&Local Database)…", self._on_import_imdb_local, None),
+            entry("theporndb", "ThePornDB…", lambda: self._on_lookup_scene("theporndb"), None),
+            entry("stashdb", "StashDB…", lambda: self._on_lookup_scene("stashdb"), None),
             # Was Ctrl+Shift+O, which is Open Folder in the rest of the family.
             entry("subtitles", "&Subtitles (OpenSubtitles, Lyrics)…", self._on_import_subtitles, "Ctrl+Shift+L"),
         ]
@@ -2322,6 +2324,13 @@ class MainWindow(QMainWindow):
         if any(selected_vf is vf for selected_vf in self._selected_video_files()):
             self._on_selection_changed()
         self.status_bar.showMessage(status_msg)
+
+    def _on_lookup_scene(self, key: str) -> None:
+        """Metadata > Look Up > ThePornDB... / StashDB...: the search dialog per selected file (the file's hash is
+        asked first), one per-field overwrite review, then the write. See gui/scene_lookup_flow.py."""
+        from gui.scene_lookup_flow import run_scene_lookup
+
+        run_scene_lookup(self, key)
 
     def _save_sidecar(self, write, choice: dict) -> tuple[str, object]:
         """Runs `write(overwrite)` (VideoFile.save_poster_sidecar /

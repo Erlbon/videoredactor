@@ -72,7 +72,7 @@ def fake_keyring(tmp_path, monkeypatch):
     secret_store.set_fallback_dir(tmp_path / "secrets")
     secret_store.set_allow_unencrypted_fallback(False)
     monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "settings.ini")
-    for var in ("TMDB_API_KEY", "TVDB_API_KEY", "OPENSUBTITLES_API_KEY"):
+    for var in ("TMDB_API_KEY", "TVDB_API_KEY", "OPENSUBTITLES_API_KEY", "THEPORNDB_API_KEY", "STASHDB_API_KEY"):
         monkeypatch.delenv(var, raising=False)
     yield backend
     secret_store.set_backend(None)

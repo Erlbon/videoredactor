@@ -39,6 +39,7 @@ from core.external_tools import KNOWN_EXECUTABLES
 from core.filename_pattern import MAX_PATTERN_HISTORY
 from core.imdb_import import BuildOptions
 from core.redact_steps import recipe_to_setting
+from core.scene_lookup import DEFAULT_STASH_ENDPOINT, normalize_endpoint
 from core.table_settings import sanitize_hidden_fields
 from core.transcode_settings import DEFAULT_AUDIO_BITRATE, DEFAULT_CRF, DEFAULT_THREADS
 from core.version import APP_VERSION
@@ -205,6 +206,22 @@ def _history_codec():
     return read, coerce
 
 
+def _stash_endpoint_codec():
+    """The StashDB address: stored only when it differs from the default (unset = the default). A value that is not an
+    http(s) address with a host is rejected, so an imported file can never point the key somewhere odd."""
+    def read(raw: str) -> str:
+        return raw or DEFAULT_STASH_ENDPOINT
+
+    def coerce(value: Any) -> str:
+        try:
+            normal = normalize_endpoint(_single_line(value))
+        except ValueError as exc:
+            raise ValueError(str(exc)) from None
+        return "" if normal == DEFAULT_STASH_ENDPOINT else normal
+
+    return read, coerce
+
+
 def _bitrate_ok(text: str) -> bool:
     return re.fullmatch(r"\d{1,4}[kKmM]?", text) is not None
 
@@ -270,6 +287,11 @@ SECTIONS: dict[str, tuple[str, bool, list[Key]]] = {
         _key("cache", "notes", "cache", _bool_codec(True)),
         _key("wikipedia", "notes", "wikipedia", _bool_codec(True)),
         _key("kinds", "notes", "kinds", _str_codec()),
+    ]),
+    # The StashDB address and the MD5 option only: the ThePornDB / StashDB KEYS are in the credential store and never here.
+    "scene_lookup": ("ThePornDB / StashDB lookups: the StashDB address and the MD5 option", True, [
+        _key("stashdb_endpoint", "scene_lookup", "stashdb_endpoint", _stash_endpoint_codec()),
+        _key("md5", "scene_lookup", "md5", _bool_codec(False)),
     ]),
     "imdb_options": ("IMDb database build options", True, [
         _key("options", "imdb", "options", _imdb_options_codec()),

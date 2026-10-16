@@ -29,6 +29,8 @@ KEYS = {
                       "OpenSubtitles API Key"),
     "libretranslate": ("libretranslate_api_key", "LIBRETRANSLATE_API_KEY", "libretranslate",
                        "LibreTranslate API Key (optional, for a server that asks for one)"),
+    "theporndb": ("theporndb_api_key", "THEPORNDB_API_KEY", "theporndb", "ThePornDB API Token"),
+    "stashdb": ("stashdb_api_key", "STASHDB_API_KEY", "stashdb", "StashDB API Key"),
 }
 
 # The one non-secret setting here: did the user agree to the UNENCRYPTED
