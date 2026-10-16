@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-16#11 -- Create Notes: the lookup cache no longer keeps an error page as the answer
+
+From the 2026-10-16 independent code review; the fix is in redactor_common 2026-10-16#08.
+- Fixed: **the Create Notes lookup cache no longer keeps an error page for 30 days**: Wikidata reports "try again later" (maxlag, rate limit, read-only) as a normal reply, and a Wi-Fi login or firewall page also arrives as a normal reply; both were stored as the real answer, so a film or series had no Wikipedia article for a month. Only a real, non-empty JSON answer without an error is stored now, and an entry an earlier version stored wrongly is thrown away and asked again when it is next needed.
+- Fixed: the notes preview shows raw HTML in a note as text instead of rendering it, and a Wikipedia link is accepted only from wikipedia.org or its sub-domains.
+- Tests: tests/test_notes_flow.py (a Wikidata error answer is asked again on the next run; a cache entry poisoned by an older version is healed).
+
 ## 2026-10-16#10 -- Progress boxes appear in time and block the window; Cancel keeps the box up
 
 From the 2026-10-16 independent code review (shared progress dialogs and threading); the fixes are in redactor_common 2026-10-16#07.

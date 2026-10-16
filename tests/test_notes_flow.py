@@ -335,3 +335,40 @@ def test_the_cast_is_in_billing_order_the_lead_first_whatever_order_tmdb_sends_i
     [p] = build_proposals(scan([tmp_path]).targets, fetchers)
     cast = p.note_text.split("## Cast")[1].split("##")[0].strip().splitlines()
     assert cast == ["- Mary Lead as A", "- Aaron Second as B", "- Zed Last as Extra", "- No Order as C"]
+
+
+def test_a_wikidata_error_answer_is_not_cached_as_the_real_answer(tmp_path):
+    """Review 2026-10-16 (6): Wikidata reports maxlag / ratelimited as HTTP 200 with an {"error": ...} body; the cache stored it
+    as a good answer for 30 days, so the title had no Wikipedia article for a month. Now the next run asks again."""
+    make_series(tmp_path)
+    cache = ResponseCache(tmp_path / "cache.sqlite")
+    busy = {"error": {"code": "maxlag", "info": "Waiting for a database server: 6 seconds lagged"}}
+    first = fake_fetchers(wiki_extra=[(r"haswbstatement", busy)])
+    [one] = build_proposals(scan([tmp_path]).targets, first, cache=cache)
+    assert "Breaking Bad is an American crime drama" not in one.note_text  # the error answer: no article this time
+    cache.close()
+    second = fake_fetchers()
+    cache2 = ResponseCache(tmp_path / "cache.sqlite")
+    [two] = build_proposals(scan([tmp_path]).targets, second, cache=cache2)
+    assert "Breaking Bad is an American crime drama" in two.note_text and second.wiki.asked(r"haswbstatement")
+    cache2.close()
+
+
+def test_a_poisoned_cache_entry_from_an_older_version_is_healed(tmp_path):
+    import sqlite3
+
+    make_series(tmp_path)
+    path = tmp_path / "cache.sqlite"
+    cache = ResponseCache(path)
+    first = fake_fetchers()
+    build_proposals(scan([tmp_path]).targets, first, cache=cache)
+    cache.close()
+    db = sqlite3.connect(str(path))
+    db.execute("UPDATE cache SET body=? WHERE key LIKE 'wiki|%haswbstatement%'", (b'{"error": {"code": "maxlag"}}',))
+    db.commit()
+    db.close()
+    second = fake_fetchers()
+    cache2 = ResponseCache(path)
+    [two] = build_proposals(scan([tmp_path]).targets, second, cache=cache2)
+    assert "Breaking Bad is an American crime drama" in two.note_text
+    cache2.close()
