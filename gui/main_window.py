@@ -38,12 +38,15 @@ from core.filename_pattern import (
 )
 from core.tmdb_client import (
     get_movie_details, get_tv_show_details, get_tv_episode_details,
-    download_poster, TMDBError,
+    download_poster, TMDBError, MovieCandidate, TVCandidate,
 )
 from core.tvdb_client import get_series_details, get_episode_details, download_image, TVDBError
 from core.release_name_parser import parse_release_name
 from core.redact_steps import _tv_guess, conversion_is_series
 from core.sidecars import with_sidecars
+from core.lookup_sources import imdb_values, tmdb_values, tvdb_values
+from core.source_tags import ref_in, sources_summary
+from gui.source_apply import SourceStage, apply_sources, fetch_prepared_poster
 from core.redact_steps import (
     RedactEnv, VideoCtx, build_catalogue, dry_run_line, finalize_file, load_recipe, make_safe_run,
     original_fate_text, pin_patterns, recipe_is_saved, save_recipe,
@@ -159,20 +162,21 @@ ALWAYS_VISIBLE_COLUMNS = ["filename", "status", "content_type"]
 # table-only, informational. Shown regardless of Content Type filter
 # (unlike Director/Cast/etc, technical info isn't content-type-specific)
 # but still user-hideable via the column context menu like anything else.
-TECHNICAL_COLUMNS = ["path", "duration_seconds", "resolution", "size_bytes", "bitrate"]
+TECHNICAL_COLUMNS = ["path", "duration_seconds", "resolution", "size_bytes", "bitrate", "sources"]
 TECHNICAL_LABELS = {
     "path": "Path",
     "duration_seconds": "Duration",
     "resolution": "Resolution",
     "size_bytes": "Size",
     "bitrate": "Bitrate",
+    "sources": "Sources",  # the source ids kept in the file (read-only; hidden until you show it)
 }
 
 # Header filters (the funnel in a column header): which columns get one. KIND_VALUES = a checklist of the
 # distinct values; KIND_TEXT = a "contains..." box above the checklist. Left out on purpose: Duration, Size and
 # Bitrate (almost every value is distinct, so a checklist would be useless).
 FILTER_COLUMN_KINDS = {
-    "filename": KIND_TEXT, "path": KIND_TEXT, "status": KIND_VALUES, "content_type": KIND_VALUES,
+    "filename": KIND_TEXT, "path": KIND_TEXT, "sources": KIND_TEXT, "status": KIND_VALUES, "content_type": KIND_VALUES,
     "resolution": KIND_VALUES, "language": KIND_VALUES,
     "personal_rating": KIND_VALUES, "season_number": KIND_VALUES, "episode_number": KIND_VALUES,
     **{f: KIND_TEXT for f in (
@@ -571,6 +575,8 @@ class MainWindow(QMainWindow):
                     Separator(),
                     MenuAction("check_files", "&Check Files…", self._on_check_files),
                     MenuAction("find_duplicates", labels.FIND_DUPLICATES, self._on_find_duplicates),
+                    MenuAction("embed_posters", "&Embed Existing Poster Files…", self._on_embed_posters,
+                               tooltip="Move old <name>-poster.jpg files into their videos (checked first, Recycle Bin after)"),
                     Separator(),
                     MenuAction("translate_subtitles", "&Translate Subtitles to English…", self._on_translate_subtitles),
                     MenuAction("compare_subtitles", "Co&mpare Subtitles…", self._on_compare_subtitles),
@@ -944,6 +950,12 @@ class MainWindow(QMainWindow):
         """Rebuild the table columns: every field, in the user's persisted drag-order, with the persisted
         hidden-column and width preferences applied. (The Content Type filter no longer changes which columns
         exist: it is a row filter in the column header now, see ColumnFilterHeader.)"""
+        # The Sources column starts hidden (once): it is there to be switched on from the header menu.
+        if get_setting("table", "sources_column_seeded", "") != "1":
+            hidden_now = self._load_hidden_fields()
+            hidden_now.add("sources")
+            set_setting("table", "hidden_columns", ",".join(sorted(hidden_now)))
+            set_setting("table", "sources_column_seeded", "1")
         field_names = list(FIELD_LABELS.keys())
 
         rest = [f for f in field_names if f != "content_type"]
@@ -1528,6 +1540,8 @@ class MainWindow(QMainWindow):
             return format_file_size(vf.size_bytes)
         if field_name == "bitrate":
             return format_bitrate(vf.metadata.bitrate)
+        if field_name == "sources":
+            return sources_summary(vf.metadata)
         value = getattr(vf.metadata, field_name, "")
         return "" if value is None else str(value)
 
@@ -1704,6 +1718,7 @@ class MainWindow(QMainWindow):
             return
         merged = self._merge_metadata_for_panel(selected)
         self.tag_panel.load_values(merged)
+        self.tag_panel.set_sources(selected)
         self._update_preview(selected)
 
     def _update_preview(self, selected: list[VideoFile]) -> None:
@@ -1733,9 +1748,10 @@ class MainWindow(QMainWindow):
             return
 
         self.tag_panel.set_preview_loading()
-        self._preview_loader.request(vf, vf.get_thumbnail)
+        self._preview_loader.request(vf, vf.get_preview)
 
-    def _on_preview_ready(self, _vf: VideoFile, image: QImage) -> None:
+    def _on_preview_ready(self, vf: VideoFile, image: QImage) -> None:
+        self.tag_panel.set_preview_caption(getattr(vf, "preview_kind", "Frame preview"))
         self.tag_panel.set_preview_qimage(image)
 
     def _merge_metadata_for_panel(self, files: list[VideoFile]) -> dict[str, object]:
@@ -1941,18 +1957,22 @@ class MainWindow(QMainWindow):
     def _import_tmdb_movies(self, files: list, skipped_load_errors: int) -> None:
         imported = 0
         skipped_no_match = 0
-        poster_saved = 0
+        poster_staged = 0
         fetch_failures: list[tuple] = []
-        overwrite_choice: dict = {}  # "Replace existing poster?" answer, kept across the batch
+        stages: dict[int, SourceStage] = {}
 
         # One undo entry for the whole batch (the stack keeps only the
         # last few entries, so one per file would lose the earlier ones).
         self._push_undo("TMDB Import", files)
-        for vf in files:
+        for index, vf in enumerate(files):
             guess = parse_release_name(vf.path.stem)
+            ref = ref_in(vf.metadata, "tmdb", ("movie",))
+            existing = (MovieCandidate(int(ref.id), f"TMDB movie {ref.id}", "",
+                                       "The id this file already carries; its details are fetched when you use it.", None),
+                        f"TMDB movie {ref.id}") if ref is not None else None
             dialog = TMDBSearchDialog(
                 mode="movie", initial_query=guess.title, initial_year=guess.year or "",
-                parent=self,
+                parent=self, **({"existing": existing} if existing else {}),
             )
             if not dialog.exec() or dialog.selected_candidate is None:
                 skipped_no_match += 1
@@ -1967,36 +1987,35 @@ class MainWindow(QMainWindow):
 
             vf.metadata.content_type = ContentType.MOVIE
             poster_path = details.pop("_poster_path", None)
+            imdb_id = details.pop("_imdb_id", "")
             for field_name, value in details.items():
                 setattr(vf.metadata, field_name, value)
             vf.dirty = True
             imported += 1
 
-            if poster_path:
-                try:
-                    image_bytes = run_lookup(self, download_poster, poster_path)
-                except TMDBError as e:
-                    # A poster failure doesn't undo the metadata import
-                    # that already succeeded -- collected alongside
-                    # fetch failures for the end-of-batch summary rather
-                    # than interrupting the loop with its own dialog.
-                    fetch_failures.append((vf, f"poster download failed: {e}"))
-                else:
-                    status, detail = self._save_sidecar(
-                        lambda overwrite: vf.save_poster_sidecar(image_bytes, overwrite), overwrite_choice,
-                    )
-                    if status == "saved":
-                        poster_saved += 1
-                    elif status == "error":
-                        fetch_failures.append((vf, f"poster not saved: {detail}"))
+            stage = SourceStage(values=tmdb_values("movie", candidate.tmdb_id, imdb_id=imdb_id, how=dialog.selected_how))
+            if dialog.save_poster:
+                # A poster failure doesn't undo the metadata import that already succeeded: it is reported in the
+                # end-of-batch summary rather than interrupting the loop with its own dialog.
+                poster, why = fetch_prepared_poster(
+                    self, "TMDB", download_poster, [poster_path] if poster_path else [],
+                    accept_landscape=dialog.accept_landscape, label=f"Downloading the poster for {vf.path.name}...",
+                    errors=(TMDBError,),
+                )
+                stage.poster = poster
+                if why:
+                    fetch_failures.append((vf, why))
+            stages[index] = stage
 
+        poster_staged = sum(1 for st in stages.values() if st.poster is not None)
+        apply_sources(self, files, stages)
         self._refresh_table_rows()
         if self._selected_video_files():
             self._on_selection_changed()
 
         parts = [f"Imported TMDB metadata for {imported} file(s)"]
-        if poster_saved:
-            parts.append(f"{poster_saved} poster(s) saved")
+        if poster_staged:
+            parts.append(f"{poster_staged} poster(s) will be embedded on Save")
         if skipped_no_match:
             parts.append(f"{skipped_no_match} skipped (no match confirmed)")
         if skipped_load_errors:
@@ -2011,7 +2030,12 @@ class MainWindow(QMainWindow):
 
     def _import_tmdb_tv(self, files: list, skipped_load_errors: int) -> None:
         guess = parse_release_name(files[0].path.stem)
-        dialog = TMDBSearchDialog(mode="tv", initial_query=guess.title, parent=self)
+        ref = ref_in(files[0].metadata, "tmdb", ("tv", "season", "episode"))
+        show_id = ref.id.split("/")[0] if ref is not None else ""
+        existing = (TVCandidate(int(show_id), f"TMDB show {show_id}", "",
+                                "The id this file already carries; its details are fetched when you use it.", None),
+                    f"TMDB show {show_id}") if show_id else None
+        dialog = TMDBSearchDialog(mode="tv", initial_query=guess.title, parent=self, **({"existing": existing} if existing else {}))
         if not dialog.exec() or dialog.selected_candidate is None:
             return
         candidate = dialog.selected_candidate
@@ -2023,30 +2047,22 @@ class MainWindow(QMainWindow):
             return
 
         poster_path = show_details.pop("_poster_path", None)
-        poster_bytes = None
+        imdb_id = show_details.pop("_imdb_id", "")
+        tvdb_id = show_details.pop("_tvdb_id", "")
+        poster = None
         poster_error = ""
-        if poster_path:
-            try:
-                poster_bytes = run_lookup(self, download_poster, poster_path)
-            except TMDBError as e:
-                poster_error = str(e)
+        if dialog.save_poster:
+            poster, poster_error = fetch_prepared_poster(
+                self, "TMDB", download_poster, [poster_path] if poster_path else [],
+                accept_landscape=dialog.accept_landscape, errors=(TMDBError,),
+            )
 
-        posters_saved = 0
-        overwrite_choice: dict = {}  # "Replace existing poster?" answer, kept across the batch
         self._push_undo("TMDB Import", files)
         for vf in files:
             vf.metadata.content_type = ContentType.TV
             for field_name, value in show_details.items():
                 setattr(vf.metadata, field_name, value)
             vf.dirty = True
-            if poster_bytes:
-                status, detail = self._save_sidecar(
-                    lambda overwrite: vf.save_poster_sidecar(poster_bytes, overwrite), overwrite_choice,
-                )
-                if status == "saved":
-                    posters_saved += 1
-                elif status == "error":
-                    poster_error = f"{vf.path.name}: {detail}"
 
         # Episode-level details still need per-file confirmation --
         # each episode genuinely is different, so this deliberately
@@ -2057,7 +2073,8 @@ class MainWindow(QMainWindow):
         # auto-apply" principle for anything that writes to a file.
         episode_failures: list[tuple] = []
         episodes_set = 0
-        for vf in files:
+        episode_of: dict[int, tuple[int, int]] = {}
+        for index, vf in enumerate(files):
             # Parsed per-file (not reused from the show-level `guess`
             # above) since each episode's own filename is what carries
             # its season/episode number -- e.g. "Show S02E04.mkv".
@@ -2078,15 +2095,27 @@ class MainWindow(QMainWindow):
                 continue
             for field_name, value in episode_details.items():
                 setattr(vf.metadata, field_name, value)
+            episode_of[index] = (episode_dialog.selected_season, episode_dialog.selected_episode.episode_number)
             episodes_set += 1
+
+        # The source ids (the episode when one was chosen, else the show) and the one poster for all the files.
+        stages = {}
+        for index, vf in enumerate(files):
+            season, episode = episode_of.get(index, (None, None))
+            stages[index] = SourceStage(
+                values=tmdb_values("tv", candidate.tmdb_id, season, episode, imdb_id=imdb_id, tvdb_id=tvdb_id,
+                                   how=dialog.selected_how),
+                poster=poster,
+            )
+        apply_sources(self, files, stages)
 
         self._refresh_table_rows()
         if self._selected_video_files():
             self._on_selection_changed()
 
         parts = [f"Imported \"{candidate.name}\" show-level metadata for {len(files)} file(s)", f"{episodes_set} episode(s) matched"]
-        if posters_saved:
-            parts.append(f"{posters_saved} poster(s) saved")
+        if poster is not None:
+            parts.append("poster will be embedded on Save")
         if poster_error:
             parts.append(f"poster problem: {poster_error}")
         if skipped_load_errors:
@@ -2166,20 +2195,30 @@ class MainWindow(QMainWindow):
         imported = episodes_set = skipped_no_match = 0
         shows: dict[str, object] = {}  # a show confirmed once is reused for the rest of the batch
         self._push_undo("IMDb Import", files)
-        for vf in files:
+        stages: dict[int, SourceStage] = {}
+        for index, vf in enumerate(files):
             guess, tv_title, tv_year = _tv_guess(vf.path.stem)  # a show's "(2005)" is split off its title
             is_tv = guess.kind == "tv" or vf.metadata.content_type is ContentType.TV
             title, year = (tv_title, tv_year) if guess.kind == "tv" else (guess.title, guess.year or "")
             candidate = shows.get(normalize_words(title)) if is_tv else None
+            dialog = None
             if candidate is None:
+                existing = None
+                held = ref_in(vf.metadata, "imdb", ("title",))
+                found_local = imdb_local.title_by_id(db, held.id) if held is not None else None
+                if found_local is not None:
+                    shown = getattr(found_local, "title", "") or getattr(found_local, "name", "")
+                    existing = (found_local, f"IMDb {held.id} ({shown})")
+                    is_tv = isinstance(found_local, imdb_local.ImdbTVCandidate)
                 dialog = TMDBSearchDialog(
                     mode="tv" if is_tv else "movie", initial_query=title, initial_year=year,
-                    parent=self, source=source,
+                    parent=self, source=source, **({"existing": existing} if existing else {}),
                 )
                 if not dialog.exec() or dialog.selected_candidate is None:
                     skipped_no_match += 1
                     continue
                 candidate = dialog.selected_candidate
+            how = "manual" if getattr(dialog, "selected_how", "title") == "manual" else "title"
             if isinstance(candidate, imdb_local.ImdbTVCandidate):
                 shows[normalize_words(title)] = shows[normalize_words(candidate.name)] = candidate
                 vf.metadata.content_type = ContentType.TV
@@ -2188,15 +2227,20 @@ class MainWindow(QMainWindow):
                     path, candidate.tconst, candidate.name, initial_season=vf.metadata.season_number or guess.season,
                     initial_episode=vf.metadata.episode_number or guess.episode, parent=self,
                 )
+                imdb_ref = candidate.imdb_id
                 if episode_dialog.exec() and episode_dialog.selected_episode is not None:
                     self._apply_imdb_fields(vf, imdb_local.episode_fields(episode_dialog.selected_episode), replace_date=True)
                     episodes_set += 1
+                    imdb_ref = getattr(episode_dialog.selected_episode, "imdb_id", "") or imdb_ref
             else:
                 vf.metadata.content_type = ContentType.MOVIE
                 self._apply_imdb_fields(vf, imdb_local.movie_fields(candidate), replace_date=True)
+                imdb_ref = candidate.imdb_id
+            stages[index] = SourceStage(values=imdb_values(imdb_ref, how))
             vf.dirty = True
             imported += 1
 
+        apply_sources(self, files, stages)
         self._refresh_table_rows()
         if self._selected_video_files():
             self._on_selection_changed()
@@ -2282,7 +2326,11 @@ class MainWindow(QMainWindow):
 
         guess = parse_release_name(vf.path.stem)
 
-        dialog = TVDBSearchDialog(initial_query=guess.title, parent=self)
+        held = ref_in(vf.metadata, "tvdb", ("series",))
+        existing = (TVCandidate(int(held.id), f"TheTVDB series {held.id}", "",
+                                "The id this file already carries; its details are fetched when you use it.", None),
+                    f"TheTVDB series {held.id}") if held is not None else None
+        dialog = TVDBSearchDialog(initial_query=guess.title, parent=self, **({"existing": existing} if existing else {}))
         if not dialog.exec() or dialog.selected_candidate is None:
             return
         candidate = dialog.selected_candidate
@@ -2306,19 +2354,18 @@ class MainWindow(QMainWindow):
         status_msg = "Imported metadata from TheTVDB -- not yet saved to disk"
         if "episode_number" not in details:
             status_msg += " (show-level only -- episode selection was skipped)"
-        if poster_url:
-            try:
-                image_bytes = run_lookup(self, download_image, poster_url)
-            except TVDBError as e:
-                status_msg += f"; poster download failed: {e}"
-            else:
-                status, detail = self._save_sidecar(lambda overwrite: vf.save_poster_sidecar(image_bytes, overwrite), {})
-                if status == "saved":
-                    status_msg += f"; poster saved as {detail.name}"
-                elif status == "kept":
-                    status_msg += "; existing poster kept"
-                else:
-                    status_msg += f"; poster not saved: {detail}"
+        stage = SourceStage(values=tvdb_values(candidate.tvdb_id, dialog.selected_how))
+        if dialog.save_poster:
+            poster, why = fetch_prepared_poster(
+                self, "TheTVDB", download_image, [poster_url] if poster_url else [],
+                accept_landscape=dialog.accept_landscape, errors=(TVDBError,),
+            )
+            stage.poster = poster
+            if poster is not None:
+                status_msg += "; poster will be embedded on Save"
+            elif why:
+                status_msg += f"; {why}"
+        apply_sources(self, [vf], {0: stage})
 
         self._refresh_table_rows()
         if any(selected_vf is vf for selected_vf in self._selected_video_files()):
@@ -2333,8 +2380,7 @@ class MainWindow(QMainWindow):
         run_scene_lookup(self, key)
 
     def _save_sidecar(self, write, choice: dict) -> tuple[str, object]:
-        """Runs `write(overwrite)` (VideoFile.save_poster_sidecar /
-        save_subtitle_sidecar) and reports the outcome as ("saved",
+        """Runs `write(overwrite)` (VideoFile.save_subtitle_sidecar) and reports the outcome as ("saved",
         path), ("kept", None) -- the file exists and the user declined to
         replace it -- or ("error", message) for an OSError. Never
         replaces an existing file unasked; `choice` carries a "to all"
@@ -2377,6 +2423,13 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Check Files", OPEN_FILES_FIRST)
             return
         run_check_and_repair(self, files, _error_details)
+
+    def _on_embed_posters(self) -> None:
+        """Media > Embed Existing Poster Files...: the `<name>-poster.jpg` files beside the selected videos (all loaded
+        videos when none is selected), reviewed, embedded, and sent to the Recycle Bin once read back."""
+        from gui.embed_posters_dialog import run_embed_posters
+
+        run_embed_posters(self, self._selected_video_files() or self._visible_video_files(), _error_details)
 
     # -- create notes ------------------------------------------------------
 

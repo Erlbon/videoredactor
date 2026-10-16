@@ -40,8 +40,8 @@ into files one at a time.
   fingerprint (the OSHASH, the same 64-bit hash as OpenSubtitles; the MD5 only if Tools > Preferences >
   Look Up allows it, as it reads the whole file) and highlights a **file match**; anything found by title is
   flagged "match by title: check it". You pick one result, then the usual per-field review shows what
-  would change before anything is written. A cover is saved (as `<name>-poster.jpg`) only when you tick
-  "Save the cover as a sidecar". Both need your own key (Tools > API Keys, with a "Check the key"
+  would change before anything is written. A poster is embedded in the video (on Save) only when you tick
+  "Save the poster in the file". Both need your own key (Tools > API Keys, with a "Check the key"
   button; the StashDB address is a setting, so other stash-box servers work). **Privacy:** only a file hash
   and/or the search text you see leave this computer, together with your key to that service; no file name,
   path or other tag, and no image is downloaded unless you ask. Data courtesy of
@@ -73,8 +73,23 @@ into files one at a time.
   AVI, MOV, WMV, FLV, WebM, MPG and other formats into MP4 or MKV,
   copying streams wherever a container can hold them — see "Library
   safety and conversion" below.
-- **Poster art** saved as a sidecar image next to the video, the
-  convention Plex/Jellyfin/Kodi already expect.
+- **Poster art embedded in the video** (MP4: the cover atom; MKV: an attachment named `cover.jpg`), which
+  Jellyfin, Plex and Kodi read from the file. A lookup (TMDB, TheTVDB, ThePornDB, StashDB) embeds one only
+  when you tick "Save the poster in the file", and only a TRUE poster: the source's own poster picture,
+  portrait (height at least 1.3 times the width, about 2:3), at least 400 x 600, scaled down to at most
+  1000 pixels wide and kept under 400 KB as a JPEG. A wide picture, a background or a video frame is never
+  used (an off-by-default box "Accept a landscape cover when there is no poster" allows a wide one for that
+  lookup); with no poster the file gets none and the dialog says "No poster available from <service>". The
+  side panel shows the embedded poster (captioned "Poster"), else a frame preview ("Frame preview": never
+  written to the file). The app creates no poster file next to the video any more: **Media > Embed Existing
+  Poster Files...** moves old `<name>-poster.jpg` files into their videos (reviewed first, landscape ones
+  unticked; each file goes to the Recycle Bin only after the embedded poster was read back).
+- **Source ids kept in the file**: every lookup you apply records which record it came from, as tags inside
+  the video (`THEPORNDB_ID`, `STASHDB_ID`, `TMDB_ID`, `IMDB_ID`, `TVDB_ID`, `SOURCE_URL`, `METADATA_MATCH` =
+  `service;date;file|title|manual`), shown read-only in the side panel's collapsed **Sources** section (links
+  to the records), in an optional **Sources** column and in `info --fields` / `--all`. A file that already
+  has an id uses it directly next time ("File has an ID" at the top of the lookup dialog, and in the Redact
+  lookup steps); an id is replaced only through the per-field review. Settings export never includes them.
 - **Thumbnail preview** — pulls a real frame from the video so you can
   see what you're tagging without opening a player.
 - **Change history** (Tools > History…) — opt-in, off by default: turn it
@@ -237,7 +252,7 @@ Each file's result is `changed`, `unchanged` (nothing differed), `planned` (dry 
 `videoredactor rename PATH... [-p PATTERN] [--zero-pad N] [--ascii] [-n]`
 
 Renames each video from its tags, in its own folder, like Rename / Export / Move > Rename files in place. Its
-poster (`<name>-poster.jpg`) and subtitle files (`<name>.srt`, `<name>.<lang>.srt`) are renamed with it. Never
+existing poster file (`<name>-poster.jpg`, no longer created by the app) and subtitle files (`<name>.srt`, `<name>.<lang>.srt`) are renamed with it. Never
 overwrites: a name that is taken gets `(2)`, `(3)`, ... A change of letter case alone (`song` to `Song`) counts as a rename.
 
 | Option | Meaning |
@@ -260,7 +275,7 @@ the pattern's optional `(...)`, `[...]` or `{...}` groups) is `skipped` with the
 
 Moves (or copies) each video into a folder tree under a library folder, like Rename / Export / Move > Move into
 folders. The pattern may contain `/` to make sub-folders: `"%show_title%/Season %season_number%/%title%"`.
-Poster and subtitle files travel with the video. Missing folders are created; nothing is overwritten (a taken
+Existing poster files and subtitle files travel with the video. Missing folders are created; nothing is overwritten (a taken
 name gets `(2)`); a destination outside the library folder or too long is refused.
 
 | Option | Meaning |

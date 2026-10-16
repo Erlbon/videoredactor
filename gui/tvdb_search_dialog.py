@@ -26,7 +26,8 @@ def _search(query, year=None):
     return search_series(query)  # looked up at call time (tests patch it); TheTVDB's search takes no year
 
 
-TVDB_SOURCE = SearchSource(name="TheTVDB", movies=_no_movies, tv=_search, errors=(TVDBError,), year_box=False)
+TVDB_SOURCE = SearchSource(name="TheTVDB", movies=_no_movies, tv=_search, errors=(TVDBError,), year_box=False,
+                           posters=True, poster_setting="tvdb_lookup")
 
 
 class TVDBSearchDialog(TMDBSearchDialog):
@@ -36,5 +37,5 @@ class TVDBSearchDialog(TMDBSearchDialog):
     if dialog.exec(): selected = dialog.selected_candidate
     """
 
-    def __init__(self, initial_query: str = "", parent=None):
-        super().__init__("tv", initial_query, parent=parent, source=TVDB_SOURCE)
+    def __init__(self, initial_query: str = "", parent=None, existing=None):
+        super().__init__("tv", initial_query, parent=parent, source=TVDB_SOURCE, existing=existing)

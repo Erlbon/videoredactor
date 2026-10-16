@@ -44,7 +44,9 @@ def test_hash_match_posts_the_fingerprint_and_maps_every_field(fetch):
         "Test Scene Title", "2021-11-15", "Example Studio", "Example Network")
     assert result.performers == ["Credited Alias", "Performer Two"]  # as credited, no disambiguation
     assert result.tags == ["Tag A", "Tag B"] and result.director == "Director One" and result.code == "CODE-1"
-    assert result.cover_url == "https://cdn.example.com/s/one.jpg" and result.duration == 1830
+    # Both listed images are landscape: neither is a poster candidate, both wait for "Accept a landscape cover".
+    assert result.cover_url == "" and result.poster_urls == [] and result.duration == 1830
+    assert result.landscape_urls == ["https://cdn.example.com/s/one.jpg", "https://cdn.example.com/s/two.jpg"]
     assert result.page_url == "https://stashdb.org/scenes/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
     assert result.urls == ["https://example.com/scene/test-scene-title"]
 
@@ -244,3 +246,24 @@ def test_a_search_never_downloads_an_image(fetch, monkeypatch):
     fetch({"data": {"searchScenes": {"scenes": [stash_scene()]}}})
     sd.search_by_title("x")
     assert cover.requests == []
+
+
+def test_only_portrait_images_are_poster_candidates(fetch):
+    images = [{"url": "https://cdn.example.com/s/wide.jpg", "width": 1920, "height": 1080},
+              {"url": "https://cdn.example.com/s/tall.jpg", "width": 600, "height": 900},
+              {"url": "https://cdn.example.com/s/square.jpg", "width": 800, "height": 800},
+              {"url": "https://cdn.example.com/s/unknown.jpg"}]
+    fetch({"data": {"findScenesBySceneFingerprints": [[stash_scene(images=images)]]}})
+    (result,) = sd.search_by_hash(OSHASH)
+    assert result.poster_urls == ["https://cdn.example.com/s/tall.jpg", "https://cdn.example.com/s/unknown.jpg"]
+    assert result.cover_url == "https://cdn.example.com/s/tall.jpg"  # a picture of unknown size is checked after the download
+    assert result.landscape_urls == ["https://cdn.example.com/s/wide.jpg", "https://cdn.example.com/s/square.jpg"]
+
+
+def test_a_result_from_another_stash_box_is_not_a_stashdb_id(fetch, monkeypatch):
+    from core import scene_lookup
+
+    monkeypatch.setattr(sd, "stash_endpoint", lambda: "https://stash.example.org/graphql")
+    fetch({"data": {"findScenesBySceneFingerprints": [[stash_scene()]]}})
+    (result,) = sd.search_by_hash(OSHASH)
+    assert result.id_trusted is False

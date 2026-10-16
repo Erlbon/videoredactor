@@ -2,10 +2,11 @@
 core/sidecars.py
 
 The files that belong to a video by name and should travel with it when
-it is renamed or moved: the poster (`<stem>-poster.jpg`, written by
-VideoFile.save_poster_sidecar) and subtitles (`<stem>.srt` or
-`<stem>.<lang>.srt`, VideoFile.save_subtitle_sidecar). Pure file-system
-logic, no Qt.
+it is renamed or moved: an EXISTING poster file (`<stem>-poster.jpg`; this app
+no longer creates one, posters are embedded in the video now, but users have
+them: Media > Embed Existing Poster Files moves them into the video) and
+subtitles (`<stem>.srt` or `<stem>.<lang>.srt`, VideoFile.save_subtitle_sidecar).
+Pure file-system logic, no Qt.
 
 Matching is exact on purpose: what follows the video's stem must be
 one of those shapes, so "Show S01E01.mkv" never claims the files of
@@ -71,3 +72,15 @@ def with_sidecars(planned: list[PlannedMove]) -> list[PlannedMove]:
         out.append(move)
         out.extend(sidecar_moves(move))
     return out
+
+
+_POSTER_RE = re.compile(r"-poster\.(?:jpe?g|png)", re.IGNORECASE)
+
+
+def poster_sidecars(video_path: str) -> list[str]:
+    """The existing poster files of a video (`<stem>-poster.jpg` / .jpeg / .png, exact stem), full paths, .jpg first."""
+    folder, name = os.path.split(os.fspath(video_path))
+    stem = os.path.splitext(name)[0]
+    found = [s for s in sidecar_suffixes(video_path) if _POSTER_RE.fullmatch(s)]
+    found.sort(key=lambda suffix: (not suffix.lower().endswith(".jpg"), suffix.lower()))
+    return [os.path.join(folder, stem + suffix) for suffix in found]

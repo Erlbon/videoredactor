@@ -44,7 +44,7 @@ import os
 import re
 import shutil
 import uuid
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable
 
@@ -88,7 +88,9 @@ from core.release_name_parser import parse_release_name
 from core.sidecars import sidecar_moves, sidecar_pairs, sidecar_suffixes
 from core.video_file import VideoFile
 from core.video_fingerprint import video_fingerprint
-from core.video_metadata import ContentType
+from core.video_metadata import SOURCE_FIELDS, ContentType
+from core.lookup_sources import imdb_values, scene_values, tmdb_values, tvdb_values
+from core.source_tags import ref_in, stage_sources
 
 RECIPE_SECTION = "redact"
 RECIPE_KEY = "recipe"
@@ -233,6 +235,7 @@ class VideoCtx:
             or live.dirty  # a scan stamp recorded earlier and never saved
             or work.metadata != live.metadata
             or work.metadata.scan_stamp != live.metadata.scan_stamp
+            or any(getattr(work.metadata, f) != getattr(live.metadata, f) for f in SOURCE_FIELDS)
         )
 
     def close(self) -> None:
@@ -359,6 +362,18 @@ def _with_note(result: StepResult, note: str) -> StepResult:
 
 def _is_empty(ctx: VideoCtx, field_name: str) -> bool:
     return not field_text(ctx.work.metadata, field_name)
+
+
+def _set_sources(ctx: VideoCtx, values: dict[str, str]) -> list[str]:
+    """Writes the source ids of an applied lookup into the working metadata: only the ones that are EMPTY (an id
+    already in the file is replaced only through Metadata > Look Up's per-field review, never here)."""
+    lines = []
+    for key, value in values.items():
+        if not getattr(ctx.work.metadata, key, "") and stage_sources(ctx.work.metadata, {key: value}):
+            lines.append(f"{key} = {value!r}")
+    if lines:
+        ctx.work.dirty = True
+    return lines
 
 
 def _set_fields(ctx: VideoCtx, fields: dict[str, Any]) -> list[str]:
@@ -700,6 +715,7 @@ class LookupFill:
     fields: dict[str, Any]
     content_type: ContentType
     year: str = ""  # the matched title's (first) year, to cross-check a local match against an online one
+    sources: dict = field(default_factory=dict)  # source id fields this match sets when they are empty (core.lookup_sources)
 
     def __str__(self) -> str:
         shown = ", ".join(f"{key}={str(value)[:40]!r}" for key, value in self.fields.items())
@@ -801,7 +817,8 @@ class LookupStep(VideoStep):
         """A title id written in the filename or the Comment field identifies the
         title exactly (97%). None when there is no id, it isn't in the database, or
         the kind of title is switched off in the step's options."""
-        wanted = imdb_local.find_imdb_id(stem, ctx.work.metadata.comment)
+        held = ref_in(ctx.work.metadata, "imdb", ("title",))
+        wanted = held.id if held is not None else imdb_local.find_imdb_id(stem, ctx.work.metadata.comment)
         if not wanted:
             return None
         try:
@@ -812,12 +829,13 @@ class LookupStep(VideoStep):
         if found is None:
             notes.append(f"IMDb (local database) doesn't have {wanted}")
             return None
-        reason = f"exact IMDb id {wanted}"
+        reason = f"exact IMDb id {wanted}" + (" (the id in the file)" if held is not None else "")
         if isinstance(found, imdb_local.ImdbMovieCandidate):
             if not opts["movies"]:
                 return None
             fill = LookupFill(imdb_local.SERVICE_NAME, f"{found.title} ({found.year})",
-                              self._only_empty(ctx, imdb_local.movie_fields(found)), ContentType.MOVIE, found.year)
+                              self._only_empty(ctx, imdb_local.movie_fields(found)), ContentType.MOVIE, found.year,
+                              imdb_values(wanted, "manual"))
             local = LocalFound(fill, LOOKUP_ID, reason)
             return self._movie_with_local(ctx, local, found.title, found.year, notes)
         if not opts["tv"]:
@@ -836,7 +854,8 @@ class LookupStep(VideoStep):
                 return None
         fields = self._tv_fields(series, episode)
         fill = LookupFill(imdb_local.SERVICE_NAME, f"{series.name} ({series.year})",
-                          self._only_empty(ctx, fields), ContentType.TV, series.year)
+                          self._only_empty(ctx, fields), ContentType.TV, series.year,
+                          imdb_values(episode.imdb_id if episode is not None and episode.imdb_id else wanted, "manual"))
         local = LocalFound(fill, LOOKUP_ID, reason)
         return self._tv_with_local(
             ctx, local, series.name, series.year, episode.season if episode else None,
@@ -883,7 +902,8 @@ class LookupStep(VideoStep):
         if pick.alias and pick.exact:
             reason += f" (as '{pick.alias}')"
         fill = LookupFill(imdb_local.SERVICE_NAME, f"{pick.title} ({pick.year})",
-                          self._only_empty(ctx, imdb_local.movie_fields(pick)), ContentType.MOVIE, pick.year)
+                          self._only_empty(ctx, imdb_local.movie_fields(pick)), ContentType.MOVIE, pick.year,
+                          imdb_values(pick.imdb_id, "title"))
         return LocalFound(fill, confidence, f"{reason} (IMDb {pick.imdb_id})")
 
     def _tv_local(self, ctx: VideoCtx, db, title: str, year: str, season, episode, notes: list[str]) -> LocalFound | None:
@@ -921,7 +941,9 @@ class LookupStep(VideoStep):
                 # The one show of that title, and it has exactly this season and episode.
                 confidence, reason = LOOKUP_EXACT, f"{reason}; S{season:02d}E{episode:02d} exists in it"
         fill = LookupFill(imdb_local.SERVICE_NAME, f"{pick.name} ({pick.year})",
-                          self._only_empty(ctx, self._tv_fields(pick, found_episode)), ContentType.TV, pick.year)
+                          self._only_empty(ctx, self._tv_fields(pick, found_episode)), ContentType.TV, pick.year,
+                          imdb_values(found_episode.imdb_id if found_episode is not None and found_episode.imdb_id else pick.imdb_id,
+                                      "title"))
         return LocalFound(fill, confidence, f"{reason} (IMDb {pick.imdb_id})")
 
     def _combine(self, ctx: VideoCtx, local: LocalFound, online: StepResult | None, notes: list[str]) -> StepResult:
@@ -944,7 +966,10 @@ class LookupStep(VideoStep):
                             fields[key] = value  # TMDB's full date beats IMDb's bare year
                         else:
                             fields.setdefault(key, value)
-                    fill = LookupFill(f"{fill.source} + {other.source}", fill.label, fields, fill.content_type, fill.year)
+                    sources = dict(fill.sources)
+                    for key, value in other.sources.items():
+                        sources.setdefault(key, value)
+                    fill = LookupFill(f"{fill.source} + {other.source}", fill.label, fields, fill.content_type, fill.year, sources)
                     confidence = min(confidence, online.confidence)
                     reason = f"{reason}; {other.source}: {online.reason}"
             elif online.note:
@@ -969,6 +994,19 @@ class LookupStep(VideoStep):
         return self._combine(ctx, local, online, notes)
 
     def _movie_online(self, ctx: VideoCtx, title: str, year: str, skip: set[str] | frozenset = frozenset()) -> StepResult:
+        held = ref_in(ctx.work.metadata, "tmdb", ("movie",))
+        if held is not None:  # the file already names its TMDB record: no search
+            try:
+                details = ctx.bg(tmdb_client.get_movie_details, int(held.id))
+            except tmdb_client.TMDBError as exc:
+                return StepResult.nothing(note=f"TMDB details unavailable: {exc}")
+            fields = {k: v for k, v in self._empty_fields(ctx, details).items() if k not in skip}
+            if not fields and ctx.work.metadata.content_type is not ContentType.UNSET:
+                return StepResult.nothing()
+            label_year = (details.get("release_date") or "")[:4]
+            fill = LookupFill("TMDB", f"{details.get('title', '')} ({label_year})", fields, ContentType.MOVIE, label_year,
+                              tmdb_values("movie", held.id, imdb_id=details.get("_imdb_id", ""), how="manual"))
+            return StepResult.suggestion(fill, LOOKUP_ID, f"the TMDB id in the file ({held.id})")
         try:
             candidates = ctx.bg(tmdb_client.search_movies, title, year or None)
         except tmdb_client.TMDBError as exc:
@@ -996,7 +1034,8 @@ class LookupStep(VideoStep):
         fields = {k: v for k, v in self._empty_fields(ctx, details).items() if k not in skip}
         if not fields and ctx.work.metadata.content_type is not ContentType.UNSET:
             return StepResult.nothing()
-        fill = LookupFill("TMDB", f"{pick.title} ({pick.year})", fields, ContentType.MOVIE, pick.year)
+        fill = LookupFill("TMDB", f"{pick.title} ({pick.year})", fields, ContentType.MOVIE, pick.year,
+                          tmdb_values("movie", pick.tmdb_id, imdb_id=details.get("_imdb_id", ""), how="title"))
         return StepResult.suggestion(fill, confidence, f"{reason} (TMDB id {pick.tmdb_id})")
 
     # -- TV -----------------------------------------------------------------------
@@ -1026,7 +1065,10 @@ class LookupStep(VideoStep):
         return self._combine(ctx, local, online, notes)
 
     def _tv_online(self, ctx, title, year, season, episode, notes, skip=frozenset()) -> StepResult | None:
-        for source in ("TMDB", "TheTVDB"):
+        order = ["TMDB", "TheTVDB"]
+        if ref_in(ctx.work.metadata, "tvdb", ("series",)) is not None and ref_in(ctx.work.metadata, "tmdb", ("tv", "season", "episode")) is None:
+            order.reverse()  # the file names its TheTVDB record only: ask that one first
+        for source in order:
             outcome = self._tv_from(ctx, source, title, year, season, episode, notes, skip)
             if outcome is not None:
                 return outcome
@@ -1035,6 +1077,9 @@ class LookupStep(VideoStep):
     def _tv_from(self, ctx, source, title, year, season, episode, notes, skip=frozenset()) -> StepResult | None:
         tmdb = source == "TMDB"
         client, error = (tmdb_client, tmdb_client.TMDBError) if tmdb else (tvdb_client, tvdb_client.TVDBError)
+        held = ref_in(ctx.work.metadata, "tmdb", ("tv", "season", "episode")) if tmdb else ref_in(ctx.work.metadata, "tvdb", ("series",))
+        if held is not None:  # the file already names the show: no search, no guessing
+            return self._tv_by_id(ctx, source, int(held.id.split("/")[0]), season, episode, notes, skip)
         try:
             candidates = ctx.bg(client.search_tv if tmdb else client.search_series, title)
         except error as exc:
@@ -1080,8 +1125,44 @@ class LookupStep(VideoStep):
         fields = {k: v for k, v in fields.items() if k not in skip}
         if not fields and ctx.work.metadata.content_type is not ContentType.UNSET:
             return StepResult.nothing()
-        fill = LookupFill(source, f"{pick.name} ({pick.year})", fields, ContentType.TV, pick.year)
+        found_episode = bool(episode_details)
+        sources = (tmdb_values("tv", ident, season if found_episode else None, episode if found_episode else None,
+                               imdb_id=show.get("_imdb_id", ""), tvdb_id=show.get("_tvdb_id", ""), how="title")
+                   if tmdb else tvdb_values(ident, "title"))
+        fill = LookupFill(source, f"{pick.name} ({pick.year})", fields, ContentType.TV, pick.year, sources)
         return StepResult.suggestion(fill, confidence, f"{reason} ({source} id {ident})")
+
+    def _tv_by_id(self, ctx, source, ident: int, season, episode, notes, skip=frozenset()) -> StepResult | None:
+        """The show the file's own TMDB_ID / TVDB_ID names (a certain match, but still a suggestion)."""
+        tmdb = source == "TMDB"
+        client, error = (tmdb_client, tmdb_client.TMDBError) if tmdb else (tvdb_client, tvdb_client.TVDBError)
+        try:
+            show = ctx.bg(tmdb_client.get_tv_show_details if tmdb else tvdb_client.get_series_details, ident)
+        except error as exc:
+            notes.append(f"{source} details unavailable: {exc}")
+            return None
+        episode_details: dict = {}
+        if season and episode:
+            try:
+                episode_details = ctx.bg(
+                    tmdb_client.get_tv_episode_details if tmdb else tvdb_client.get_episode_details, ident, season, episode,
+                )
+            except error:
+                notes.append(f"{source}: no S{season:02d}E{episode:02d} in the show the file's id names")
+        fields = self._empty_fields(ctx, episode_details)
+        for key, value in self._empty_fields(ctx, show).items():
+            fields.setdefault(key, value)
+        fields = {k: v for k, v in fields.items() if k not in skip}
+        if not fields and ctx.work.metadata.content_type is not ContentType.UNSET:
+            return StepResult.nothing()
+        found_episode = bool(episode_details)
+        sources = (tmdb_values("tv", ident, season if found_episode else None, episode if found_episode else None,
+                               imdb_id=show.get("_imdb_id", ""), tvdb_id=show.get("_tvdb_id", ""), how="manual")
+                   if tmdb else tvdb_values(ident, "manual"))
+        name = show.get("show_title", "") or f"{source} {ident}"
+        year = (show.get("release_date") or "")[:4]
+        fill = LookupFill(source, f"{name} ({year})", fields, ContentType.TV, year, sources)
+        return StepResult.suggestion(fill, LOOKUP_ID, f"the {source} id in the file ({ident})")
 
     @staticmethod
     def _empty_fields(ctx: VideoCtx, details: dict) -> dict[str, Any]:
@@ -1098,6 +1179,7 @@ class LookupStep(VideoStep):
             ctx.work.dirty = True
             lines.append(f"content_type = {fill.content_type.value!r}")
         lines += _set_fields(ctx, fill.fields)
+        lines += _set_sources(ctx, fill.sources)
         return [f"from {fill.source} '{fill.label}'"] + lines
 
 
@@ -1138,15 +1220,21 @@ class SceneLookupStep(VideoStep):
             return StepResult.nothing(note="the file is under 128 KB, too small for a fingerprint match")
         notes: list[str] = []
         for name, client in clients:
+            held = ref_in(ctx.work.metadata, "stashdb" if client is stashdb_client else "theporndb",
+                          ("scene",) if client is stashdb_client else ("scene", "movie", "jav"))
             try:
-                if client is stashdb_client:
+                if held is not None:  # the file already names its record: ask for exactly that, no hash search
+                    one = ctx.bg(client.get, held.id) if client is stashdb_client else ctx.bg(client.get, held.id, held.kind)
+                    one.match_kind = scene_lookup.MATCH_ID
+                    found = [one]
+                elif client is stashdb_client:
                     found = ctx.bg(client.search_by_hash, hashes.oshash, hashes.md5)
                 else:
                     found = ctx.bg(client.search_by_hash, hashes.oshash)
             except scene_lookup.SceneLookupError as exc:
                 notes.append(f"{name} unavailable: {exc}")
                 continue
-            found = [r for r in found if r.is_file_match]
+            found = [r for r in found if r.is_file_match or r.is_id_match]
             if not found:
                 notes.append(f"{name} has no record with this file's fingerprint")
                 continue
@@ -1158,9 +1246,12 @@ class SceneLookupStep(VideoStep):
                       if _is_empty(ctx, k)}
             if not fields and ctx.work.metadata.content_type is not ContentType.UNSET:
                 return StepResult.nothing(note=f"{name} matched the file, but every field it could fill is already set")
-            fill = LookupFill(name, result.title or "(untitled)", fields, scene_lookup.CONTENT_TYPE, result.year)
+            fill = LookupFill(name, result.title or "(untitled)", fields, scene_lookup.CONTENT_TYPE, result.year,
+                              scene_values(result))
+            why = (f"the {name} id in the file ({result.external_id})" if result.is_id_match
+                   else f"file match: {name} has this file's fingerprint (id {result.external_id})")
             suggestion = StepResult.suggestion(
-                fill, SCENE_FILE_CONFIDENCE, f"file match: {name} has this file's fingerprint (id {result.external_id})",
+                fill, SCENE_FILE_CONFIDENCE, why,
                 review_only=True,
             )
             return _with_note(suggestion, "; ".join(notes))
@@ -1174,6 +1265,7 @@ class SceneLookupStep(VideoStep):
             ctx.work.dirty = True
             lines.append(f"content_type = {fill.content_type.value!r}")
         lines += _set_fields(ctx, fill.fields)
+        lines += _set_sources(ctx, fill.sources)
         return [f"from {fill.source} '{fill.label}'"] + lines
 
 

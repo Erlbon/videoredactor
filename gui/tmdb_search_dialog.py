@@ -16,11 +16,12 @@ from dataclasses import dataclass
 from typing import Callable, Optional, Union
 
 from PyQt6.QtWidgets import (
-    QComboBox, QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
+    QCheckBox, QComboBox, QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QLineEdit, QPushButton, QLabel, QTextEdit, QMessageBox,
 )
 from PyQt6.QtCore import Qt
 
+from core.config import get_setting, set_setting
 from gui.lookup import run_lookup
 from gui.tmdb_attribution import TmdbAttributionFooter
 from core.tmdb_client import (
@@ -46,6 +47,8 @@ class SearchSource:
     note: str = ""
     switchable: bool = False
     year_box: bool = True
+    posters: bool = False          # the source has posters: the dialog offers "Save the poster in the file"
+    poster_setting: str = ""       # settings section remembering that box ("tmdb_lookup"...); default ON (the old default)
 
 
 class TMDBSearchDialog(QDialog):
@@ -57,14 +60,24 @@ class TMDBSearchDialog(QDialog):
     `initial_year` (movie mode only) pre-fills a Year box that narrows
     the search via TMDB's dedicated `year` param -- much more reliable
     than hoping the year survives as plain text inside the query.
+
+    `existing` = (candidate, text): a record the FILE already names by an id it carries (TMDB_ID, TVDB_ID, IMDB_ID).
+    It is listed first as "File has an ID: <text>", selected, and no search runs until the user presses Search.
+    `selected_how` is then "manual" (else "title"). With a poster-capable source the dialog also has the "Save the
+    poster in the file" box (`save_poster`) and "Accept a landscape cover when there is no poster"
+    (`accept_landscape`, off by default).
     """
 
     def __init__(self, mode: str, initial_query: str = "", initial_year: str = "", parent=None,
-                 source: Optional[SearchSource] = None):
+                 source: Optional[SearchSource] = None, existing: Optional[tuple] = None):
         super().__init__(parent)
         self.mode = mode  # 'movie' or 'tv'
         self.source = source  # None: TMDB
         self.selected_candidate: Optional[Candidate] = None
+        self.selected_how = "title"
+        self.save_poster = False
+        self.accept_landscape = False
+        self._existing = existing
         self._candidates: list[Candidate] = []
 
         self._set_title()
@@ -117,6 +130,21 @@ class TMDBSearchDialog(QDialog):
         self.overview_label.setMaximumHeight(100)
         layout.addWidget(self.overview_label)
 
+        self.poster_box: Optional[QCheckBox] = None
+        self.landscape_box: Optional[QCheckBox] = None
+        if source is None or source.posters:
+            self._poster_section = source.poster_setting if source is not None else "tmdb_lookup"
+            self.poster_box = QCheckBox("Save the poster in the file")
+            self.poster_box.setToolTip(
+                "Downloads the service's poster (a portrait picture; never a frame from the video) when you use the "
+                "result, embeds it in the video on Save, and asks before replacing a cover the file already has. "
+                "No separate picture file is created.")
+            self.poster_box.setChecked(get_setting(self._poster_section, "poster_in_file", "1") == "1")
+            layout.addWidget(self.poster_box)
+            self.landscape_box = QCheckBox("Accept a landscape cover when there is no poster")
+            self.landscape_box.setToolTip("Off by default: a landscape picture is not a poster.")
+            layout.addWidget(self.landscape_box)
+
         # TMDB's required notice and logo; not for the other sources this
         # dialog also serves (the local IMDb database has its own).
         if source is None:
@@ -134,8 +162,20 @@ class TMDBSearchDialog(QDialog):
         button_row.addWidget(self.cancel_button)
         layout.addLayout(button_row)
 
-        if initial_query:
+        if existing is not None:
+            self._show_existing()
+        elif initial_query:
             self._on_search()
+
+    def _show_existing(self) -> None:
+        candidate, text = self._existing
+        item = QListWidgetItem(f"File has an ID: {text}")
+        item.setData(Qt.ItemDataRole.UserRole, candidate)
+        font = item.font()
+        font.setBold(True)
+        item.setFont(font)
+        self.results_list.addItem(item)
+        self.results_list.setCurrentRow(0)
 
     def _set_title(self) -> None:
         kind = "Movie" if self.mode == "movie" else "TV Show"
@@ -154,6 +194,8 @@ class TMDBSearchDialog(QDialog):
         self.results_list.clear()
         self.overview_label.clear()
         self.select_button.setEnabled(False)
+        if self._existing is not None:
+            self._show_existing()
 
         errors = (TMDBError,) + (self.source.errors if self.source else ())
         try:
@@ -209,4 +251,9 @@ class TMDBSearchDialog(QDialog):
         if candidate is None:
             return
         self.selected_candidate = candidate
+        self.selected_how = "manual" if self._existing is not None and candidate is self._existing[0] else "title"
+        if self.poster_box is not None:
+            self.save_poster = self.poster_box.isChecked()
+            self.accept_landscape = bool(self.landscape_box and self.landscape_box.isChecked())
+            set_setting(self._poster_section, "poster_in_file", "1" if self.save_poster else "0")
         self.accept()

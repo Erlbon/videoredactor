@@ -72,6 +72,25 @@ class VideoMetadata:
     # write it, VideoFile.record_check sets it.
     scan_stamp: str = field(default="", compare=False)
 
+    # --- Source ids (core.source_tags): which record in which outside database this file was matched to ---
+    # Stored inside the file (MKV global tags / MP4 freeform atoms THEPORNDB_ID, STASHDB_ID, TMDB_ID, IMDB_ID,
+    # TVDB_ID, SOURCE_URL, METADATA_MATCH). Like scan_stamp: not in EDITABLE_FIELDS (the panel never edits them),
+    # compare=False, and only ever written from an accepted lookup result (core.source_tags.stage_sources).
+    theporndb_id: str = field(default="", compare=False)
+    stashdb_id: str = field(default="", compare=False)
+    tmdb_id: str = field(default="", compare=False)
+    imdb_id: str = field(default="", compare=False)
+    tvdb_id: str = field(default="", compare=False)
+    source_url: str = field(default="", compare=False)
+    metadata_match: str = field(default="", compare=False)
+
+    # --- Embedded poster ---
+    # cover_info: what the file carries now ("JPEG 600x900, 88 KB"; "" = none), read-only, from the file.
+    # cover_pending: a poster (JPEG bytes, core.poster) staged by a lookup, embedded by the next Save (an undoable
+    # staged change like any other field, so it IS compared).
+    cover_info: str = field(default="", compare=False)
+    cover_pending: Optional[bytes] = field(default=None, repr=False)
+
     # --- Read-only / technical (populated from file, never hand-edited) ---
     resolution: str = field(default="", compare=False)
     video_codec: str = field(default="", compare=False)
@@ -81,6 +100,11 @@ class VideoMetadata:
     frame_rate: str = field(default="", compare=False)
     container: str = field(default="", compare=False)  # 'mp4' or 'mkv'
 
+
+# The per-file source fields (see above): kept in the file, shown read-only, never in settings.
+SOURCE_FIELDS = [
+    "theporndb_id", "stashdb_id", "tmdb_id", "imdb_id", "tvdb_id", "source_url", "metadata_match",
+]
 
 # Fields considered "editable" (i.e. NOT the read-only technical block).
 # Used by the GUI to decide what the bulk-edit panel ever touches.

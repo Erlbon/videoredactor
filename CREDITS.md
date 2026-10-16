@@ -48,7 +48,7 @@ system:
   [stash-box](https://github.com/stashapp/stash-box) instance; other instances can be set under Tools > API Keys) —
   optional scene metadata lookups (Metadata > Look Up). The data is contributed by their users and belongs to its
   contributors; the app sends only a file's hash and/or the search text you see, with your own key, and fetches a
-  cover only when you apply a result and ask for it. Neither is bundled and neither has endorsed this application.
+  poster only when you apply a result and ask for it (it is embedded in the video, not saved beside it). Neither is bundled and neither has endorsed this application.
 - **[LibreTranslate](https://libretranslate.com/)** and
   **[Argos Translate](https://github.com/argosopentech/argos-translate)** —
   the optional offline translation engines subtitle translation can

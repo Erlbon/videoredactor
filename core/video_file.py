@@ -22,9 +22,9 @@ from redactor_common.core.scan_stamp import ScanStamp, make_stamp, parse_stamp
 from redactor_common.core.journal import KIND_SAVE
 
 from core import history
-from core.video_metadata import VideoMetadata, EDITABLE_FIELDS, ContentType
-from core.mp4_backend import read_mp4_metadata, write_mp4_metadata
-from core.mkv_backend import read_mkv_metadata, write_mkv_metadata
+from core.video_metadata import VideoMetadata, EDITABLE_FIELDS, SOURCE_FIELDS, ContentType
+from core.mp4_backend import read_mp4_cover, read_mp4_metadata, write_mp4_cover, write_mp4_metadata
+from core.mkv_backend import read_mkv_cover, read_mkv_metadata, write_mkv_cover, write_mkv_metadata
 from core.ffmpeg_backend import IMPORTABLE_EXTENSIONS, extract_thumbnail, probe_technical_info
 from core.external_tools import is_tool_available, MKVTOOLNIX, FFMPEG
 from core.opensubtitles_client import clean_language_code
@@ -69,6 +69,8 @@ class VideoFile:
     # Tools > History journal). None for a VideoFile that was never loaded (a Redact working copy, the tag
     # re-write after a conversion): its saves are not journaled.
     baseline: Optional[dict] = field(default=None, repr=False, compare=False)
+    # "Poster" or "Frame preview": what get_preview() last returned (the side panel's caption).
+    preview_kind: str = field(default="Frame preview", repr=False, compare=False)
 
     def __setattr__(self, name, value):
         if name == "dirty":
@@ -300,7 +302,50 @@ class VideoFile:
             return
 
         self.save_error = ""
+        if self.metadata.cover_pending:  # embedded and read back: it is the file's cover now
+            self.metadata.cover_info = self._cover_info_now()
+            self.metadata.cover_pending = None
         self.dirty = False
+
+    def _cover_info_now(self) -> str:
+        try:
+            if self.is_mkv:
+                return read_mkv_metadata(str(self.path)).cover_info
+            return read_mp4_metadata(str(self.path)).cover_info
+        except Exception:  # noqa: BLE001
+            return ""
+
+    def read_cover(self) -> Optional[bytes]:
+        """The poster embedded in the file (bytes), None when there is none."""
+        if self.is_mkv:
+            return read_mkv_cover(str(self.path))
+        if self.is_mp4:
+            return read_mp4_cover(str(self.path))
+        return None
+
+    def embed_cover_now(self, jpeg: bytes) -> str:
+        """Embeds `jpeg` as the file's cover right away, touching nothing else (no other staged edit is written),
+        then reads it back. Returns "" on success or the problem. Used by Embed Existing Poster Files, which must
+        know the embed worked before it moves a sidecar to the Recycle Bin."""
+        try:
+            if self.is_mkv:
+                if not is_tool_available(MKVTOOLNIX):
+                    return f"MKVToolNix (mkvpropedit) not found -- install it from {MKVTOOLNIX.download_url}."
+                result = write_mkv_cover(str(self.path), jpeg)
+                if result.returncode not in (0, 1):
+                    return result.stderr.strip() or "mkvpropedit failed"
+            elif self.is_mp4:
+                write_mp4_cover(str(self.path), jpeg)
+            else:
+                return f"Unsupported extension: {self.extension}"
+            if self.read_cover() != jpeg:
+                return "the poster is not in the file after writing it"
+        except OSError as e:
+            return f"File error: {describe_save_error(e)}"
+        except Exception as e:  # noqa: BLE001
+            return f"Could not embed the poster: {e}"
+        self.metadata.cover_info = self._cover_info_now()
+        return ""
 
     def _verify_write(self, write_diagnostic: str = "") -> str:
         """Re-read the just-saved file and compare every EDITABLE_FIELDS
@@ -347,6 +392,22 @@ class VideoFile:
             mismatches.append(
                 f"'scan_stamp' (wrote {self.metadata.scan_stamp!r}, file now reads {reread.scan_stamp!r})"
             )
+        for field_name in SOURCE_FIELDS:
+            if getattr(reread, field_name, "") != getattr(self.metadata, field_name, ""):
+                mismatches.append(
+                    f"'{field_name}' (wrote {getattr(self.metadata, field_name, '')!r}, "
+                    f"file now reads {getattr(reread, field_name, '')!r})"
+                )
+        pending = self.metadata.cover_pending
+        if pending:
+            try:
+                embedded = self.read_cover()
+            except Exception as e:  # noqa: BLE001
+                embedded = None
+                mismatches.append(f"'cover' (could not be read back: {e})")
+            else:
+                if embedded != pending:
+                    mismatches.append("'cover' (the poster is not in the file after the save)")
         for field_name in EDITABLE_FIELDS:
             expected = getattr(self.metadata, field_name, None)
             actual = getattr(reread, field_name, None)
@@ -382,28 +443,6 @@ class VideoFile:
             message += f" | read-back tool output: {read_errors}"
         return message
 
-    def save_poster_sidecar(self, image_bytes: bytes, overwrite: bool = False) -> Path:
-        """Write poster art as a sidecar JPEG next to the video file
-        (`<stem>-poster.jpg`), the convention Plex/Jellyfin/Kodi already
-        prefer over embedded cover art. Used for BOTH MP4 and MKV in v1
-        -- deliberately not also embedding into MP4's native covr atom
-        here, even though mp4_backend supports it, so poster-saving has
-        one consistent immediate-write behavior across formats rather
-        than MP4 writing to the video file immediately while other
-        imported fields stay staged until Save.
-
-        Unlike metadata edits, this is NOT staged/dirty -- it writes a
-        brand-new sidecar file, which never risks corrupting the actual
-        video file, so there's no reason to gate it behind Save.
-
-        Raises FileExistsError (not silently replacing a poster the
-        user may have picked by hand) unless `overwrite`; OSError for
-        anything else -- the caller reports it.
-        """
-        out_path = self.path.with_name(f"{self.path.stem}-poster.jpg")
-        _write_sidecar(out_path, image_bytes, overwrite)
-        return out_path
-
     def save_subtitle_sidecar(self, subtitle_text: str, language: str = "en", overwrite: bool = False) -> Path:
         """Write a subtitle as a sidecar file (`<stem>.<lang>.srt`), the
         same convention Plex/Jellyfin/Kodi expect for external subtitle
@@ -412,7 +451,7 @@ class VideoFile:
         adding a track needs an mkvmerge remux), so embedding was
         deliberately dropped in favor of matching MP4's simpler sidecar
         approach, keeping subtitle-saving behavior consistent across
-        formats the same way poster-saving is.
+        formats the same way.
 
         Language code goes in the filename (Plex/Jellyfin/Kodi convention
         for identifying which sidecar is which language) rather than
@@ -421,11 +460,39 @@ class VideoFile:
         `language` must look like a language code (anything else, e.g.
         a value with a path separator from the server, becomes "und" --
         it's part of a filename). Raises FileExistsError unless
-        `overwrite`, OSError for anything else, like save_poster_sidecar.
+        `overwrite`, OSError for anything else.
         """
         out_path = self.path.with_name(f"{self.path.stem}.{clean_language_code(language)}.srt")
         _write_sidecar(out_path, subtitle_text.encode("utf-8"), overwrite)
         return out_path
+
+    def get_preview(self) -> Optional[Path]:
+        """What the side panel shows: the poster embedded in the file when it has one (a JPEG, extracted into the
+        thumbnail cache), else the frame thumbnail. `preview_kind` says which: "Poster" or "Frame preview"."""
+        self.preview_kind = "Frame preview"
+        if self.metadata.cover_info:
+            try:
+                mtime = self.path.stat().st_mtime
+                key = hashlib.sha1(f"{self.path}:{mtime}:poster".encode("utf-8")).hexdigest()
+                out_path = THUMBNAIL_CACHE_DIR / f"{key}.jpg"
+                if not out_path.exists() or not is_valid_thumbnail(out_path):
+                    data = self.read_cover()
+                    THUMBNAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+                    def produce(tmp: str) -> bool:
+                        if not data:
+                            return False
+                        with open(tmp, "wb") as handle:
+                            handle.write(data)
+                        return True
+
+                    if not write_thumbnail_atomically(out_path, produce):
+                        raise OSError("poster not usable")
+                self.preview_kind = "Poster"
+                return out_path
+            except Exception:  # noqa: BLE001 -- the frame preview is the fallback
+                pass
+        return self.get_thumbnail()
 
     def get_thumbnail(self, force_regenerate: bool = False) -> Optional[Path]:
         """Return a cached thumbnail path, generating it via ffmpeg if

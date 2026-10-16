@@ -1,6 +1,7 @@
 """The ThePornDB / StashDB lookup on the real MainWindow, offscreen, with a scratch settings file and a FAKE source (no
 network): the hash search on open, the file-match highlight, the title flag, the explicit pick, the per-field overwrite
-review before anything is written, Cancel, the missing-key panel and the cover sidecar."""
+review before anything is written, Cancel, the missing-key panel, the source ids and the EMBEDDED poster (no sidecar
+file is ever created)."""
 
 import os
 
@@ -28,14 +29,16 @@ def scene(**over) -> SceneResult:
     base = dict(source="Fake", external_id="id-1", title="Test Scene Title", date="2021-11-15", studio="Example Studio",
                 parent_studio="Example Network", performers=["Performer One", "Performer Two"], tags=["Tag A", "Tag B"],
                 description="Synthetic description.", director="Director One", page_url="https://example.com/scenes/id-1",
-                cover_url="https://cdn.example.com/c.jpg", match_kind=MATCH_FILE)
+                cover_url="https://cdn.example.com/c.jpg", poster_urls=["https://cdn.example.com/c.jpg"],
+                match_kind=MATCH_FILE)
     base.update(over)
     return SceneResult(**base)
 
 
-def tiny_png() -> bytes:
-    """A generated 4x4 solid image (synthetic pixels, not artwork) standing in for a downloaded cover."""
-    image = QImage(4, 4, QImage.Format.Format_RGB32)
+def tiny_png(width: int = 600, height: int = 900) -> bytes:
+    """A generated solid image (synthetic pixels, not artwork) standing in for a downloaded picture; 600x900 is a
+    poster, 900x600 a landscape picture."""
+    image = QImage(width, height, QImage.Format.Format_RGB32)
     image.fill(0x336699)
     buffer = QBuffer()
     buffer.open(QIODevice.OpenModeFlag.WriteOnly)
@@ -50,7 +53,7 @@ class FakeSource(SceneSource):
         return self.key_present
 
 
-def make_source(by_hash=None, by_title=None, key=True, uses_md5=False, kinds=()):
+def make_source(by_hash=None, by_title=None, key=True, uses_md5=False, kinds=(), key_id="fake"):
     calls = {"hash": [], "title": [], "cover": []}
 
     def search_hash(hashes):
@@ -65,7 +68,7 @@ def make_source(by_hash=None, by_title=None, key=True, uses_md5=False, kinds=())
         calls["cover"].append(url)
         return tiny_png()
 
-    source = FakeSource(key_id="fake", name="Fake", search_hash=search_hash, search_title=search_title,
+    source = FakeSource(key_id=key_id, name="Fake", search_hash=search_hash, search_title=search_title,
                         download_cover=download_cover, uses_md5=uses_md5, kinds=kinds)
     source.key_present = key
     source.calls = calls
@@ -99,11 +102,12 @@ def no_message_boxes(monkeypatch):
     return shown
 
 
-def pick_first_and_accept(monkeypatch, cover=False, seen=None):
+def pick_first_and_accept(monkeypatch, cover=False, seen=None, landscape=False):
     def fake_exec(self):
         if seen is not None:
             seen.append(self)
         self.table.selectRow(0)
+        self.landscape_box.setChecked(landscape)
         self.cover_box.setChecked(cover)
         self._on_accept()
         return QDialog.DialogCode.Accepted
@@ -280,7 +284,7 @@ def test_the_review_shows_before_an_existing_value_is_overwritten_and_starts_unt
     assert meta.cast == "Performer One, Performer Two" and meta.director == "Director One"  # the blank ones were
 
 
-def test_cancelling_the_review_changes_nothing_and_saves_no_cover(window, monkeypatch, tmp_path):
+def test_cancelling_the_review_changes_nothing_and_stages_no_poster(window, monkeypatch, tmp_path):
     window.video_files[0].metadata = VideoMetadata(title="My Own Title")
     pick_first_and_accept(monkeypatch, cover=True)
     review(monkeypatch, accept=False)
@@ -288,33 +292,61 @@ def test_cancelling_the_review_changes_nothing_and_saves_no_cover(window, monkey
     run(window, source)
     vf = window.video_files[0]
     assert vf.metadata == VideoMetadata(title="My Own Title") and not vf.dirty and not window.undo_manager.can_undo()
-    assert source.calls["cover"] == [] and not (tmp_path / "Example.Studio.Test.Scene.Title.2021-poster.jpg").exists()
+    # The poster was fetched for the review to show it; nothing of it was staged or written anywhere.
+    assert vf.metadata.cover_pending is None and not list(tmp_path.glob("*-poster.*"))
 
 
-def test_the_cover_is_saved_only_when_ticked_as_a_jpeg_sidecar(window, monkeypatch, tmp_path):
-    target = tmp_path / "Example.Studio.Test.Scene.Title.2021-poster.jpg"
+def listing(folder):
+    return sorted(os.listdir(folder))
+
+
+def test_the_poster_is_embedded_only_when_ticked_and_no_sidecar_is_created(window, monkeypatch, tmp_path):
+    before = listing(tmp_path)
     pick_first_and_accept(monkeypatch, cover=False)
     source = make_source(by_hash=[scene()])
     run(window, source)
-    assert source.calls["cover"] == [] and not target.exists()  # not ticked: nothing downloaded
+    vf = window.video_files[0]
+    assert source.calls["cover"] == [] and vf.metadata.cover_pending is None  # not ticked: nothing downloaded
 
-    window.video_files[0].metadata = VideoMetadata()
+    vf.metadata = VideoMetadata()
     pick_first_and_accept(monkeypatch, cover=True)
     run(window, source)
     assert source.calls["cover"] == ["https://cdn.example.com/c.jpg"]
-    assert target.read_bytes()[:3] == b"\xff\xd8\xff"  # the PNG the source returned was converted to a JPEG
+    assert vf.metadata.cover_pending[:3] == b"\xff\xd8\xff"  # the PNG the source returned became a JPEG, staged
+    assert vf.dirty and "poster(s) will be embedded on Save" in window.status_bar.currentMessage()
+    assert listing(tmp_path) == before  # NO sidecar file anywhere: nothing was written beside the video
 
 
-def test_a_result_without_a_cover_cannot_ask_for_one(window):
-    dialog = SceneSearchDialog(make_source(by_hash=[scene(cover_url="")]), window.video_files[0], parent=window)
+def test_a_landscape_picture_is_not_embedded_unless_accepted(window, monkeypatch, tmp_path):
+    before = listing(tmp_path)
+    source = make_source(by_hash=[scene()])
+    source.download_cover = lambda url: tiny_png(900, 600)
+    pick_first_and_accept(monkeypatch, cover=True)
+    run(window, source)
+    vf = window.video_files[0]
+    assert vf.metadata.cover_pending is None and vf.metadata.title == "Test Scene Title"
+    assert "No poster available from Fake" in window.status_bar.currentMessage()
+    assert listing(tmp_path) == before
+
+    vf.metadata = VideoMetadata()
+    pick_first_and_accept(monkeypatch, cover=True, landscape=True)
+    source = make_source(by_hash=[scene(landscape_urls=["https://cdn.example.com/wide.jpg"])])
+    source.download_cover = lambda url: tiny_png(900, 600)
+    run(window, source)
+    assert vf.metadata.cover_pending is not None  # the user accepted a landscape cover for this lookup
+
+
+def test_a_result_without_a_poster_cannot_ask_for_one(window):
+    dialog = SceneSearchDialog(make_source(by_hash=[scene(cover_url="", poster_urls=[])]), window.video_files[0], parent=window)
     dialog.table.selectRow(0)
     assert not dialog.cover_box.isEnabled()
     dialog.cover_box.setChecked(True)
     dialog._on_accept()
     assert dialog.save_cover is False
+    assert "none from Fake" in dialog.detail.toPlainText()
 
 
-def test_a_failed_cover_download_does_not_undo_the_metadata(window, monkeypatch, no_message_boxes):
+def test_a_failed_poster_download_does_not_undo_the_metadata(window, monkeypatch, no_message_boxes):
     pick_first_and_accept(monkeypatch, cover=True)
     source = make_source(by_hash=[scene()])
 
@@ -324,7 +356,76 @@ def test_a_failed_cover_download_does_not_undo_the_metadata(window, monkeypatch,
     source.download_cover = boom
     run(window, source)
     assert window.video_files[0].metadata.title == "Test Scene Title"
-    assert "cover not saved" in window.status_bar.currentMessage()
+    assert window.video_files[0].metadata.cover_pending is None
+    assert "No poster available from Fake" in window.status_bar.currentMessage()
+
+
+def test_an_existing_cover_is_replaced_only_through_the_review(window, monkeypatch):
+    vf = window.video_files[0]
+    vf.metadata = VideoMetadata(cover_info="JPEG 600x900, 80 KB")
+    pick_first_and_accept(monkeypatch, cover=True)
+    shown = []
+    review(monkeypatch, accept=True, shown=shown)
+    run(window, make_source(by_hash=[scene()]))
+    assert len(shown) == 1  # the existing cover is a conflict: the review appears
+    # the poster row starts unticked (it would replace a cover): the accepted review left it out
+    assert vf.metadata.cover_pending is None
+
+
+def test_source_ids_are_staged_from_the_accepted_result(window, monkeypatch):
+    uuid = "d284e2a0-789d-4e6c-beb9-6e61c24e8b84"
+    result = scene(source="ThePornDB", external_id=uuid, page_url="https://theporndb.net/scenes/some-slug")
+    pick_first_and_accept(monkeypatch)
+    run(window, make_source(by_hash=[result]))
+    md = window.video_files[0].metadata
+    assert md.theporndb_id == uuid and md.stashdb_id == "" and md.tmdb_id == ""
+    assert md.source_url == "https://theporndb.net/scenes/" + uuid
+    assert md.metadata_match.startswith("theporndb;") and md.metadata_match.endswith(";file")
+
+
+def test_nothing_is_staged_when_the_review_is_cancelled(window, monkeypatch):
+    uuid = "d284e2a0-789d-4e6c-beb9-6e61c24e8b84"
+    window.video_files[0].metadata = VideoMetadata(title="Mine")
+    pick_first_and_accept(monkeypatch, cover=True)
+    review(monkeypatch, accept=False)
+    run(window, make_source(by_hash=[scene(source="ThePornDB", external_id=uuid)]))
+    md = window.video_files[0].metadata
+    assert md.theporndb_id == "" and md.cover_pending is None and md.title == "Mine"
+
+
+def test_the_id_in_the_file_is_used_directly_without_a_search(window, monkeypatch):
+    uuid = "d284e2a0-789d-4e6c-beb9-6e61c24e8b84"
+    window.video_files[0].metadata = VideoMetadata(theporndb_id=uuid)
+    asked = []
+
+    def by_id(ref):
+        asked.append(ref)
+        return scene(source="ThePornDB", external_id=uuid, match_kind=MATCH_TITLE)
+
+    source = make_source(by_hash=[scene()], by_title=[scene()], key_id="theporndb") if False else make_source(by_hash=[scene()])
+    source.key_id = "theporndb"
+    source.get_by_id = by_id
+    source.id_kinds = ("scene", "movie", "jav")
+    dialog = SceneSearchDialog(source, window.video_files[0], parent=window)
+    assert [r.id for r in asked] == [uuid]
+    assert source.calls["hash"] == [] and source.calls["title"] == []  # no search at all
+    assert dialog.table.rowCount() == 1 and dialog.table.item(0, 0).text() == "File has an ID"
+    assert "File has an ID" in dialog.status_label.text()
+    dialog._on_accept()
+    assert dialog.selected_result.is_id_match
+
+
+def test_an_id_that_cannot_be_fetched_falls_back_to_the_normal_search(window):
+    uuid = "d284e2a0-789d-4e6c-beb9-6e61c24e8b84"
+    window.video_files[0].metadata = VideoMetadata(theporndb_id=uuid)
+
+    def by_id(ref):
+        raise SceneLookupError("gone")
+
+    source = make_source(by_hash=[scene()])
+    source.key_id, source.get_by_id = "theporndb", by_id
+    SceneSearchDialog(source, window.video_files[0], parent=window)
+    assert len(source.calls["hash"]) == 1
 
 
 def test_several_selected_files_each_get_a_dialog_and_one_review(window, monkeypatch, tmp_path):

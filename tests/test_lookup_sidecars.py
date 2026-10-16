@@ -97,13 +97,9 @@ def test_subtitle_sidecar_cannot_escape_the_folder_and_does_not_overwrite(tmp_pa
     assert vf.save_subtitle_sidecar("three", language="zz", overwrite=True).read_text() == "three"
 
 
-def test_poster_sidecar_does_not_silently_overwrite(tmp_path):
-    vf = VideoFile(path=tmp_path / "m.mkv", metadata=VideoMetadata())
-    poster = vf.save_poster_sidecar(b"a")
-    with pytest.raises(FileExistsError):
-        vf.save_poster_sidecar(b"b")
-    assert poster.read_bytes() == b"a"
-    assert vf.save_poster_sidecar(b"b", overwrite=True).read_bytes() == b"b"
+def test_no_poster_sidecar_can_be_created_any_more():
+    """Posters are embedded in the video (core.poster, VideoFile.embed_cover_now): the sidecar writer is gone."""
+    assert not hasattr(VideoFile, "save_poster_sidecar")
 
 
 @pytest.fixture
@@ -124,7 +120,7 @@ def window(monkeypatch, tmp_path):
 def test_save_sidecar_reports_errors_and_asks_before_replacing(window, monkeypatch, tmp_path):
     vf = VideoFile(path=tmp_path / "m.mkv", metadata=VideoMetadata())
 
-    status, detail = window._save_sidecar(lambda overwrite: vf.save_poster_sidecar(b"a", overwrite), {})
+    status, detail = window._save_sidecar(lambda overwrite: vf.save_subtitle_sidecar("a", "en", overwrite), {})
     assert status == "saved"
 
     asked = []
@@ -136,14 +132,14 @@ def test_save_sidecar_reports_errors_and_asks_before_replacing(window, monkeypat
         return fake
 
     monkeypatch.setattr(QMessageBox, "question", answer(QMessageBox.StandardButton.No))
-    assert window._save_sidecar(lambda o: vf.save_poster_sidecar(b"b", o), {})[0] == "kept"
-    assert detail.read_bytes() == b"a" and "m-poster.jpg" in asked[0]
+    assert window._save_sidecar(lambda o: vf.save_subtitle_sidecar("b", "en", o), {})[0] == "kept"
+    assert detail.read_bytes() == b"a" and "m.en.srt" in asked[0]
 
     monkeypatch.setattr(QMessageBox, "question", answer(QMessageBox.StandardButton.YesToAll))
     choice = {}
-    assert window._save_sidecar(lambda o: vf.save_poster_sidecar(b"b", o), choice)[0] == "saved"
+    assert window._save_sidecar(lambda o: vf.save_subtitle_sidecar("b", "en", o), choice)[0] == "saved"
     assert detail.read_bytes() == b"b" and choice == {"all": True}
-    assert window._save_sidecar(lambda o: vf.save_poster_sidecar(b"c", o), choice)[0] == "saved"  # no new question
+    assert window._save_sidecar(lambda o: vf.save_subtitle_sidecar("c", "en", o), choice)[0] == "saved"  # no new question
     assert len(asked) == 2
 
     def unwritable(_overwrite):

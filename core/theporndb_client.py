@@ -118,19 +118,31 @@ def _names(nodes: Any) -> list[str]:
     return clean_names([_name_of(n) for n in nodes] if isinstance(nodes, list) else [])
 
 
-def _pick_cover(scene: dict) -> str:
-    """The best cover URL the record carries: the poster sizes first, then the plain poster and the scene image."""
+def _poster_urls(scene: dict) -> list[str]:
+    """The poster-type pictures of the record, best first: the `posters` sizes (the API's poster type), then the plain
+    `poster` and `poster_image` fields. NEVER `background`, `image` or `back_image`: those are scene stills. The
+    picture's real shape is checked after the download (core.poster), because a studio can put a still in `poster`."""
     candidates: list[Any] = []
-    for key in ("posters", "background"):
-        sizes = scene.get(key)
-        if isinstance(sizes, dict):
-            candidates += [sizes.get("large"), sizes.get("full"), sizes.get("medium")]
-    candidates += [scene.get("poster"), scene.get("image"), scene.get("poster_image")]
+    sizes = scene.get("posters")
+    if isinstance(sizes, dict):
+        candidates += [sizes.get("large"), sizes.get("full"), sizes.get("medium")]
+    candidates += [scene.get("poster"), scene.get("poster_image")]
+    urls: list[str] = []
     for candidate in candidates:
         url = clean_url(candidate)
-        if url:
-            return url
-    return ""
+        if url and url not in urls:
+            urls.append(url)
+    return urls
+
+
+def _landscape_urls(scene: dict) -> list[str]:
+    """The wide pictures (background, scene image): used only when the user ticks "Accept a landscape cover"."""
+    candidates: list[Any] = []
+    sizes = scene.get("background")
+    if isinstance(sizes, dict):
+        candidates += [sizes.get("large"), sizes.get("full"), sizes.get("medium")]
+    candidates += [scene.get("image")]
+    return [u for u in dict.fromkeys(clean_url(c) for c in candidates) if u]
 
 
 def parse_scene(scene: Any, match_kind: str = MATCH_TITLE, kind: str = "scene") -> Optional[SceneResult]:
@@ -161,7 +173,10 @@ def parse_scene(scene: Any, match_kind: str = MATCH_TITLE, kind: str = "scene") 
         director=", ".join(_names(scene.get("directors"))),
         urls=[u for u in (clean_url(scene.get("url")),) if u],
         page_url=page,
-        cover_url=_pick_cover(scene),
+        cover_url=(_poster_urls(scene) or [""])[0],
+        poster_urls=_poster_urls(scene),
+        landscape_urls=_landscape_urls(scene),
+        kind=kind,
         code=clean_text(scene.get("sku"), 100, single_line=True),
         duration=int(duration) if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration > 0 else None,
         match_kind=match_kind,

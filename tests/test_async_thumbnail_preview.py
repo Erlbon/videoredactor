@@ -24,9 +24,13 @@ class _FakeVideoFile:
         self._thumb_path = thumb_path
         self._delay = delay
 
+    preview_kind = "Frame preview"
+
     def get_thumbnail(self):
         time.sleep(self._delay)
         return self._thumb_path
+
+    get_preview = get_thumbnail  # the window asks for the preview (poster, else this frame)
 
 
 def _write_jpeg(path):

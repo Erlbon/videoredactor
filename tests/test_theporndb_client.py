@@ -46,6 +46,8 @@ def test_hash_match_is_a_file_match_with_every_field(fetch):
     assert result.performers == ["Performer One", "Performer Two"] and result.tags == ["Tag A", "Tag B"]
     assert result.director == "Director One" and result.code == "SKU-0001" and result.duration == 1830
     assert result.cover_url == "https://cdn.example.com/p/large.jpg"  # the poster sizes win
+    assert all("background" not in u and "image" not in u for u in result.poster_urls)  # a still is never a poster
+    assert result.kind == "scene"
     assert result.urls == ["https://example.com/scene/test-scene-title"]
     assert result.page_url == "https://theporndb.net/scenes/example-studio-test-scene-title"
     assert result.external_id == "11111111-2222-3333-4444-555555555555"

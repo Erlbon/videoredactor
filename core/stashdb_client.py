@@ -167,13 +167,38 @@ def _credited(entry: Any) -> str:
     return alias or clean_text(performer.get("name"), 200, single_line=True)
 
 
-def _pick_image(images: Any) -> str:
-    """The cover: the first image the record lists (the service puts the primary one first)."""
+def _poster_images(images: Any) -> list[str]:
+    """The poster candidates: StashDB has no poster type, so an image counts when it is portrait (the sizes the
+    record states: height / width >= 1.3, see core.poster) or states none (checked after the download). Portrait
+    ones first; a landscape one is never a candidate."""
+    from core.poster import MIN_RATIO
+
+    portrait: list[str] = []
+    unknown: list[str] = []
     for image in images if isinstance(images, list) else []:
         url = clean_url(image.get("url")) if isinstance(image, dict) else ""
-        if url:
-            return url
-    return ""
+        if not url:
+            continue
+        w, h = image.get("width"), image.get("height")
+        if isinstance(w, int) and isinstance(h, int) and not isinstance(w, bool) and w > 0 and h > 0:
+            if h / w >= MIN_RATIO:
+                portrait.append(url)
+        else:
+            unknown.append(url)
+    return portrait + unknown
+
+
+def _landscape_images(images: Any) -> list[str]:
+    """The images that are not portrait (used only when the user ticks "Accept a landscape cover")."""
+    from core.poster import MIN_RATIO
+
+    out: list[str] = []
+    for image in images if isinstance(images, list) else []:
+        url = clean_url(image.get("url")) if isinstance(image, dict) else ""
+        w, h = (image.get("width"), image.get("height")) if isinstance(image, dict) else (None, None)
+        if url and isinstance(w, int) and isinstance(h, int) and w > 0 and h > 0 and h / w < MIN_RATIO:
+            out.append(url)
+    return out
 
 
 def parse_scene(scene: Any, match_kind: str = MATCH_TITLE, endpoint: str = "") -> Optional[SceneResult]:
@@ -203,7 +228,10 @@ def parse_scene(scene: Any, match_kind: str = MATCH_TITLE, endpoint: str = "") -
         director=clean_text(scene.get("director"), 300, single_line=True),
         urls=[u for u in (clean_url(x.get("url")) if isinstance(x, dict) else "" for x in (urls if isinstance(urls, list) else [])) if u],
         page_url=f"{base}/scenes/{ident}" if ident else "",
-        cover_url=_pick_image(scene.get("images")),
+        cover_url=(_poster_images(scene.get("images")) or [""])[0],
+        poster_urls=_poster_images(scene.get("images")),
+        landscape_urls=_landscape_images(scene.get("images")),
+        id_trusted=urllib.parse.urlsplit(base).netloc.lower() in ("stashdb.org", "www.stashdb.org"),
         code=clean_text(scene.get("code"), 100, single_line=True),
         duration=int(duration) if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration > 0 else None,
         match_kind=match_kind,

@@ -121,8 +121,8 @@ def notes_section(actions: tuple[PrefAction, ...] = ()) -> PrefSection:
 SCENE_PRIVACY_TEXT = (
     "Metadata > Look Up > ThePornDB and StashDB send ONLY a file's hash (the OSHASH, which reads 128 KB of the file) "
     "and/or the search text shown in the dialog, together with your own key to that service. No file name, path or "
-    "other tag leaves this computer, and no image is downloaded unless you apply a result and tick Save the cover as "
-    "a sidecar. The services see your key and your IP address. The StashDB address and the keys are under "
+    "other tag leaves this computer, and no image is downloaded unless you apply a result and tick Save the poster "
+    "in the file. The services see your key and your IP address. The StashDB address and the keys are under "
     "Tools > API Keys."
 )
 

@@ -52,6 +52,7 @@ DEFAULT_STASH_ENDPOINT = "https://stashdb.org/graphql"
 
 MATCH_FILE = "file match"
 MATCH_TITLE = "title match"
+MATCH_ID = "id match"  # the file already carries the service's id (THEPORNDB_ID / STASHDB_ID)
 TITLE_WARNING = "match by title: check it"
 
 # Where to get a key (shown when none is set).
@@ -94,7 +95,11 @@ class SceneResult:
     director: str = ""
     urls: list[str] = field(default_factory=list)          # the studio's own pages for it
     page_url: str = ""                                     # the page on the service
-    cover_url: str = ""
+    cover_url: str = ""                                    # the first poster candidate ("" = the record has no poster)
+    poster_urls: list[str] = field(default_factory=list)   # poster-type pictures only (never a background or a scene still)
+    landscape_urls: list[str] = field(default_factory=list)  # wide pictures: used only when the user accepts a landscape cover
+    kind: str = "scene"                                    # ThePornDB: scene / movie / jav (StashDB: scene)
+    id_trusted: bool = True                                # False for a stash-box that is not stashdb.org: its id is not a StashDB id
     code: str = ""
     duration: Optional[int] = None                         # seconds
     match_kind: str = MATCH_TITLE
@@ -106,6 +111,10 @@ class SceneResult:
     @property
     def is_file_match(self) -> bool:
         return self.match_kind == MATCH_FILE
+
+    @property
+    def is_id_match(self) -> bool:
+        return self.match_kind == MATCH_ID
 
     def summary(self) -> str:
         who = ", ".join(self.performers[:3]) + (" ..." if len(self.performers) > 3 else "")

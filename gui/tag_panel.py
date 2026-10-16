@@ -14,13 +14,14 @@ specifically fix once (v23) after it initially leaked through.
 """
 
 from __future__ import annotations
+import html
 from typing import Optional
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFormLayout, QLineEdit,
-    QTextEdit, QSpinBox, QComboBox, QLabel, QPushButton, QStyle,
+    QTextEdit, QSpinBox, QComboBox, QLabel, QPushButton, QStyle, QToolButton,
 )
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
 
 from core.video_metadata import ContentType, fields_for_content_type, UNIVERSAL_FIELDS
@@ -123,7 +124,30 @@ class TagPanel(QWidget):
         self.scroll_area.setWidgetResizable(True)
         self.form_container = QWidget()
         self.form_layout = QFormLayout(self.form_container)
-        self.scroll_area.setWidget(self.form_container)
+        # The form, then the collapsed read-only "Sources" section (the source ids kept in the file).
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.addWidget(self.form_container)
+        self.sources_toggle = QToolButton()
+        self.sources_toggle.setCheckable(True)
+        self.sources_toggle.setChecked(False)
+        self.sources_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.sources_toggle.setArrowType(Qt.ArrowType.RightArrow)
+        self.sources_toggle.setText("Sources")
+        self.sources_toggle.setToolTip("Which records of which databases this file was matched to (read-only; they "
+                                       "are set by a lookup and kept inside the file).")
+        self.sources_toggle.toggled.connect(self._on_sources_toggled)
+        scroll_layout.addWidget(self.sources_toggle)
+        self.sources_label = QLabel()
+        self.sources_label.setTextFormat(Qt.TextFormat.RichText)
+        self.sources_label.setOpenExternalLinks(True)
+        self.sources_label.setWordWrap(True)
+        self.sources_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        self.sources_label.setVisible(False)
+        scroll_layout.addWidget(self.sources_label)
+        scroll_layout.addStretch(1)
+        self.scroll_area.setWidget(scroll_content)
 
         # redactor_common's ImagePreviewBox + ImagePanelSplitter: the
         # resizable image area every Redactor side panel shares -- drag
@@ -151,6 +175,35 @@ class TagPanel(QWidget):
 
         self.set_content_type_filter(None)  # builds the initial (all-fields) form
 
+    def _on_sources_toggled(self, expanded: bool) -> None:
+        self.sources_toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
+        self.sources_label.setVisible(expanded)
+
+    def set_sources(self, files: list) -> None:
+        """The Sources section for the selection: one file's ids as clickable links (built by redactor_common's
+        build_link, from validated ids only), a note for several files or none. Read-only; stays collapsed or open as
+        the user left it."""
+        from core.source_tags import describe
+
+        if len(files) != 1:
+            self.sources_toggle.setText("Sources")
+            self.sources_label.setText("Select one file to see its sources." if files else "")
+            return
+        rows = describe(files[0].metadata)
+        self.sources_toggle.setText(f"Sources ({len([r for r in rows if r[2]])})" if rows else "Sources")
+        if not rows:
+            self.sources_label.setText("<i>This file has no source ids. A lookup (Metadata > Look Up) adds them.</i>")
+            return
+        lines = []
+        for label, text, link in rows:
+            value = (f'<a href="{html.escape(link, quote=True)}">{html.escape(text)}</a>' if link else html.escape(text))
+            lines.append(f"<b>{html.escape(label)}:</b> {value}")
+        self.sources_label.setText("<br>".join(lines))
+
+    def set_preview_caption(self, caption: str) -> None:
+        """'Poster' (the picture embedded in the file) or 'Frame preview' (a frame ffmpeg grabbed; never written)."""
+        self.preview_box.setTitle(caption)
+
     def set_preview_image(self, path: Optional[str]) -> None:
         """Show a thumbnail, or a 'No preview'/'Multiple files selected'
         placeholder when path is None. AspectRatioImageLabel keeps
@@ -159,6 +212,7 @@ class TagPanel(QWidget):
         box the way this used to be.
         """
         if path is None:
+            self.set_preview_caption("Preview")
             self.preview_box.show_message("No preview")
             return
         self.preview_box.show_pixmap(QPixmap(path), "Preview unavailable")

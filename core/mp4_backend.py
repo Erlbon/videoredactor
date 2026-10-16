@@ -50,7 +50,15 @@ from typing import Optional
 
 from redactor_common.core.os_utils import replace_with_retry, retry_on_lock
 
-from core.video_metadata import VideoMetadata, ContentType
+from core.poster import describe_cover
+from core.video_metadata import SOURCE_FIELDS, VideoMetadata, ContentType
+
+# Freeform atom name of each source field (kept here, not imported from core.source_tags, so the backend stays
+# free of that module; tests/test_source_tags.py checks the two tables agree).
+SOURCE_TAG_NAMES = {
+    "theporndb_id": "THEPORNDB_ID", "stashdb_id": "STASHDB_ID", "tmdb_id": "TMDB_ID", "imdb_id": "IMDB_ID",
+    "tvdb_id": "TVDB_ID", "source_url": "SOURCE_URL", "metadata_match": "METADATA_MATCH",
+}
 
 CUSTOM_ATOM_PREFIX = "----:com.videoredactor:"
 
@@ -83,10 +91,12 @@ CUSTOM_FIELDS = [
     "director", "cast", "writer", "studio", "collection",
     "track_title",
     "scan_stamp",
+    # Source ids (core.source_tags): THEPORNDB_ID ... METADATA_MATCH, written only from an accepted lookup.
+    *SOURCE_FIELDS,
 ]
 
 # Freeform atom names that differ from the field name.
-CUSTOM_ATOM_NAMES = {"scan_stamp": "REDACTOR_CHECK"}
+CUSTOM_ATOM_NAMES = {"scan_stamp": "REDACTOR_CHECK", **{f: t for f, t in SOURCE_TAG_NAMES.items()}}
 
 
 def _custom_key(field_name: str) -> str:
@@ -143,6 +153,9 @@ def read_mp4_metadata(path: str) -> VideoMetadata:
                 setattr(meta, field_name, int(text) if text.isdigit() else None)
             else:
                 setattr(meta, field_name, text)
+        covers = mp4.tags.get("covr")
+        if covers:
+            meta.cover_info = describe_cover(bytes(covers[0]))
     # else: mp4.tags is None -- a genuinely untagged file. meta stays at
     # its all-defaults state, same outcome as if every atom lookup above
     # had simply found nothing, just without needing to crash first.
@@ -174,12 +187,19 @@ def write_mp4_metadata(path: str, meta: VideoMetadata) -> None:
     # mid-write truncates it): copy to a scratch beside it, edit the copy, check it still parses, then swap it
     # in with a lock retry. Same approach as mp3redactor's core/tag_writer.py. MKV (mkvpropedit) is unchanged:
     # it edits in place, by design of the tool.
+    _edit_via_scratch(path, lambda scratch: _apply_mp4_tags(scratch, meta))
+
+
+def _edit_via_scratch(path: str, apply) -> None:
+    """Runs `apply(scratch_path)` on a copy of the video and swaps the copy in only when it still parses."""
     target = os.path.realpath(path)
     fd, scratch = tempfile.mkstemp(prefix=".videoredactor-", suffix=".tmp", dir=os.path.dirname(target))
     os.close(fd)
     try:
         retry_on_lock(shutil.copy2, target, scratch)  # keeps the permissions
-        _apply_mp4_tags(scratch, meta)
+        apply(scratch)
+        from mutagen.mp4 import MP4
+
         MP4(scratch)  # the edited copy must still parse before it replaces anything
         replace_with_retry(scratch, target)
     except BaseException:
@@ -192,7 +212,7 @@ def write_mp4_metadata(path: str, meta: VideoMetadata) -> None:
 
 def _apply_mp4_tags(path: str, meta: VideoMetadata) -> None:
     """The mutagen edit itself, on `path` (a scratch copy, see write_mp4_metadata)."""
-    from mutagen.mp4 import MP4, MP4FreeForm
+    from mutagen.mp4 import MP4, MP4Cover, MP4FreeForm
 
     mp4 = MP4(path)
     if mp4.tags is None:
@@ -230,6 +250,10 @@ def _apply_mp4_tags(path: str, meta: VideoMetadata) -> None:
         elif key in mp4.tags:
             del mp4.tags[key]
 
+    # A staged poster (core.poster JPEG): the standard cover atom. Nothing staged leaves the existing cover alone.
+    if getattr(meta, "cover_pending", None):
+        mp4.tags["covr"] = [MP4Cover(bytes(meta.cover_pending), imageformat=MP4Cover.FORMAT_JPEG)]
+
     mp4.save()
 
 
@@ -249,16 +273,19 @@ def read_mp4_cover(path: str) -> Optional[bytes]:
     return bytes(covers[0])
 
 
-def write_mp4_cover(path: str, image_bytes: bytes, is_png: bool = False) -> None:
-    """Embed cover art into an MP4 file (native 'covr' atom). Same
-    add_tags() guard as write_mp4_metadata for a file with no existing
-    tags container.
-    """
+def _apply_cover(path: str, image_bytes: bytes, is_png: bool = False) -> None:
+    """The mutagen edit of write_mp4_cover, on `path` itself (a scratch copy)."""
     from mutagen.mp4 import MP4, MP4Cover
 
+    fmt = MP4Cover.FORMAT_PNG if is_png else MP4Cover.FORMAT_JPEG
     mp4 = MP4(path)
     if mp4.tags is None:
         mp4.add_tags()
-    fmt = MP4Cover.FORMAT_PNG if is_png else MP4Cover.FORMAT_JPEG
     mp4.tags["covr"] = [MP4Cover(image_bytes, imageformat=fmt)]
     mp4.save()
+
+
+def write_mp4_cover(path: str, image_bytes: bytes, is_png: bool = False) -> None:
+    """Embed cover art into an MP4 file (native 'covr' atom), the same safe way tags are written (a scratch copy
+    swapped in once it parses). Only this atom is touched. Same add_tags() guard as _apply_mp4_tags."""
+    _edit_via_scratch(path, lambda scratch: _apply_cover(scratch, image_bytes, is_png))

@@ -14,7 +14,7 @@ from core.filename_pattern import field_text, set_field_text
 from core.video_file import VideoFile
 from redactor_common.cli import EXIT_OK, EXIT_PARTIAL, CliError, Output, add_common_options
 
-from videocli.fields import DEFAULT_INFO_FIELDS, FIELD_NAMES, parse_assignment, resolve_field
+from videocli.fields import DEFAULT_INFO_FIELDS, INFO_FIELD_NAMES, parse_assignment, resolve_field, resolve_info_field
 from videocli.files import add_path_arguments, collect, load_videos, skip_reason
 
 
@@ -31,16 +31,16 @@ def _duration_text(seconds) -> str:
 def add_info_parser(sub) -> None:
     parser = sub.add_parser("info", help="show what the video files are", description="Show each video's technical details and tags.")
     add_path_arguments(parser)
-    parser.add_argument("--fields", metavar="LIST", help="comma-separated tag fields to show (default: content_type, title, show_title, season_number, episode_number, release_date)")
-    parser.add_argument("--all", action="store_true", help="show every tag field that has a value")
+    parser.add_argument("--fields", metavar="LIST", help="comma-separated tag fields to show (default: content_type, title, show_title, season_number, episode_number, release_date); the read-only source fields theporndb_id, stashdb_id, tmdb_id, imdb_id, tvdb_id, source_url, metadata_match and cover_info can be named too")
+    parser.add_argument("--all", action="store_true", help="show every tag field that has a value, including the source ids and the poster")
     add_common_options(parser)
     parser.set_defaults(handler=run_info)
 
 
 def run_info(args: argparse.Namespace, out: Output) -> int:
     files = collect(args.paths, out, recurse=not args.no_recurse)
-    wanted = FIELD_NAMES if args.all else (
-        [resolve_field(name) for name in args.fields.split(",") if name.strip()] if args.fields else DEFAULT_INFO_FIELDS
+    wanted = INFO_FIELD_NAMES if args.all else (
+        [resolve_info_field(name) for name in args.fields.split(",") if name.strip()] if args.fields else DEFAULT_INFO_FIELDS
     )
     failed = 0
     for index, video in enumerate(load_videos(files, out), start=1):

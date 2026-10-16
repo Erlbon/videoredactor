@@ -83,7 +83,7 @@ class ApiKeysDialog(QDialog):
         self.scene_note = QLabel(
             "ThePornDB and StashDB: only a file's hash (OSHASH) and/or the search text you see in the lookup dialog are "
             "sent, with your key to that service. Nothing else leaves this computer, and no image is downloaded unless "
-            "you apply a result and tick Save the cover as a sidecar."
+            "you apply a result and tick Save the poster in the file."
         )
         self.scene_note.setWordWrap(True)
         self.scene_note.setStyleSheet("color: gray;")

@@ -25,9 +25,13 @@ from PyQt6.QtWidgets import (
 )
 from redactor_common.gui.table_columns import make_columns_resizable
 
+from redactor_common.core.source_ids import SourceRef
+
 from core import api_keys, stashdb_client, theporndb_client
+from core.config import get_setting, set_setting
+from core.source_tags import ref_in
 from core.scene_lookup import (
-    KEY_HELP, TITLE_WARNING, FileHashes, SceneLookupError, SceneResult, file_hashes, md5_enabled,
+    KEY_HELP, MATCH_ID, TITLE_WARNING, FileHashes, SceneLookupError, SceneResult, file_hashes, md5_enabled,
     search_text_for,
 )
 from core.video_file import VideoFile
@@ -56,6 +60,8 @@ class SceneSource:
     errors: tuple = (SceneLookupError,)
     kinds: tuple = ()                               # (("scene", "Scene"), ...) -> a Type chooser
     uses_md5: bool = False                          # the service can match an MD5 too
+    get_by_id: Optional[Callable[[SourceRef], SceneResult]] = None  # the record of an id the file already carries
+    id_kinds: tuple = ("scene",)                    # the kinds of id this service's file tag can hold
 
     def has_key(self) -> bool:
         return bool(api_keys.get_key(self.key_id))
@@ -68,6 +74,8 @@ def theporndb_source() -> SceneSource:
         search_title=lambda text, year, kind: theporndb_client.search_by_title(text, year or None, kind or "scene"),
         download_cover=lambda url: theporndb_client.download_cover(url),
         kinds=tuple((key, label) for key, (_segment, label) in theporndb_client.KINDS.items()),
+        get_by_id=lambda ref: theporndb_client.get(ref.id, ref.kind),
+        id_kinds=("scene", "movie", "jav"),
     )
 
 
@@ -78,6 +86,7 @@ def stashdb_source() -> SceneSource:
         search_title=lambda text, year, kind: stashdb_client.search_by_title(text, year or None),
         download_cover=lambda url: stashdb_client.download_cover(url),
         uses_md5=True,
+        get_by_id=lambda ref: stashdb_client.get(ref.id),
     )
 
 
@@ -87,7 +96,8 @@ SOURCE_FACTORIES = {"theporndb": theporndb_source, "stashdb": stashdb_source}
 def detail_text(result: SceneResult) -> str:
     """The preview of one result: plain text, never HTML."""
     lines = [result.title or "(untitled)"]
-    lines.append("File match: the service has a record with this file's fingerprint." if result.is_file_match
+    lines.append("File has an ID: the file already carries this record's id." if result.is_id_match
+                 else "File match: the service has a record with this file's fingerprint." if result.is_file_match
                  else TITLE_WARNING)
     studio = result.studio + (f"  (part of {result.parent_studio})" if result.parent_studio else "")
     for label, value in (
@@ -95,7 +105,8 @@ def detail_text(result: SceneResult) -> str:
         ("Performers", ", ".join(result.performers)), ("Tags", ", ".join(result.tags)),
         ("Code", result.code), ("Length", f"{result.duration // 60} min {result.duration % 60} s" if result.duration else ""),
         ("On the service", result.page_url), ("Studio page", result.urls[0] if result.urls else ""),
-        ("Cover", "available (saved only if you tick the box below)" if result.cover_url else ""),
+        ("Poster", "available (embedded in the file only if you tick the box below)" if result.cover_url
+         else f"none from {result.source}"),
     ):
         if value:
             lines.append(f"{label}: {value}")
@@ -116,6 +127,9 @@ class SceneSearchDialog(QDialog):
         self.open_api_keys = open_api_keys
         self.selected_result: Optional[SceneResult] = None
         self.save_cover = False
+        self.accept_landscape = False
+        self.file_ref: Optional[SourceRef] = (
+            ref_in(video.metadata, source.key_id, source.id_kinds) if source.get_by_id else None)
         self.results: list[SceneResult] = []
         self.status_note = ""
         self.setWindowTitle(f"Search {source.name}")
@@ -175,11 +189,20 @@ class SceneSearchDialog(QDialog):
         self.detail.setMaximumHeight(170)
         layout.addWidget(self.detail)
 
-        self.cover_box = QCheckBox("Save the cover as a sidecar (<name>-poster.jpg)")
-        self.cover_box.setToolTip("Downloads the picture only when you apply the result, and never replaces an existing "
-                                  "poster without asking.")
+        self.cover_box = QCheckBox("Save the poster in the file")
+        self.cover_box.setToolTip("Downloads a true poster (portrait, from the service's poster pictures) only when you "
+                                  "apply the result, embeds it in the video on Save, and asks before replacing a cover "
+                                  "the file already has. No separate picture file is created.")
         self.cover_box.setEnabled(False)
         layout.addWidget(self.cover_box)
+        self.landscape_box = QCheckBox("Accept a landscape cover when there is no poster")
+        self.landscape_box.setToolTip("Off by default: a landscape picture is not a poster. Tick it to embed the "
+                                      "service's wide picture when it has no portrait poster.")
+        layout.addWidget(self.landscape_box)
+        self._poster_default = get_setting("scene_lookup", "poster_in_file", "0") == "1"
+        self._poster_touched = False
+        self.cover_box.clicked.connect(lambda: setattr(self, "_poster_touched", True))
+        self.landscape_box.toggled.connect(lambda _on: self._on_selection_changed())
 
         buttons = QHBoxLayout()
         buttons.addStretch()
@@ -226,7 +249,10 @@ class SceneSearchDialog(QDialog):
     # --- searching ------------------------------------------------------------------------------------------------
 
     def run_initial_search(self) -> None:
-        """The file's hash first (a "file match"); the title search only when that found nothing."""
+        """The id the file already carries first (no search at all); else the file's hash (a "file match"); the
+        title search only when that found nothing."""
+        if self.file_ref is not None and self._id_lookup():
+            return
         found = self._hash_search()
         if found is None:  # cancelled or failed: the status says which; the user can still press Search
             return
@@ -240,6 +266,25 @@ class SceneSearchDialog(QDialog):
             self._set_status(self.status_note + f" Showing {len(self.results)} title result(s): {TITLE_WARNING}.")
         else:
             self._set_status(self.status_note + " No title result either.")
+
+    def _id_lookup(self) -> bool:
+        """Shows the record of the file's own id at the top. False when it could not be fetched (the hash and title
+        search then carry on as usual)."""
+        ref = self.file_ref
+        try:
+            result = run_cancellable_lookup(self, self.source.get_by_id, ref,
+                                            label=f"Asking {self.source.name} for the id in the file...")
+        except self.source.errors as exc:
+            self._set_status(f"The id in the file ({ref.id}) could not be fetched: {exc}. Searching instead.")
+            return False
+        if result is CANCELLED or result is None:
+            self._set_status("The lookup was cancelled.")
+            return False
+        result.match_kind = MATCH_ID
+        self._show([result])
+        self.table.selectRow(0)
+        self._set_status(f"File has an ID: {ref.id}. No search was needed; press Search for other results.")
+        return True
 
     def _hash_search(self) -> Optional[list[SceneResult]]:
         """The results by hash, [] for none (and `status_note` says why), None when cancelled or failed."""
@@ -315,14 +360,16 @@ class SceneSearchDialog(QDialog):
         italic.setItalic(True)
         self.table.setRowCount(len(self.results))
         for row, result in enumerate(self.results):
-            match_text = FILE_MATCH_LABEL if result.is_file_match else "Title: check it"
+            match_text = ("File has an ID" if result.is_id_match
+                          else FILE_MATCH_LABEL if result.is_file_match else "Title: check it")
             cells = [match_text, result.title or "(untitled)", result.studio, result.date, ", ".join(result.performers)]
             for col, text in enumerate(cells):
                 item = QTableWidgetItem(text)
-                item.setToolTip(TITLE_WARNING if not result.is_file_match else "The service has this exact file.")
+                item.setToolTip("The file carries this record's id." if result.is_id_match
+                                else TITLE_WARNING if not result.is_file_match else "The service has this exact file.")
                 if col == COL_TITLE:
                     item.setData(Qt.ItemDataRole.UserRole, row)
-                if result.is_file_match:
+                if result.is_file_match or result.is_id_match:
                     item.setBackground(QBrush(FILE_MATCH_TINT))
                     item.setFont(bold)
                 elif col == COL_MATCH:
@@ -340,19 +387,29 @@ class SceneSearchDialog(QDialog):
     def _on_selection_changed(self) -> None:
         result = self._selected()
         self.select_button.setEnabled(result is not None)
-        self.cover_box.setEnabled(result is not None and bool(result.cover_url))
+        has_poster = result is not None and bool(
+            result.cover_url or (self.landscape_box.isChecked() and result.landscape_urls))
+        self.cover_box.setEnabled(has_poster)
         if result is None:
             self.detail.clear()
             self.cover_box.setChecked(False)
             return
         self.detail.setPlainText(detail_text(result))
-        if not result.cover_url:
+        if not has_poster:
             self.cover_box.setChecked(False)
+        elif not self.cover_box.isChecked() and self._poster_default and not self._poster_touched:
+            self.cover_box.setChecked(True)
 
     def _on_accept(self) -> None:
         result = self._selected()
         if result is None:
             return
         self.selected_result = result
-        self.save_cover = bool(self.cover_box.isChecked() and result.cover_url)
+        self.accept_landscape = bool(self.landscape_box.isChecked())
+        usable = bool(result.cover_url or (self.accept_landscape and result.landscape_urls))
+        self.save_cover = bool(self.cover_box.isChecked() and usable)
+        set_setting("scene_lookup", "poster_in_file", "1" if self.cover_box.isChecked() else "0")
+        if self.save_cover and self.accept_landscape:
+            # The user accepted the wide picture for this one: portrait posters first, then the wide ones.
+            result.poster_urls = result.poster_urls + [u for u in result.landscape_urls if u not in result.poster_urls]
         self.accept()

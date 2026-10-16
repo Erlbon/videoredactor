@@ -58,6 +58,7 @@ def test_other_menus_hold_what_the_spec_says(window):
     ]
     assert _labels(menus["Media"]) == [
         "Play", "Remux to MP4…", "Convert to MP4 (H.264)…", "Convert to MP4/MKV (Rules)…", "Check Files…", "Find Duplicates…",
+        "Embed Existing Poster Files…",
         "Translate Subtitles to English…", "Compare Subtitles…",
     ]
     assert _labels(menus["Tools"]) == [
@@ -96,7 +97,7 @@ HANDLERS = {
     "remove_from_list": "_on_remove_from_list", "clear_list": "_on_clear_list", "redact": "_on_redact",
     "redact_recipe": "_on_edit_redact_recipe", "search_replace": "_on_search_replace",
     "change_case": "_on_case_conversion", "auto_number": "_on_auto_numbering", "remux": "_on_remux_selected",
-    "convert_to_mp4": "_on_convert_to_mp4", "check_files": "_on_check_files",
+    "convert_to_mp4": "_on_convert_to_mp4", "check_files": "_on_check_files", "embed_posters": "_on_embed_posters",
     "find_duplicates": "_on_find_duplicates", "api_keys": "_on_add_external_apis",
     "external_tools": "_on_locate_tools", "imdb_settings": "_on_open_imdb_settings", "columns": "_on_open_column_visibility",
     "genres": "_on_open_genres", "languages": "_on_open_languages", "history": "_on_open_history",

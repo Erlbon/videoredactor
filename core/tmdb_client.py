@@ -186,6 +186,7 @@ def get_movie_details(tmdb_id: int) -> dict:
         "cast": ", ".join(cast_names),
         "studio": ", ".join(c.get("name", "") for c in data.get("production_companies", [])),
         "_poster_path": data.get("poster_path"),  # underscore: not a VideoMetadata field, handled specially by caller
+        "_imdb_id": data.get("imdb_id") or "",   # TMDB's own record of the IMDb id (a source id when applied)
     }
 
 
@@ -193,7 +194,8 @@ def get_tv_show_details(tmdb_id: int) -> dict:
     """Show-level details (Network, general info) -- season/episode
     numbering is filled in separately since it's per-file, not per-show.
     """
-    data = _get_json(f"/tv/{tmdb_id}", {})
+    data = _get_json(f"/tv/{tmdb_id}", {"append_to_response": "external_ids"})
+    external = data.get("external_ids") if isinstance(data.get("external_ids"), dict) else {}
     return {
         "show_title": data.get("name", ""),
         "description": data.get("overview", ""),
@@ -201,6 +203,8 @@ def get_tv_show_details(tmdb_id: int) -> dict:
         "release_date": data.get("first_air_date", ""),
         "network": ", ".join(n.get("name", "") for n in data.get("networks", [])),
         "_poster_path": data.get("poster_path"),
+        "_imdb_id": external.get("imdb_id") or "",
+        "_tvdb_id": external.get("tvdb_id") or "",
     }
 
 

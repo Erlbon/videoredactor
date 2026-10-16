@@ -47,6 +47,9 @@ import tempfile
 import xml.etree.ElementTree as ET
 from typing import Optional
 
+import re
+
+from core.poster import MAX_INPUT_BYTES
 from core.video_metadata import VideoMetadata, ContentType
 from core.external_tools import get_executable_path
 from redactor_common.core.subprocess_utils import run_tool
@@ -84,7 +87,21 @@ FIELD_TO_MKV_TAG = {
     # plan_global_tags treats it as this app's own tag (replaced, and
     # cleared when empty) while other tools' tags are carried over.
     "scan_stamp": "REDACTOR_CHECK",
+    # Source ids (core.source_tags): written only from an accepted lookup result.
+    "theporndb_id": "THEPORNDB_ID",
+    "stashdb_id": "STASHDB_ID",
+    "tmdb_id": "TMDB_ID",
+    "imdb_id": "IMDB_ID",
+    "tvdb_id": "TVDB_ID",
+    "source_url": "SOURCE_URL",
+    "metadata_match": "METADATA_MATCH",
 }
+
+# The embedded poster: the Matroska attachment named cover.jpg (the name Jellyfin, Plex and Kodi read; the
+# cover_land.* names are landscape variants, never touched here).
+COVER_NAME = "cover.jpg"
+COVER_MIME = "image/jpeg"
+_COVER_NAME_RE = re.compile(r"^cover\.(jpe?g|png|webp)$", re.IGNORECASE)
 
 REVERSE_FIELD_MAP = {v: k for k, v in FIELD_TO_MKV_TAG.items()}
 
@@ -244,6 +261,12 @@ def read_mkv_metadata(path: str, diagnostics: Optional[dict] = None) -> VideoMet
     if native_title:
         meta.title = native_title
 
+    cover = _find_cover_attachment(info)
+    if cover is not None:
+        size = cover.get("size")
+        kind = "JPEG" if cover["file_name"].lower().endswith(("jpg", "jpeg")) else cover["file_name"].rsplit(".", 1)[-1].upper()
+        meta.cover_info = f"{kind}, {max(1, round(size / 1024))} KB" if isinstance(size, int) else kind
+
     duration_ns = container_props.get("duration")
     meta.duration_seconds = (
         duration_ns / 1_000_000_000 if isinstance(duration_ns, (int, float)) else None
@@ -292,6 +315,72 @@ def read_mkv_metadata(path: str, diagnostics: Optional[dict] = None) -> VideoMet
             setattr(meta, field_name, value)
 
     return meta
+
+
+def _find_cover_attachment(info: object) -> Optional[dict]:
+    """The cover attachment (id, file_name, size...) in an `mkvmerge -J` answer, or None. Prefers the exact name
+    cover.jpg this app writes."""
+    attachments = info.get("attachments") if isinstance(info, dict) else None
+    found = [a for a in attachments if isinstance(a, dict) and isinstance(a.get("file_name"), str)
+             and _COVER_NAME_RE.match(a["file_name"])] if isinstance(attachments, list) else []
+    exact = [a for a in found if a["file_name"].lower() == COVER_NAME]
+    return (exact or found or [None])[0]
+
+
+def _identify(path: str) -> dict:
+    result = run_tool([get_executable_path("mkvmerge"), "-J", path], timeout=MKV_TOOL_TIMEOUT_SECONDS)
+    try:
+        info = json.loads(result.stdout) if result.stdout else {}
+    except json.JSONDecodeError:
+        return {}
+    return info if isinstance(info, dict) else {}
+
+
+def read_mkv_cover(path: str) -> Optional[bytes]:
+    """The embedded cover's bytes (the attachment named cover.jpg, else cover.png/.webp), or None. Extracted with
+    `mkvextract <file> attachments <id>:<out>`."""
+    cover = _find_cover_attachment(_identify(path))
+    if cover is None or not isinstance(cover.get("id"), int):
+        return None
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".img", delete=False) as handle:
+            tmp_path = handle.name
+        result = run_tool(
+            [get_executable_path("mkvextract"), path, "attachments", f"{cover['id']}:{tmp_path}"],
+            timeout=MKV_TOOL_TIMEOUT_SECONDS,
+        )
+        if result.returncode not in (0, 1) or not os.path.exists(tmp_path):
+            return None
+        if os.path.getsize(tmp_path) > MAX_INPUT_BYTES:
+            return None
+        with open(tmp_path, "rb") as handle:
+            data = handle.read()
+        return data or None
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+def write_mkv_cover(path: str, jpeg: bytes) -> subprocess.CompletedProcess:
+    """Embeds `jpeg` as the attachment cover.jpg. An attachment of that name already there is deleted in the same
+    mkvpropedit call (`--delete-attachment name:cover.jpg`, then `--attachment-name`/`--attachment-mime-type` and
+    `--add-attachment <file>`: the options come before the action they apply to, per the mkvpropedit manual;
+    --replace-attachment is not used because its `selector:filename` form is ambiguous with a Windows drive
+    letter). The caller reads it back (VideoFile does)."""
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as handle:
+            handle.write(jpeg)
+            tmp_path = handle.name
+        args: list[str] = []
+        if _find_cover_attachment(_identify(path)) is not None:
+            args += ["--delete-attachment", f"name:{COVER_NAME}"]
+        args += ["--attachment-name", COVER_NAME, "--attachment-mime-type", COVER_MIME, "--add-attachment", tmp_path]
+        return run_mkvpropedit(path, args)
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
 
 
 def _extract_tags_xml(path: str) -> Optional[str]:
@@ -452,6 +541,9 @@ def write_mkv_metadata(path: str, meta: VideoMetadata) -> subprocess.CompletedPr
             if tmp_xml_path and os.path.exists(tmp_xml_path):
                 os.remove(tmp_xml_path)
 
+    if getattr(meta, "cover_pending", None):
+        results.append(write_mkv_cover(path, bytes(meta.cover_pending)))
+
     if not results:
         return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
     combined_returncode = max(r.returncode for r in results)
@@ -460,10 +552,3 @@ def write_mkv_metadata(path: str, meta: VideoMetadata) -> subprocess.CompletedPr
     return subprocess.CompletedProcess(
         args=[], returncode=combined_returncode, stdout=combined_stdout, stderr=combined_stderr,
     )
-
-
-# NOTE: MKV cover art is sidecar-file only for v1 (a `moviename-poster.jpg`
-# next to the file, same convention Plex/Jellyfin/Kodi already prefer over
-# embedded art) -- no embedded-attachment extraction/writing here by design.
-# Sidecar handling lives at the file-management layer, not per-container,
-# since it works identically for MP4 and MKV alike.
