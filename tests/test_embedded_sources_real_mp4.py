@@ -18,9 +18,10 @@ from core.video_file import VideoFile  # noqa: E402
 from core.video_metadata import ContentType, VideoMetadata  # noqa: E402
 from tests.test_poster import solid  # noqa: E402
 
-SAMPLE = r"C:\Temp\Claude\exebuild\samples\Show.S01E01.mp4"
+from tests.sample_clip import SAMPLE, SKIP_REASON  # noqa: E402
+
 FFPROBE = shutil.which("ffprobe")
-pytestmark = pytest.mark.skipif(not os.path.exists(SAMPLE) or not FFPROBE, reason="sample clip or ffprobe missing")
+pytestmark = pytest.mark.skipif(bool(SKIP_REASON), reason=SKIP_REASON or "sample clip")
 
 _app = QApplication.instance() or QApplication([])
 U = "d284e2a0-789d-4e6c-beb9-6e61c24e8b84"

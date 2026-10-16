@@ -493,10 +493,10 @@ def test_the_panel_caption_says_poster_or_frame_preview(window, monkeypatch):
 # --- the command line -------------------------------------------------------------------------------------------------
 
 
-SAMPLE = r"C:\Temp\Claude\exebuild\samples\Show.S01E01.mp4"
+from tests.sample_clip import SAMPLE, SKIP_REASON  # noqa: E402
 
 
-@pytest.mark.skipif(not os.path.exists(SAMPLE) or shutil.which("ffprobe") is None, reason="sample clip or ffprobe missing")
+@pytest.mark.skipif(bool(SKIP_REASON), reason=SKIP_REASON or "sample clip")
 def test_cli_info_shows_the_read_only_source_fields_and_set_refuses_them(tmp_path, capsys, monkeypatch):
     import core.config as config
     from redactor_common.cli import CliError
