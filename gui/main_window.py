@@ -109,6 +109,10 @@ from redactor_common.gui.zoom_toolbar import TableZoomController
 from redactor_common.gui.about_dialog import AboutDialog, ChangelogDialog
 from redactor_common.gui.rename_single_file import rename_single_file as prompt_rename_single_file
 from redactor_common.gui.sortable_table import NumericTableWidgetItem, suspend_sorting
+from redactor_common.gui.path_column import PathTableWidgetItem, install_cell_copy
+from redactor_common.core.path_column import (
+    PATH_KEY, PATH_LABEL, SEEDED_SETTING as PATH_SEEDED_SETTING, folder_of, insert_path_key, migrate_saved_columns,
+)
 from redactor_common.gui import standard_shortcuts as shortcuts
 from redactor_common.core.error_summary import summarize_errors
 from redactor_common.core.trash import TrashError, move_to_trash
@@ -167,9 +171,9 @@ ALWAYS_VISIBLE_COLUMNS = ["filename", "status", "content_type"]
 # table-only, informational. Shown regardless of Content Type filter
 # (unlike Director/Cast/etc, technical info isn't content-type-specific)
 # but still user-hideable via the column context menu like anything else.
-TECHNICAL_COLUMNS = ["path", "duration_seconds", "resolution", "size_bytes", "bitrate", "sources"]
+TECHNICAL_COLUMNS = ["duration_seconds", "resolution", "size_bytes", "bitrate", "sources"]
 TECHNICAL_LABELS = {
-    "path": "Path",
+    PATH_KEY: PATH_LABEL,  # shared Path column (redactor_common.core.path_column): sits right after Filename
     "duration_seconds": "Duration",
     "resolution": "Resolution",
     "size_bytes": "Size",
@@ -464,6 +468,7 @@ class MainWindow(QMainWindow):
         # see suspend_sorting()'s own docstring for why that's required,
         # not just tidy.
         self.table.setSortingEnabled(True)
+        install_cell_copy(self.table)  # Ctrl+C: the current column of the selected rows (full path for Path)
         self.table.setStyleSheet(TABLE_SELECTION_STYLESHEET)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
         self.table.cellDoubleClicked.connect(self._on_cell_double_clicked)
@@ -988,10 +993,19 @@ class MainWindow(QMainWindow):
             hidden_now.add("lyrics")
             set_setting("table", "hidden_columns", ",".join(sorted(hidden_now)))
             set_setting("table", "lyrics_column_seeded", "1")
+        # The shared Path column moves to just after Filename and is un-hidden, once, for users whose saved column
+        # order / hidden set predates it (after that their own choices win).
+        if get_setting("table", PATH_SEEDED_SETTING, "") != "1":
+            saved_order = self._load_persisted_column_order()
+            order, hidden_now = migrate_saved_columns(saved_order, self._load_hidden_fields())
+            if saved_order:
+                set_setting("table", "column_order", ",".join(order))
+            set_setting("table", "hidden_columns", ",".join(sorted(hidden_now)))
+            set_setting("table", PATH_SEEDED_SETTING, "1")
         field_names = list(FIELD_LABELS.keys())
 
         rest = [f for f in field_names if f != "content_type"]
-        base_order = ALWAYS_VISIBLE_COLUMNS + rest + TECHNICAL_COLUMNS
+        base_order = insert_path_key(ALWAYS_VISIBLE_COLUMNS + rest + TECHNICAL_COLUMNS)
 
         persisted_order = self._load_persisted_column_order()
         self._column_order = merge_column_order(persisted_order, base_order)
@@ -1459,7 +1473,8 @@ class MainWindow(QMainWindow):
                     check_note = vf.check.summary() if vf.check is not None and vf.check.findings else ""
                     stamp = vf.stamp
                     stamp_note = stamp.tooltip() if stamp is not None and field_name == "status" else ""
-                    tooltip = "\n".join(t for t in (vf.save_error or vf.load_error, check_note, stamp_note) if t)
+                    path_note = str(vf.path) if field_name == PATH_KEY else ""
+                    tooltip = "\n".join(t for t in (path_note, vf.save_error or vf.load_error, check_note, stamp_note) if t)
                     if tooltip:
                         item.setToolTip(tooltip)
                     if row_colors is not None:
@@ -1527,6 +1542,8 @@ class MainWindow(QMainWindow):
             return NumericTableWidgetItem(text, sort_value=float(size) if size is not None else None)
         if field_name == "bitrate":
             return NumericTableWidgetItem(text, sort_value=bitrate_bps(vf.metadata.bitrate))
+        if field_name == PATH_KEY:
+            return PathTableWidgetItem(vf.path)  # the folder as text, the full path as tooltip and for Ctrl+C
         if field_name in NUMERIC_FIELDS:
             return NumericTableWidgetItem(text)
         return QTableWidgetItem(text)
@@ -1556,8 +1573,8 @@ class MainWindow(QMainWindow):
     def _display_value(self, vf: VideoFile, field_name: str) -> str:
         if field_name == "filename":
             return vf.path.name
-        if field_name == "path":
-            return str(vf.path)
+        if field_name == PATH_KEY:
+            return folder_of(vf.path)
         if field_name == "status":
             if vf.load_error:
                 # A file whose tags can't be read (e.g. an MKV without

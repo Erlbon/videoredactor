@@ -45,7 +45,7 @@ def test_the_old_filter_row_is_gone_and_all_columns_stay(window):
     import gui.main_window as mw
 
     assert not hasattr(window, "filter_combo")
-    assert len(window._column_order) == len(mw.FIELD_LABELS) + len(mw.TECHNICAL_COLUMNS) + 2
+    assert len(window._column_order) == len(mw.FIELD_LABELS) + len(mw.TECHNICAL_COLUMNS) + 3
     assert "director" in window.tag_panel._inputs and "show_title" in window.tag_panel._inputs
 
 

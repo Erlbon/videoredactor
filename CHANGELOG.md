@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-10-17#10 -- Path column: shared, right after Filename
+
+Shared part: redactor_common 2026-10-17#05 (core/path_column.py, gui/path_column.py); all four Redactor apps now use the same Path column.
+- Fixed: **the Path column was far to the right** (end of the technical columns) and easy to miss (owner report, 2026-10-17). It now sits **directly after Filename** and is visible by default.
+- Changed: **the cell shows the folder** the file is in (the file name is in the Filename column); the tooltip has the full file path. Before, the cell held the full path including the file name.
+- New: **Ctrl+C on the table copies the current column of the selected rows, the Path column as full file paths** (one per line). Sorting is case-insensitive natural text order; the header filter is still a "contains" filter (on the folder text).
+- One-time migration (setting `path_column_seeded`): if you had a saved column order or hidden columns, Path is moved to just after Filename and un-hidden once, so you see it. After that your own order and hiding win.
+- The Path cell updates after Rename File, Rename by Pattern, Undo Last Rename and Move into Folders (tests for rename and move).
+
 ## 2026-10-17#09 -- Content Type Porn
 
 - New: **Porn is a Content Type** (beside Movie, TV, Music Video, Clip, Misc), with the same fields as Movie (director, cast, writer, studio, collection). ThePornDB and StashDB lookups set it on a file whose Content Type is empty (they set Movie before). The genres are what both services call tags, all of them, comma separated into Genre Tags (unchanged).
