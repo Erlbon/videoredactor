@@ -875,14 +875,17 @@ class MainWindow(QMainWindow):
         bulk-edit panel if anything changed ("hiding a column also hides
         its panel field")."""
         before = sanitize_hidden_fields(self._load_hidden_fields())
+        shown_order = self._current_visual_column_order()  # the order the table SHOWS (a header drag included)
         dialog = ColumnSettingsDialog(
-            list(COLUMN_LABEL_LOOKUP.items()), before,
+            [(key, COLUMN_LABEL_LOOKUP.get(key, key)) for key in shown_order], before,
             protected_columns=PROTECTED_COLUMNS, parent=self,
         )
         dialog.exec()
         hidden = sanitize_hidden_fields(dialog.hidden_fields())
-        if hidden != before:
+        new_order = dialog.column_order()
+        if hidden != before or new_order != shown_order:
             set_setting("table", "hidden_columns", ",".join(sorted(hidden)))
+            set_setting("table", "column_order", ",".join(new_order))
             self._on_column_visibility_changed_via_settings()
 
     def _on_open_history(self) -> None:
@@ -1027,6 +1030,13 @@ class MainWindow(QMainWindow):
                 self.table.setColumnHidden(idx, not is_column_visible(field_name, hidden))
                 if field_name in widths:
                     self.table.setColumnWidth(idx, widths[field_name])
+            # Visual order = logical order (the logical order was just built from the saved order): without
+            # this a header drag from before the rebuild would stay on top of the new mapping.
+            header = self.table.horizontalHeader()
+            for logical in range(self.table.columnCount()):
+                visual = header.visualIndex(logical)
+                if visual != logical:
+                    header.moveSection(visual, logical)
         finally:
             self._suppress_column_signals = False
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-17#12 -- Tools > Columns can move columns
+
+Shared part: redactor_common 2026-10-17#06 (the Columns dialog, gui/column_order.py); all four Redactor apps get the same dialog.
+- New: **Tools > Columns now reorders the table's columns**, not only shows/hides them. The list is in the table's current left-to-right order (hidden columns included, a header drag is reflected), top = leftmost. Move a row with the arrow buttons (earlier / later) or by dragging it; the checkbox still shows or hides the column. The new order is saved by column name like a header drag and is part of Export/Import Settings (it already was).
+- Fix: the table's visual column order is reset to the saved order whenever the columns are rebuilt (after Columns, or an import), so an earlier header drag can no longer sit on top of a new order.
+- Tests for the dialog in the real window.
+
 ## 2026-10-17#11 -- Lookups: Cancel really cancels, new Skip button
 
 - Changed: **Cancel in a batch lookup cancels the whole lookup** (owner request, 2026-10-17). In every lookup dialog opened from a batch (TMDB movies and TV, TheTVDB, IMDb local, ThePornDB, StashDB, and the episode pickers), the bottom Cancel button, Esc and the window's X now end the lookup: this file and every file after it stay untouched, the files confirmed earlier in the run keep their staged results (and the Undo for them), and the status line says how many files were not asked. Before, they only skipped the current file and the loop went on.
