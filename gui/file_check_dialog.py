@@ -237,16 +237,50 @@ def _deep_check_files(window, files, errors, checked) -> list[VideoFile]:
     return checked
 
 
+def unsaved(files) -> list[VideoFile]:
+    """The files with edits that are not written yet (a changed check stamp alone is not an edit)."""
+    return [vf for vf in files if vf.dirty and not vf.stamp_only_dirty]
+
+
+def save_pending_first(window, files: list[VideoFile]) -> tuple[list[VideoFile], list[str], set]:
+    """A repair rewrites the file from what is on disk, so edits that are only in memory would be lost or refused:
+    the files with unsaved edits are saved FIRST, through the same path as Save All (progress, journal, failure
+    box). Returns (the files that were saved, one error line per file whose save failed, the ids of those files:
+    they are not repaired)."""
+    pending = unsaved(files)
+    if not pending or window is None or not hasattr(window, "_save_files"):
+        return [], [], set()
+    saveable, skipped = window._split_saveable(pending)
+    if saveable:
+        window._save_files(saveable, skipped_error_count=len(skipped))
+    saved, errors, not_ready = [], [], set()
+    for vf in pending:
+        if vf in skipped:
+            errors.append(f"{vf.path.name}: not repaired -- it failed to load, so its changes cannot be saved")
+            not_ready.add(id(vf))
+        elif vf.save_error or (vf.dirty and not vf.stamp_only_dirty):
+            errors.append(f"{vf.path.name}: not repaired -- saving its unsaved changes first failed: "
+                          f"{vf.save_error or 'it is still marked unsaved'}")
+            not_ready.add(id(vf))
+        else:
+            saved.append(vf)
+    return saved, errors, not_ready
+
+
 def repair_files(window, files: list[VideoFile]) -> tuple[list[VideoFile], list[str], list[str]]:
-    """Repairs `files` (each already checked and repairable); returns
-    (repaired, errors, notes). Files with unsaved edits are skipped --
-    save or discard those first."""
+    """Repairs `files` (each already checked and repairable); returns (repaired, errors, notes). Files with
+    unsaved edits are saved first (see save_pending_first); a file whose save fails is not repaired and is
+    reported with its save error. The per-file guard below stays as a safety net (it should never fire)."""
     repaired: list[VideoFile] = []
     errors: list[str] = []
     notes: list[str] = []
+    saved_first, save_errors, not_ready = save_pending_first(window, files)
+    errors.extend(save_errors)
     ready = []
     for vf in files:
-        if vf.dirty and not vf.stamp_only_dirty:
+        if id(vf) in not_ready:
+            continue  # already reported with its save error
+        if vf.dirty and not vf.stamp_only_dirty:  # the safety net: with the save above this should never fire
             errors.append(f"{vf.path.name}: has unsaved changes -- save or discard them first")
         else:
             ready.append(vf)
@@ -267,7 +301,15 @@ def repair_files(window, files: list[VideoFile]) -> tuple[list[VideoFile], list[
 
     run_with_progress(window, ready, step, "Repairing files...", threshold=1,
                       label_for=lambda vf: f"Repairing {vf.path.name}")
+    repaired_ids = {id(vf) for vf in repaired}
+    saved_and_repaired = [vf for vf in saved_first if id(vf) in repaired_ids]
+    if saved_and_repaired:
+        notes.insert(0, saved_first_note(len(saved_and_repaired)))
     return repaired, errors, notes
+
+
+def saved_first_note(count: int) -> str:
+    return f"Saved {count} file(s) with unsaved changes first, then repaired them."
 
 
 def build_cut_confirmation(window, files: list[VideoFile]):
@@ -435,9 +477,15 @@ def run_check_and_repair(window, files: list[VideoFile], error_details, deep: Op
     )
     if answer != QMessageBox.StandardButton.Yes:
         return
+    pending_before = unsaved(targets)
     repaired, errors, notes = repair_files(window, targets)
     window._refresh_table_rows()
-    parts = [f"Repaired {len(repaired)} of {len(targets)} file(s)"]
+    saved_first = [vf for vf in pending_before if vf in repaired and not unsaved([vf])]
+    if saved_first:
+        parts = [f"Saved {len(saved_first)} file(s) with unsaved changes first, then repaired "
+                 f"{len(repaired)} of {len(targets)} file(s)"]
+    else:
+        parts = [f"Repaired {len(repaired)} of {len(targets)} file(s)"]
     if errors:
         parts.append(f"{len(errors)} not repaired")
     window.status_bar.showMessage(", ".join(parts))

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-17#17 -- Repair now saves pending changes first
+
+Found by the owner: applying the Porn content type and then running Repair silently skipped those files (the reason was only in the results).
+- Changed: **Media > Check Files / Repair saves a file's unsaved changes first**, automatically and without a question, then repairs it. The save goes through the same path as Save All (progress, history journal, failure box). A file that fails to save is NOT repaired and is reported with its save error; the files without a problem are still repaired. A change of the check stamp alone needs no save.
+- The result says it plainly: the status line reads "Saved N file(s) with unsaved changes first, then repaired M of K file(s)" and the results box starts with "Saved N file(s) with unsaved changes first, then repaired them." The progress dialog's own Cancel still stops the run.
+- The per-file guard inside the repair worker stays as a safety net (it should never fire now).
+- Tests with real MP4s: a dirty file saved then repaired reads back with BOTH the staged title and a repaired layout, a failing save blocks only that file's repair, clean files unchanged, a stamp-only change, the safety net, and the whole flow's status line.
+
 ## 2026-10-17#16 -- ThePornDB / StashDB lookups use the folder name when the file name says nothing
 
 Found on the owner's real files: clips named clip1, clip2, clip3 sit in a folder that has the movie's name.
