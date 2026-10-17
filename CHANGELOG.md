@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-17#14 -- Deep scan and Cut Out Damaged Parts (Check Files)
+
+Found on the owner's real downloads: MP4s whose media data holds blocks of exactly 256 KiB of zero bytes (torrent pieces that never arrived). The index is fine, so Check Files said REPAIRABLE and the lossless Repair then refused ("the repaired copy didn't pass the check"); the files can't be fetched again.
+- New: **Deep scan (reads the whole file)**, a checkbox in a small Check Files dialog before the check (default off, remembered). It reads the file once (8 MB chunks, one counted progress dialog with Cancel, fine over a network share), finds zero runs of 64 KiB or more inside the media data (MP4: the mdat box; free/skip padding and the index are never scanned; MKV and other containers: the clusters, reported as approximate), maps them with an ffprobe packet listing to damaged packets (zeros cover the packet, its first bytes are zero, or its NAL length walk fails) and to time spans: video up to the next keyframe (back to the previous one when a keyframe itself is damaged), cut to whole GOPs, union with the audio. Zero runs that lie in no packet are harmless and ignored.
+- New: a file with damage found gets status **DAMAGED** (red) and the finding "N zero-filled block(s) inside the video: about X s of video and Y s of audio are missing (first at mm:ss)"; the status tooltip lists up to 10 ranges. It is never offered the remux Repair or called REPAIRABLE (a remux can't bring the parts back).
+- New: the ordinary check always reads the first and last 8 MB of the media data for zero blocks (cheap) and says "run Deep scan" when it sees any.
+- New: **Cut Out Damaged Parts...** in the Check Files results, for files with damaged ranges: lossless (stream copy), every part cut at keyframes so all streams stay in sync, tags and poster kept, the new file verified (full decode must print nothing, A/V lengths within 0.3 s, length = original minus the cut within 0.5 s plus 0.1 s per join) before it replaces the original, which goes to the Recycle Bin (the undo). A confirmation first states exactly what is lost ("This removes N parts totalling ... of video and audio from the file; the rest is kept unchanged. The original goes to the Recycle Bin."), per-file totals for a batch; more than 25% of the duration lost is a strong warning with Cancel as the default. Progress dialog with Cancel (the original stays untouched), a report per file afterwards (removed ranges, new duration, verify result), a visible error for a failure.
+- The Recycle Bin swap is now one shared helper (file_check.swap_in) used by Repair and the cut.
+- Real file (owner's damaged MP4, 417 MB, 33 min): 8 zero runs at the 8 known offsets, 44.2 s removed in 5 parts, 2003.4 s -> 1959.6 s, decode messages 2119 -> 0.
+- Tests: tests/test_deep_scan.py (synthetic H.264+AAC files with moov at the start and at the end, zeroed blocks, audio-only, first keyframe, next to the index, free-atom padding, clean file, verification failure, cancel, changed file, the >25% warning, the real window offscreen, and the real sample when present).
+
 ## 2026-10-17#13 -- Save from the right-click menu
 
 Shared part: redactor_common 2026-10-17#07 (gui/context_menu.py: the optional Save Selected item); all four Redactor apps get it.
