@@ -235,8 +235,16 @@ def apply_restore(path: str, values: Mapping[str, str]) -> str:
     """Writes {field: text} onto `path` with the app's own reader and writer (load the file's CURRENT tags, set
     the given fields, save: write, re-read, compare). Returns "" or a plain-language problem. Runs on a worker
     thread: no widgets. Writes no journal entry (the History dialog records the restore itself)."""
+    from core import track_language  # noqa: PLC0415
     from core.video_file import VideoFile  # here, not at the top: video_file imports this module
 
+    # 'track a1 language' fields (Set Track Language) go back through the track writer, not the tag writer.
+    track_values = {name: text for name, text in values.items() if track_language.key_of_field(name)}
+    if track_values:
+        problem = track_language.apply_field_values(path, track_values)
+        values = {name: text for name, text in values.items() if name not in track_values}
+        if problem or not values:
+            return problem
     video = VideoFile(path=Path(path))
     video.load()
     if video.load_error:

@@ -454,7 +454,9 @@ def quick_check(
     if unlabelled:
         kinds = sorted({s["codec_type"] for s in unlabelled})
         result.findings.append(Finding(
-            "no_language", NOTE, f"{len(unlabelled)} {'/'.join(kinds)} track(s) without a language",
+            "no_language", NOTE,
+            f"{len(unlabelled)} {'/'.join(kinds)} track(s) without a language"
+            + (" -- Metadata > Set Track Language fixes this" if suffix in (".mp4", ".m4v", ".mkv") else ""),
         ))
     return result
 

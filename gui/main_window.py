@@ -582,6 +582,10 @@ class MainWindow(QMainWindow):
                     look_up_submenu(self._look_up_entries("lookup_")),
                     Separator(),
                     MenuAction("number_episodes", "&Number Episodes…", self._on_number_episodes),
+                    Separator(),
+                    MenuAction("set_track_language", "Set &Track Language…", self._on_set_track_language,
+                               enabled=False,
+                               tooltip="Set the language tag of the audio / subtitle tracks of MP4 and MKV files, in place"),
                 ]),
                 # Only the heavy video-specific operations: what acts on the
                 # container/streams rather than on tags.
@@ -890,6 +894,44 @@ class MainWindow(QMainWindow):
             set_setting("table", "hidden_columns", ",".join(sorted(hidden)))
             set_setting("table", "column_order", ",".join(new_order))
             self._on_column_visibility_changed_via_settings()
+
+    @staticmethod
+    def _track_language_state(files: list) -> tuple[bool, str]:
+        """(enabled, tooltip) of Set Track Language for these files: works on MP4 and MKV only."""
+        from core import track_language
+
+        usable = [vf for vf in files if not vf.load_error and track_language.is_supported(vf.path)]
+        if not files:
+            return False, "Select one or more MP4 / MKV files first"
+        if not usable:
+            return False, track_language.unsupported_reason(files[0].path) or "The selected files did not load"
+        left_out = len(files) - len(usable)
+        if left_out:
+            return True, f"{left_out} of the {len(files)} selected files are not MP4/MKV (or did not load) and are left out"
+        return True, "Set the language tag of the audio / subtitle tracks, in place"
+
+    def _update_track_language_action(self, selected: list) -> None:
+        try:
+            action = self.actions_by_key["set_track_language"]
+        except KeyError:
+            action = None
+        if action is not None:
+            enabled, tip = self._track_language_state(selected)
+            action.setEnabled(enabled)
+            action.setToolTip(tip)
+
+    def _on_set_track_language(self) -> None:
+        """Metadata > Set Track Language... (and the right-click entry): the language of the audio / subtitle tracks of
+        the selected MP4 / MKV files, written in place without touching anything else (gui/track_language_dialog.py).
+        Does not save, and does not block on, a file's pending tag edits."""
+        from core import track_language
+        from gui.track_language_dialog import run_set_track_language
+
+        files = [vf for vf in self._selected_video_files() if track_language.is_supported(vf.path)]
+        if not files:
+            self.status_bar.showMessage("Set Track Language: select at least one MP4 or MKV file first")
+            return
+        run_set_track_language(self, files, _error_details)
 
     def _on_open_history(self) -> None:
         """Tools > History...: the operations journal (every tag change this app made, with the old values)
@@ -1668,6 +1710,9 @@ class MainWindow(QMainWindow):
             look_up = [e for e in look_up if e.key != "ctx_get_lyrics"]  # Get Lyrics: one Music Video only
         items.append(Submenu("Look Up", look_up))
         items.append(MenuAction("ctx_clear_fields", "Clear Fields…", self._on_clear_fields))
+        track_ok, track_tip = self._track_language_state(files)
+        items.append(MenuAction("ctx_set_track_language", "Set Track Language…", self._on_set_track_language,
+                                enabled=track_ok, tooltip=track_tip))
         items.append(Submenu("Organize", [
             self.actions_by_key["rename_export_move"],
             MenuAction("ctx_number_episodes", "Number Episodes…", lambda: self._quick_number_episodes(files)),
@@ -1813,6 +1858,7 @@ class MainWindow(QMainWindow):
     def _on_selection_changed(self) -> None:
         selected = self._selected_video_files()
         self._update_get_lyrics_visibility()
+        self._update_track_language_action(selected)
         self._update_play_button(selected)
         set_apply_count(self.apply_action, len(selected))  # 'Apply to N Selected', greyed at 0
         if not selected:

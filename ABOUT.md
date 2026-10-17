@@ -185,6 +185,7 @@ videoredactor notes   PATH...  [--kind KIND] [--write] [--include-uncertain] [--
 videoredactor lookup-check  theporndb|stashdb  [--endpoint URL]
 videoredactor fix-container PATH... [--apply] [--log FILE]
 videoredactor undo-remux LOG.tsv
+videoredactor set-language PATH... --audio eng [--subtitle nor] [--only-unlabelled] [--dry-run]
 ```
 
 The command line uses the same code as the window, so the results are the same. It reads the same settings file
@@ -432,6 +433,24 @@ Reads the log of a `fix-container --apply` (or the window's remux) and puts each
 moved to an `undone remux <date>` folder beside it, never deleted. An original whose name is taken again is left in
 quarantine and reported. Undoing twice does nothing. Exit code 1 when something could not be put back.
 
+### set-language
+
+`videoredactor set-language PATH... --audio LANG [--subtitle LANG] [--only-unlabelled] [--dry-run]`
+
+Sets the language of the audio and/or subtitle tracks of MP4 and MKV files **in place**: nothing is re-encoded or
+rewritten (an MP4's track language field is patched, an MKV is edited with mkvpropedit), every change is read back, and
+the old languages go into Tools > History when History is on. It is the command-line side of Metadata > Set Track
+Language and the fix for Check Files' "audio track(s) without a language". Codes are ISO 639-2/B three-letter codes
+(`eng`, `nor`, `swe`, `ger`, `fre`, ...; `und` = undetermined). A read-only file is refused and listed; a failing file
+does not stop the others. Exit code 1 when a file failed.
+
+| Option | Meaning |
+| --- | --- |
+| `--audio LANG` | The language to give the audio tracks. |
+| `--subtitle LANG` | The language to give the subtitle tracks. |
+| `--only-unlabelled` | Change only the tracks that have no language yet (und); the others keep theirs. |
+| `--dry-run` | List what would change; nothing is written. |
+
 ### JSON output
 
 `--json` prints one document: `{"results": [...], <summary fields>, "warnings": [...], "errors": [...]}`. It is ASCII-only (a non-ASCII character in a path is a `\uXXXX` escape, which any JSON reader decodes). If a command fails or is interrupted after it started, the document is still printed, with what was done so far and an `error` entry, so a script reading `--output FILE` never finds an empty or half-written file.
@@ -440,6 +459,7 @@ quarantine and reported. Undoing twice does nothing. Exit code 1 when something 
 | --- | --- | --- |
 | `info` | `path`, `status`, `check`, `technical` (container, resolution, video_codec, audio_codec, bitrate, frame_rate, duration_seconds), `fields` (name to value) | `files`, `failed` |
 | `set` | `path`, `status`, `changes` (field to `{old, new}`), `message` | `files`, `failed`, `dry_run` |
+| `set-language` | `path`, `status`, `changes` (track, old, new), `message` | `files`, `failed`, `dry_run`, `tracks`, `changed_files` |
 | `rename`, `move` | `path`, `status`, `new_path`, `message` | `files`, `failed`, `dry_run`, and `pattern` or `root` |
 | `check` | `path`, `status`, `problem`, `findings` (code, severity, message), `declared_seconds`, `readable_seconds`, `repaired`, `stamped`, `message` | `files`, `problems`, `repair`, `stamp`, `dry_run` |
 | `redact` | `file`, `path`, `status`, `applied`, `needs_review` (step, value, confidence, reason), `failures`, `notes`, `skipped`, `not_saved` | `files`, `failed`, `needs_review`, `cancelled`, `confidence_threshold`, `run_notes` |

@@ -6,7 +6,7 @@ purpose: this package is imported on every start, the commands themselves only w
 
 from redactor_common.cli import is_cli_invocation
 
-COMMANDS = ("info", "set", "rename", "move", "check", "redact", "notes", "lookup-check", "clear", "fix-container", "undo-remux")
+COMMANDS = ("info", "set", "rename", "move", "check", "redact", "notes", "lookup-check", "clear", "fix-container", "undo-remux", "set-language")
 
 
 def cli_requested(argv) -> bool:

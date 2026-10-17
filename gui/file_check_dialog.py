@@ -54,6 +54,7 @@ TITLE = "Check Files"
 DEEP_SCAN_LABEL = "Deep scan (reads the whole file)"
 CUT_BUTTON = "Cut Out Damaged Parts"
 REMUX_BUTTON = "Remux to Real Container"
+LANGUAGE_BUTTON = "Set Track Language"
 _SETTINGS_SECTION = "file_check"
 _DEEP_KEY = "deep_scan"
 
@@ -110,6 +111,11 @@ class FileCheckResultsDialog(QDialog):
         self.repairable = [vf for vf in checked if vf.check and vf.check.can_repair]
         self.cuttable = [vf for vf in checked if vf.check and getattr(vf.check, "can_cut", False)]
         self.remuxable = [vf for vf in checked if vf.check and getattr(vf.check, "can_remux_container", False)]
+        self.language_files = [
+            vf for vf in checked
+            if vf.check and any(f.code == "no_language" for f in vf.check.findings)
+            and vf.path.suffix.lower() in (".mp4", ".m4v", ".mkv")
+        ]
         counts = {status: sum(1 for vf in checked if vf.check and vf.check.status == status) for status in order}
 
         layout = QVBoxLayout(self)
@@ -135,6 +141,11 @@ class FileCheckResultsDialog(QDialog):
                 "losslessly into a real MP4/MKV, verified (container, length, tracks, a full decode), and only then "
                 "swapped in; the original is MOVED to a 'remuxed originals' folder (never deleted) and a log "
                 "allows an undo. You can choose a dry run first."
+            )
+        if self.language_files:
+            text += (
+                f"<br><b>{LANGUAGE_BUTTON}</b> is for a file with audio or subtitle tracks that have no language tag "
+                "(a note only): it writes the language of the tracks inside the file, without re-encoding or rewriting it."
             )
         summary = QLabel(text)
         summary.setWordWrap(True)
@@ -170,9 +181,18 @@ class FileCheckResultsDialog(QDialog):
             self.remux_button = buttons.addButton(
                 f"{REMUX_BUTTON} ({len(self.remuxable)})...", QDialogButtonBox.ButtonRole.ActionRole)
             self.remux_button.clicked.connect(self._choose_remux)
+        self.language_button: Optional[QPushButton] = None
+        if self.language_files:
+            self.language_button = buttons.addButton(
+                f"{LANGUAGE_BUTTON}... ({len(self.language_files)})", QDialogButtonBox.ButtonRole.ActionRole)
+            self.language_button.clicked.connect(self._choose_language)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _choose_language(self) -> None:
+        self.action = "language"
+        self.accept()
 
     def _choose_remux(self) -> None:
         self.action = "remux"
@@ -587,6 +607,11 @@ def run_check_and_repair(window, files: list[VideoFile], error_details, deep: Op
     reported = sum(1 for vf in checked if vf.check.findings)
     window.status_bar.showMessage(f"Checked {len(checked)} file(s), {reported} with findings")
     if dialog.exec() != QDialog.DialogCode.Accepted:
+        return
+    if dialog.action == "language":
+        from gui.track_language_dialog import run_set_track_language
+
+        run_set_track_language(window, dialog.language_files, error_details)
         return
     if dialog.action == "remux":
         if dialog.remuxable:
