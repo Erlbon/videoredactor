@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-17#21 -- An audio-track selector in the Player, and "Play this track" in Set Track Language
+
+Owner request: to decide a track's language you have to hear it.
+- New in the shared **Player window** (redactor_common 2026-10-17#12, pinned now): when a file has more than one audio track a compact selector sits next to the volume control ("Audio: 1 - AAC - eng", "Audio: 2 - AC3 - und (no language)"). Switching keeps the playback position and play/pause state. The **A** key (no modifier) switches to the next audio track; it works with the focus on the selector too. Hidden for a file with one audio track, so single-track audio (mp3redactor) looks and behaves as before. The labels use ffprobe's language, title and codec where the caller passes them, because QtMultimedia often reports none (it cannot map a code like 'nor' and MP4 keeps no track titles).
+- New in **Set Track Language**: a **Play this track** button on every audio row (one file selected; not for the combined rows of several files) opens the Player on that file with that audio track already active. The dialog is window-modal so the Player stays usable; the Player is closed before the file is written.
+- Checked for real (offscreen, output silent): an MP4 with a 440 Hz and an 880 Hz audio track; the frequency of the decoded audio of the active track read through QAudioBufferOutput showed ~452 Hz and ~882 Hz, the time advanced, the A key switched, paused stayed paused, initial_audio_track opened on the right track, a one-track file shows no selector. A real loudspeaker was not part of it. Unit tests (no live player): labels, visibility rule, track hints, cycling, the position-preserving switch with a fake player, the Play buttons and the flow wiring.
 ## 2026-10-17#20 -- Set Track Language: Check Files' "audio track(s) without a language" can now be fixed
 
 Raised twice by the owner: Check Files reported the note but the app could not set a track's language, so those files stayed flagged forever.

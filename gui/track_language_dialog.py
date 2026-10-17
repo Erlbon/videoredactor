@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QVBoxLayout,
@@ -75,6 +75,9 @@ class TrackLanguageDialog(QDialog):
     def __init__(self, entries: list, parent=None, can_play: bool = False):
         super().__init__(parent)
         self.setWindowTitle(TITLE)
+        # Window-modal (not application-modal): the player opened by "Play this track" is a sibling window and must
+        # stay usable (A key, play/pause) while this dialog is open.
+        self.setWindowModality(Qt.WindowModality.WindowModal)
         self.resize(760, 460)
         self.entries = entries
         self.rows: list[_Row] = []
@@ -264,6 +267,33 @@ def refresh_after_write(window, files, changed_paths: set[str]) -> None:
         window._on_selection_changed()
 
 
+def audio_hints(tracks) -> dict[int, dict[str, str]]:
+    """{0-based audio position: {language, title, codec}} for the player's selector, from our own ffprobe read (Qt often
+    reports no language or title: it cannot map codes like 'nor' and MP4 keeps no track titles)."""
+    audio = [t for t in tracks if t.kind == "audio"]
+    return {n: {"language": t.language, "title": t.title, "codec": t.codec} for n, t in enumerate(audio)}
+
+
+def open_player(window, path: str, audio_position: int, tracks) -> None:
+    """'Play this track': the shared Player on `path` with that audio track (0-based among the audio tracks) active, to
+    listen and decide its language. Read-only."""
+    from redactor_common.gui.media_preview import show_media_preview  # noqa: PLC0415
+
+    show_media_preview(window, path, video=True, autoplay=True, initial_audio_track=audio_position,
+                       track_labels=audio_hints(tracks))
+
+
+def close_players() -> None:
+    """Closes the Player window(s), if any (this module's own listening windows)."""
+    try:
+        from redactor_common.gui import media_preview  # noqa: PLC0415
+
+        for player in list(media_preview._open_windows):
+            player.close()
+    except Exception:  # noqa: BLE001 -- no player (or no QtMultimedia) is not a problem here
+        pass
+
+
 def run_set_track_language(window, files, error_details: Callable[[list[str]], str],
                            play: Optional[Callable[[str, int], None]] = None) -> None:
     """The whole Metadata > Set Track Language flow for `files` (VideoFile objects)."""
@@ -278,10 +308,16 @@ def run_set_track_language(window, files, error_details: Callable[[list[str]], s
         QMessageBox.warning(window, TITLE, error_details(problems))
     if not entries:
         return
-    dialog = TrackLanguageDialog(entries, window, can_play=play is not None and len(entries) == 1)
-    if play is not None:
-        dialog.play_requested.connect(play)
-    if dialog.exec() != QDialog.DialogCode.Accepted:
+    by_path = dict(entries)
+    if play is None:
+        def play(path: str, audio_position: int) -> None:
+            open_player(window, path, audio_position, by_path[path])
+
+    dialog = TrackLanguageDialog(entries, window, can_play=len(entries) == 1)
+    dialog.play_requested.connect(play)
+    accepted = dialog.exec() == QDialog.DialogCode.Accepted
+    close_players()  # a player holds the file open: it must not be open while the file is written
+    if not accepted:
         window.status_bar.showMessage("Set Track Language: cancelled, nothing changed")
         return
     plan = dialog.plan()

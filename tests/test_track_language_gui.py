@@ -211,3 +211,58 @@ def test_check_files_runs_the_language_flow(window, tmp_path, monkeypatch):
     check_flow.run_check_and_repair(window, files, _details, deep=False)
     assert probe_languages(path)["audio"] == ["eng", "eng"]
     assert files[0].check is not None and not [f for f in files[0].check.findings if f.code == "no_language"]
+
+
+# --- "Play this track" (the shared Player, never started here: QMediaPlayer is checked by hand) --------------------
+
+
+def test_play_buttons_exist_per_audio_row_for_one_file_only(tmp_path, qapp):
+    a = make_mp4(tmp_path / "a.mp4")
+    b = make_mp4(tmp_path / "b.mp4")
+    single = flow.TrackLanguageDialog(_entries(a), can_play=True)
+    assert single.table.columnCount() == 4 and len(single.play_buttons) == 2
+    heard = []
+    single.play_requested.connect(lambda path, n: heard.append((os.path.basename(path), n)))
+    single.play_buttons[1].click()
+    single.play_buttons[0].click()
+    assert heard == [("a.mp4", 1), ("a.mp4", 0)]
+    assert single.play_buttons[0].text() == "Play this track"
+    combined = flow.TrackLanguageDialog(_entries(a, b), can_play=False)
+    assert combined.table.columnCount() == 3 and combined.play_buttons == []
+    assert flow.TrackLanguageDialog(_entries(a)).play_buttons == []  # not offered unless the caller can play
+
+
+def test_open_player_asks_for_the_track_with_ffprobe_labels(tmp_path, monkeypatch, qapp):
+    path = make_mp4(tmp_path / "a.mp4", languages=["eng", None])
+    calls = []
+    monkeypatch.setattr("redactor_common.gui.media_preview.show_media_preview", lambda *a, **k: calls.append((a, k)))
+    flow.open_player("WINDOW", str(path), 1, tl.list_tracks(path))
+    (args, kwargs), = calls
+    assert args == ("WINDOW", str(path)) and kwargs["initial_audio_track"] == 1 and kwargs["video"] and kwargs["autoplay"]
+    assert kwargs["track_labels"] == {0: {"language": "eng", "title": "", "codec": "aac"},
+                                      1: {"language": "und", "title": "", "codec": "aac"}}
+
+
+def test_the_flow_wires_play_and_closes_the_player_before_writing(window, tmp_path, monkeypatch):
+    path = make_mp4(tmp_path / "a.mp4")
+    files = _load(window, path)
+    opened, closed = [], []
+    monkeypatch.setattr("redactor_common.gui.media_preview.show_media_preview", lambda *a, **k: opened.append(k["initial_audio_track"]))
+
+    class _Open:
+        def close(self):
+            closed.append(os.path.getsize(path))
+
+    monkeypatch.setattr("redactor_common.gui.media_preview._open_windows", [_Open()])
+
+    def fake_exec(self):
+        assert self.windowModality() == flow.Qt.WindowModality.WindowModal  # the player stays usable meanwhile
+        self.play_buttons[1].click()
+        self.choose("audio", 2, "ger")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(flow.TrackLanguageDialog, "exec", fake_exec)
+    before = path.stat().st_size
+    flow.run_set_track_language(window, files, _details)
+    assert opened == [1] and closed == [before]
+    assert probe_languages(path)["audio"] == ["und", "ger"]
