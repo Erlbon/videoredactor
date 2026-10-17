@@ -99,14 +99,41 @@ def journal_exists() -> bool:
     return os.path.isfile(get_journal().path)
 
 
+def notes_backup_base() -> str:
+    """The folder that holds `notes_backup/` (the text a refreshed note replaced): the folder of the journal, which
+    is the folder next to the settings file (core/app_paths.base_dir()); never a library folder."""
+    return os.path.dirname(os.path.abspath(get_journal().path))
+
+
+def quarantine_folder() -> str:
+    """The Library safety backup folder ("" = none): where a file goes on a drive without a Recycle Bin."""
+    try:
+        from core.library_safety import get_safety_settings  # noqa: PLC0415
+
+        return get_safety_settings().quarantine_root
+    except Exception:  # noqa: BLE001 -- a broken settings file means no backup folder
+        return ""
+
+
+def note_undo_handlers() -> dict:
+    """What Tools > History needs to undo a written note: kind -> handler(entry) -> (ok, message), for both
+    'note' (created) and 'note-update' (refreshed)."""
+    from redactor_common.core.notes_model import KIND_NOTE, KIND_NOTE_UPDATE, make_note_undo_handler  # noqa: PLC0415
+
+    handler = make_note_undo_handler(get_journal(), notes_backup_base(), fallback_folder=quarantine_folder)
+    return {KIND_NOTE: handler, KIND_NOTE_UPDATE: handler}
+
+
 def delete_history(trash=None) -> str:
-    """Moves the journal file (and a leftover prune temp file) to the Recycle Bin (`trash`, injectable for
-    tests). Returns "" or the problem."""
+    """Moves the journal file (and a leftover prune temp file, and the kept text of refreshed notes) to the Recycle
+    Bin (`trash`, injectable for tests). Returns "" or the problem."""
     if trash is None:
         from redactor_common.core.trash import move_to_trash as trash  # noqa: PLC0415
     path = get_journal().path
     try:
-        for candidate in (path, path + ".tmp"):
+        from redactor_common.core.notes_model import backup_folder  # noqa: PLC0415
+
+        for candidate in (path, path + ".tmp", backup_folder(notes_backup_base())):
             if os.path.exists(candidate):
                 trash(candidate)
     except Exception as exc:  # noqa: BLE001 -- TrashError or OSError: reported, not raised

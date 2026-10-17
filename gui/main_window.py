@@ -881,7 +881,7 @@ class MainWindow(QMainWindow):
             return problem
 
         title = "History" if enabled else "History (recording is off)"
-        HistoryDialog(history.get_journal(), apply_restore, self, title).exec()
+        HistoryDialog(history.get_journal(), apply_restore, self, title, undo_handlers=history.note_undo_handlers()).exec()
         if restored:
             self._reload_restored(restored)
 

@@ -42,7 +42,7 @@ from core.opensubtitles_hash import compute_moviehash
 from core.release_name_parser import parse_release_name
 from core.version import APP_VERSION
 from core.video_metadata import ContentType
-from redactor_common.core.lookup_client import make_default_fetch
+from redactor_common.core.lookup_client import SameSiteRedirects, make_default_fetch
 
 # The services ask for a descriptive User-Agent; this one names the app, its version and its author.
 USER_AGENT = f"TheVideoRedactor/{APP_VERSION} (https://github.com/Erlbon)"
@@ -313,16 +313,8 @@ def search_text_for(stem: str) -> tuple[str, str]:
 # --- polite HTTP --------------------------------------------------------------------------------------------------------
 
 
-class SameSiteRedirects(urllib.request.HTTPRedirectHandler):
-    """Follows a redirect only to the same scheme and host: the API key travels in a header, and urllib would carry
-    it along to wherever the answer pointed."""
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D102
-        old = urllib.parse.urlsplit(req.full_url)
-        new = urllib.parse.urlsplit(urllib.parse.urljoin(req.full_url, newurl))
-        if (old.scheme.lower(), old.netloc.lower()) != (new.scheme.lower(), new.netloc.lower()):
-            return None  # the HTTPError of the redirect surfaces: "returned an error (HTTP 302)"
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+# SameSiteRedirects: redactor_common's shared redirect policy (same scheme/host/port only, http/https only, capped);
+# the API key travels in a header and urllib would carry it along to wherever the answer pointed.
 
 
 def make_fetch(timeout: float, max_bytes: int = 8 * 1024 * 1024):

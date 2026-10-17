@@ -32,7 +32,9 @@ from typing import Optional
 
 from core import api_keys
 import urllib.error
-from redactor_common.core.lookup_client import build_request, fetch_bytes, fetch_json, make_default_fetch
+from redactor_common.core.lookup_client import (
+    as_dict, as_int, as_text, build_request, dict_items, fetch_bytes, fetch_json, json_object, make_default_fetch,
+)
 
 BASE_URL = "https://api.thetvdb.com/v4"
 USER_AGENT = "TheVideoRedactor"
@@ -142,13 +144,13 @@ def _login(force: bool = False) -> str:
 
     api_key = _require_api_key()
     request = build_request(f"{BASE_URL}/login", json_body={"apikey": api_key})
-    data = fetch_json(
+    data = json_object(fetch_json(
         request, _fetch, TVDBError, "TheTVDB",
         status_messages={401: "TheTVDB rejected the API key (401 Unauthorized)."},
-    ) or {}
+    ), TVDBError, "TheTVDB")
 
-    token = (data.get("data") or {}).get("token")
-    if not token:
+    token = as_dict(data.get("data")).get("token")
+    if not isinstance(token, str) or not token:
         raise TVDBError("TheTVDB login succeeded but returned no token.")
     _cached_token = token
     return token
@@ -165,10 +167,10 @@ def _get_json(path: str, params: Optional[dict] = None, _retrying: bool = False)
     token = _login()
     request = build_request(f"{BASE_URL}{path}", params, {"Authorization": f"Bearer {token}"})
     try:
-        return fetch_json(
+        return json_object(fetch_json(
             request, _fetch, TVDBError, "TheTVDB",
             status_messages={429: "TheTVDB rate limit hit -- try again shortly."},
-        ) or {}
+        ), TVDBError, "TheTVDB")
     except TVDBError as e:
         cause = e.__cause__
         if isinstance(cause, urllib.error.HTTPError) and cause.code == 401:
@@ -188,13 +190,17 @@ def search_series(query: str) -> list[SeriesCandidate]:
     """
     data = _get_json("/search", {"query": query, "type": "series"})
     results = []
-    for r in data.get("data", []):
+    for r in dict_items(data.get("data")):
+        tvdb_id = as_int(r.get("tvdb_id")) or as_int(r.get("id"))
+        if not tvdb_id:
+            continue  # no usable id: it cannot be picked
+        image_url = r.get("image_url")
         results.append(SeriesCandidate(
-            tvdb_id=int(r.get("tvdb_id") or r.get("id", 0)),
-            name=r.get("name", ""),
-            first_air_time=r.get("first_air_time", "") or "",
-            overview=r.get("overview", "") or "",
-            image_url=r.get("image_url"),
+            tvdb_id=tvdb_id,
+            name=as_text(r.get("name")),
+            first_air_time=as_text(r.get("first_air_time")),
+            overview=as_text(r.get("overview")),
+            image_url=image_url if isinstance(image_url, str) else None,
         ))
     return results
 
@@ -206,15 +212,16 @@ def get_series_details(series_id: int) -> dict:
     exactly so the GUI layer can treat either source's result the same way.
     """
     data = _get_json(f"/series/{series_id}/extended")
-    series = data.get("data", {})
-    genres = series.get("genres") or []
+    series = as_dict(data.get("data"))
+    genres = dict_items(series.get("genres"))
+    image = series.get("image")
     return {
-        "show_title": series.get("name", ""),
-        "description": series.get("overview", "") or "",
-        "genre_tags": ", ".join(g.get("name", "") for g in genres if isinstance(g, dict)),
-        "release_date": series.get("firstAired", "") or "",
-        "network": (series.get("originalNetwork") or {}).get("name", "") or "",
-        "_poster_path": series.get("image"),  # TheTVDB gives a full URL here, not a relative path
+        "show_title": as_text(series.get("name")),
+        "description": as_text(series.get("overview")),
+        "genre_tags": ", ".join(as_text(g.get("name")) for g in genres),
+        "release_date": as_text(series.get("firstAired")),
+        "network": as_text(as_dict(series.get("originalNetwork")).get("name")),
+        "_poster_path": image if isinstance(image, str) else None,  # TheTVDB gives a full URL here, not a relative path
     }
 
 
@@ -231,14 +238,14 @@ def get_series_episodes(series_id: int) -> list[EpisodeInfo]:
     running shows without mentioning it.
     """
     data = _get_json(f"/series/{series_id}/episodes/default")
-    episodes_data = (data.get("data") or {}).get("episodes") or []
+    episodes_data = dict_items(as_dict(data.get("data")).get("episodes"))
     return [
         EpisodeInfo(
-            season_number=e.get("seasonNumber", 0),
-            episode_number=e.get("number", 0),
-            name=e.get("name", "") or "",
-            overview=e.get("overview", "") or "",
-            aired=e.get("aired", "") or "",
+            season_number=as_int(e.get("seasonNumber")),
+            episode_number=as_int(e.get("number")),
+            name=as_text(e.get("name")),
+            overview=as_text(e.get("overview")),
+            aired=as_text(e.get("aired")),
         )
         for e in episodes_data
     ]

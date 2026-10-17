@@ -44,7 +44,9 @@ from redactor_common.core.notes_model import KIND_NOTE, STATUS_SKIPPED, Candidat
 from redactor_common.core.notes_model import Proposal as _Proposal
 from redactor_common.core.notes_model import build_each, text_sha
 from redactor_common.core.notes_model import summarize as _summarize
+from redactor_common.core.notes_model import record_note_entry
 from redactor_common.core.notes_model import undo_note_entry as _undo_note_entry
+from redactor_common.core.trash import trash_with_fallback
 from redactor_common.core.notes_model import write_proposal as _write_proposal
 from redactor_common.core.notes_phases import PhaseSet, PhaseTimer
 
@@ -447,23 +449,27 @@ def build_proposals(
 def write_proposal(proposal: Proposal, dry_run: bool = False, allow_uncertain: bool = False) -> NoteWriteResult:
     """Writes the draft of a CONFIDENT proposal (the shared write_proposal: an uncertain / none one is refused with status
     'skipped' unless a person chose it, an existing note is never overwritten). With the opt-in history on, a written note
-    is recorded so it can be undone (undo_note_entry)."""
-    return _write_proposal(proposal, dry_run, allow_uncertain, record=record_note_created)
+    is recorded so it can be undone from Tools > History (undo_note_entry). A refresh sends the older note to the Recycle
+    Bin, or to the Library safety backup folder on a drive without one (a network share)."""
+    return _write_proposal(proposal, dry_run, allow_uncertain, record=record_note_created,
+                           trash=trash_with_fallback(history.quarantine_folder))
 
 
-def record_note_created(path: str, text: str, replaced: bool = False) -> None:
-    """Journal entry for a created note when the opt-in history is on (otherwise nothing is touched). The entry keeps the
-    SHA-256 of what was written so an undo can tell whether the person edited it since."""
+def record_note_created(path: str, text: str, replaced: bool = False, old_bytes=None) -> None:
+    """Journal entry for a written note when the opt-in history is on (otherwise nothing is touched, nothing stored). A
+    created note is 'note'; a refresh is 'note-update' and keeps the replaced text in notes_backup next to the settings, so
+    the undo can put it back. The entry keeps the SHA-256 of what was written so an undo can tell whether the person edited
+    it since."""
     if not history.history_enabled():
         return
     try:
-        before = "an older note, now in the Recycle Bin" if replaced else ""
-        history.get_journal().record(path, KIND_NOTE, {"note": (before, Path(path).name)}, note=f"sha256:{text_sha(text)}")
+        record_note_entry(history.get_journal(), history.notes_backup_base(), path, text, replaced, old_bytes)
     except Exception as exc:  # noqa: BLE001 -- the note is already written; a journal failure never undoes it
         history._report(exc)
 
 
 def undo_note_entry(entry, journal=None) -> str:
-    """Undoes a journal entry of a created note (the shared undo: Recycle Bin, only if it still holds exactly what was
-    written). Returns '' or a plain-language problem."""
-    return _undo_note_entry(entry, journal if journal is not None else history.get_journal())
+    """Undoes a journal entry of a written note (the shared undo: Recycle Bin or the backup folder, only if it still holds
+    exactly what was written; a refresh gets its older text back). Returns '' or a plain-language problem."""
+    return _undo_note_entry(entry, journal if journal is not None else history.get_journal(),
+                            trash=trash_with_fallback(history.quarantine_folder), backup_base=history.notes_backup_base())

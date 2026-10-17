@@ -107,7 +107,11 @@ into files one at a time.
   follows the same setting: off = nothing recorded) is recorded with the old and new value of each changed field in
   `videoredactor_journal.jsonl`, next to `videoredactor_settings.ini`.
   "Restore Old Values…" writes the old values back, so an unwanted save
-  can be undone even after the app was closed. Covers and other images
+  can be undone even after the app was closed. A note written by Tools >
+  Create Notes (created, or refreshed from an older version) is recorded too
+  and "Undo Note…" puts it back (the note goes to the Recycle Bin, or to the
+  Library safety backup folder on a network drive; a refresh gets its older
+  text back; only while the note is unchanged). Covers and other images
   are not kept there; a file replaced by a conversion is in the Recycle
   Bin or the quarantine folder instead. The newest 50,000 changes from the
   last 90 days are kept.

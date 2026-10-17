@@ -29,7 +29,9 @@ import re
 from core import api_keys
 from core.opensubtitles_hash import compute_moviehash
 from core.version import APP_VERSION
-from redactor_common.core.lookup_client import build_request, fetch_bytes, fetch_json, make_default_fetch
+from redactor_common.core.lookup_client import (
+    as_dict, as_int, as_text, build_request, dict_items, fetch_bytes, fetch_json, json_object, make_default_fetch,
+)
 
 BASE_URL = "https://api.opensubtitles.com/api/v1"
 USER_AGENT = f"TheVideoRedactor v{APP_VERSION}"  # OpenSubtitles requires a descriptive User-Agent
@@ -88,24 +90,24 @@ def _headers(bearer_token: Optional[str]) -> dict:
 
 def _get_json(path: str, params: dict, bearer_token: Optional[str] = None) -> dict:
     request = build_request(f"{BASE_URL}{path}", params, _headers(bearer_token))
-    return fetch_json(
+    return json_object(fetch_json(
         request, _fetch, OpenSubtitlesError, "OpenSubtitles",
         status_messages={
             401: "OpenSubtitles rejected the API key (401 Unauthorized).",
             429: _RATE_LIMITED,
         },
-    ) or {}
+    ), OpenSubtitlesError, "OpenSubtitles")
 
 
 def _post_json(path: str, payload: dict, bearer_token: Optional[str] = None) -> dict:
     request = build_request(f"{BASE_URL}{path}", headers=_headers(bearer_token), json_body=payload)
-    return fetch_json(
+    return json_object(fetch_json(
         request, _fetch, OpenSubtitlesError, "OpenSubtitles",
         status_messages={
             401: "OpenSubtitles rejected the request (401 Unauthorized).",
             429: _RATE_LIMITED,
         },
-    ) or {}
+    ), OpenSubtitlesError, "OpenSubtitles")
 
 
 def search_by_hash(video_path: str, language: str = "en") -> list[SubtitleCandidate]:
@@ -135,17 +137,22 @@ def search_by_title(query: str, language: str = "en") -> list[SubtitleCandidate]
 
 
 def _parse_results(data: dict, hash_matched: bool) -> list[SubtitleCandidate]:
+    """The candidates of a /subtitles answer. A malformed entry (not an object, no usable file id) is skipped: the
+    server is outside our control and must never be able to crash the dialog."""
     results = []
-    for entry in data.get("data", []):
-        attrs = entry.get("attributes", {})
-        files = attrs.get("files", [])
+    for entry in dict_items(as_dict(data).get("data")):
+        attrs = as_dict(entry.get("attributes"))
+        files = dict_items(attrs.get("files"))
         if not files:
             continue
+        file_id = as_int(files[0].get("file_id"))
+        if not file_id:
+            continue
         results.append(SubtitleCandidate(
-            file_id=files[0].get("file_id"),
+            file_id=file_id,
             language=clean_language_code(attrs.get("language", "")),
-            release_name=attrs.get("release", "") or attrs.get("feature_details", {}).get("title", ""),
-            download_count=attrs.get("download_count", 0),
+            release_name=as_text(attrs.get("release")) or as_text(as_dict(attrs.get("feature_details")).get("title")),
+            download_count=as_int(attrs.get("download_count")),
             hash_matched=hash_matched,
         ))
     return results
@@ -160,7 +167,7 @@ def download_subtitle_text(file_id: int) -> str:
     """
     link_data = _post_json("/download", {"file_id": file_id})
     download_url = link_data.get("link")
-    if not download_url:
+    if not isinstance(download_url, str) or not download_url:
         raise OpenSubtitlesError("OpenSubtitles did not return a download link.")
 
     data = fetch_bytes(download_url, _download_fetch, OpenSubtitlesError, what="the subtitle file")

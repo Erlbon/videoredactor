@@ -18,7 +18,9 @@ from dataclasses import dataclass
 from typing import Optional
 
 from core import api_keys
-from redactor_common.core.lookup_client import build_request, fetch_bytes, fetch_json, make_default_fetch
+from redactor_common.core.lookup_client import (
+    as_dict, as_int, as_text, build_request, dict_items, fetch_bytes, fetch_json, json_object, make_default_fetch,
+)
 
 BASE_URL = "https://api.themoviedb.org/3"
 USER_AGENT = "TheVideoRedactor"
@@ -95,6 +97,10 @@ class EpisodeInfo:
     air_date: str
 
 
+def _path_or_none(value: object) -> Optional[str]:
+    return value if isinstance(value, str) and value else None
+
+
 def get_api_key() -> Optional[str]:
     return api_keys.get_key("tmdb")
 
@@ -116,9 +122,9 @@ def _get_json(path: str, params: dict) -> dict:
     were handled here."""
     key = _require_api_key()
     request = build_request(f"{BASE_URL}{path}", {**params, "api_key": key})
-    return fetch_json(
+    return json_object(fetch_json(
         request, _fetch, TMDBError, "TMDB", status_messages=_STATUS_MESSAGES,
-    ) or {}
+    ), TMDBError, "TMDB")
 
 
 def search_movies(query: str, year: Optional[str] = None) -> list[MovieCandidate]:
@@ -134,13 +140,13 @@ def search_movies(query: str, year: Optional[str] = None) -> list[MovieCandidate
     data = _get_json("/search/movie", params)
     return [
         MovieCandidate(
-            tmdb_id=r["id"],
-            title=r.get("title", ""),
-            release_date=r.get("release_date", ""),
-            overview=r.get("overview", ""),
-            poster_path=r.get("poster_path"),
+            tmdb_id=as_int(r.get("id")),
+            title=as_text(r.get("title")),
+            release_date=as_text(r.get("release_date")),
+            overview=as_text(r.get("overview")),
+            poster_path=_path_or_none(r.get("poster_path")),
         )
-        for r in data.get("results", [])
+        for r in dict_items(data.get("results")) if as_int(r.get("id"))
     ]
 
 
@@ -150,13 +156,13 @@ def search_tv(query: str) -> list[TVCandidate]:
     data = _get_json("/search/tv", {"query": query})
     return [
         TVCandidate(
-            tmdb_id=r["id"],
-            name=r.get("name", ""),
-            first_air_date=r.get("first_air_date", ""),
-            overview=r.get("overview", ""),
-            poster_path=r.get("poster_path"),
+            tmdb_id=as_int(r.get("id")),
+            name=as_text(r.get("name")),
+            first_air_date=as_text(r.get("first_air_date")),
+            overview=as_text(r.get("overview")),
+            poster_path=_path_or_none(r.get("poster_path")),
         )
-        for r in data.get("results", [])
+        for r in dict_items(data.get("results")) if as_int(r.get("id"))
     ]
 
 
@@ -168,25 +174,26 @@ def get_movie_details(tmdb_id: int) -> dict:
     """
     data = _get_json(f"/movie/{tmdb_id}", {"append_to_response": "credits"})
 
+    credits = as_dict(data.get("credits"))
     director = ""
-    for crew in data.get("credits", {}).get("crew", []):
+    for crew in dict_items(credits.get("crew")):
         if crew.get("job") == "Director":
-            director = crew.get("name", "")
+            director = as_text(crew.get("name"))
             break
 
-    cast_names = [c.get("name", "") for c in data.get("credits", {}).get("cast", [])[:10]]
+    cast_names = [as_text(c.get("name")) for c in dict_items(credits.get("cast"))[:10]]
 
     return {
-        "title": data.get("title", ""),
-        "description": data.get("overview", ""),
-        "genre_tags": ", ".join(g.get("name", "") for g in data.get("genres", [])),
-        "release_date": data.get("release_date", ""),
-        "language": data.get("original_language", ""),
+        "title": as_text(data.get("title")),
+        "description": as_text(data.get("overview")),
+        "genre_tags": ", ".join(as_text(g.get("name")) for g in dict_items(data.get("genres"))),
+        "release_date": as_text(data.get("release_date")),
+        "language": as_text(data.get("original_language")),
         "director": director,
         "cast": ", ".join(cast_names),
-        "studio": ", ".join(c.get("name", "") for c in data.get("production_companies", [])),
-        "_poster_path": data.get("poster_path"),  # underscore: not a VideoMetadata field, handled specially by caller
-        "_imdb_id": data.get("imdb_id") or "",   # TMDB's own record of the IMDb id (a source id when applied)
+        "studio": ", ".join(as_text(c.get("name")) for c in dict_items(data.get("production_companies"))),
+        "_poster_path": _path_or_none(data.get("poster_path")),  # underscore: not a VideoMetadata field, handled specially by caller
+        "_imdb_id": as_text(data.get("imdb_id")),   # TMDB's own record of the IMDb id (a source id when applied)
     }
 
 
@@ -195,16 +202,16 @@ def get_tv_show_details(tmdb_id: int) -> dict:
     numbering is filled in separately since it's per-file, not per-show.
     """
     data = _get_json(f"/tv/{tmdb_id}", {"append_to_response": "external_ids"})
-    external = data.get("external_ids") if isinstance(data.get("external_ids"), dict) else {}
+    external = as_dict(data.get("external_ids"))
     return {
-        "show_title": data.get("name", ""),
-        "description": data.get("overview", ""),
-        "genre_tags": ", ".join(g.get("name", "") for g in data.get("genres", [])),
-        "release_date": data.get("first_air_date", ""),
-        "network": ", ".join(n.get("name", "") for n in data.get("networks", [])),
-        "_poster_path": data.get("poster_path"),
-        "_imdb_id": external.get("imdb_id") or "",
-        "_tvdb_id": external.get("tvdb_id") or "",
+        "show_title": as_text(data.get("name")),
+        "description": as_text(data.get("overview")),
+        "genre_tags": ", ".join(as_text(g.get("name")) for g in dict_items(data.get("genres"))),
+        "release_date": as_text(data.get("first_air_date")),
+        "network": ", ".join(as_text(n.get("name")) for n in dict_items(data.get("networks"))),
+        "_poster_path": _path_or_none(data.get("poster_path")),
+        "_imdb_id": as_text(external.get("imdb_id")),
+        "_tvdb_id": as_text(external.get("tvdb_id")),
     }
 
 
@@ -219,11 +226,11 @@ def get_tv_seasons(tmdb_id: int) -> list[SeasonInfo]:
     data = _get_json(f"/tv/{tmdb_id}", {})
     return [
         SeasonInfo(
-            season_number=s.get("season_number", 0),
-            name=s.get("name", f"Season {s.get('season_number', '?')}"),
-            episode_count=s.get("episode_count", 0),
+            season_number=as_int(s.get("season_number")),
+            name=as_text(s.get("name")) or f"Season {as_text(s.get('season_number'), '?')}",
+            episode_count=as_int(s.get("episode_count")),
         )
-        for s in data.get("seasons", [])
+        for s in dict_items(data.get("seasons"))
     ]
 
 
@@ -232,12 +239,12 @@ def get_season_episodes(tmdb_id: int, season_number: int) -> list[EpisodeInfo]:
     data = _get_json(f"/tv/{tmdb_id}/season/{season_number}", {})
     return [
         EpisodeInfo(
-            episode_number=e.get("episode_number", 0),
-            name=e.get("name", ""),
-            overview=e.get("overview", ""),
-            air_date=e.get("air_date", ""),
+            episode_number=as_int(e.get("episode_number")),
+            name=as_text(e.get("name")),
+            overview=as_text(e.get("overview")),
+            air_date=as_text(e.get("air_date")),
         )
-        for e in data.get("episodes", [])
+        for e in dict_items(data.get("episodes"))
     ]
 
 
@@ -246,9 +253,9 @@ def get_tv_episode_details(tmdb_id: int, season: int, episode: int) -> dict:
     already identified via get_tv_show_details."""
     data = _get_json(f"/tv/{tmdb_id}/season/{season}/episode/{episode}", {})
     return {
-        "title": data.get("name", ""),           # episode title
-        "description": data.get("overview", ""),
-        "release_date": data.get("air_date", ""),
+        "title": as_text(data.get("name")),           # episode title
+        "description": as_text(data.get("overview")),
+        "release_date": as_text(data.get("air_date")),
         "season_number": season,
         "episode_number": episode,
     }

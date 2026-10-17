@@ -407,8 +407,9 @@ def _fake_dialog(monkeypatch, seen, on_exec=None):
     import gui.main_window as mw
 
     class FakeDialog:
-        def __init__(self, journal, apply_restore, parent, title):
+        def __init__(self, journal, apply_restore, parent, title, undo_handlers=None):
             seen["journal"], seen["title"] = journal, title
+            assert sorted(undo_handlers) == ["note", "note-update"]  # batch 4: written notes are undone from here
             self.apply_restore = apply_restore
 
         def exec(self):

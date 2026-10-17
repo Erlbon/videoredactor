@@ -24,8 +24,12 @@ from redactor_common.gui.progress import run_with_progress
 from redactor_common.gui.table_columns import make_columns_resizable
 
 from core.embed_posters import EmbedOutcome, PosterOffer, embed_offer, find_offers
+from core.poster import MAX_BYTES, MAX_WIDTH
 
 TITLE = "Embed Existing Poster Files"
+# What embedding does to the picture: the same limits a looked-up poster gets (core.poster.prepare_poster).
+SCALING_SENTENCE = (f"The poster is scaled to at most {MAX_WIDTH} px and {MAX_BYTES // 1024} KB; "
+                    "the original file goes to the Recycle Bin.")
 HEADERS = ["Embed", "Video", "Poster file", "Size", "True poster?", "Cover now"]
 COL_TICK, COL_VIDEO, COL_FILE, COL_SIZE, COL_VERDICT, COL_COVER = range(6)
 
@@ -43,7 +47,8 @@ class EmbedPostersDialog(QDialog):
             "Posters are now kept inside the video file. These poster files sit next to their videos from earlier "
             "versions. Ticked ones are embedded; each poster file then goes to the Recycle Bin, but only after the "
             "embedded poster was read back from the video. A landscape picture is not a poster and starts unticked; "
-            "so does a poster that would replace a cover the video already has."
+            "so does a poster that would replace a cover the video already has. "
+            f"{SCALING_SENTENCE}"
         )
         note.setWordWrap(True)
         layout.addWidget(note)

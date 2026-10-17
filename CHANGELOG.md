@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-17#01 -- Created and refreshed notes can be undone from History; lookups never leak a key to another host
+
+From the 2026-10-16 independent code review (batch 4); the shared parts are in redactor_common 2026-10-17#01.
+- Fixed: **a lookup that was redirected to another host carried the API key along**: TheTVDB's login token and OpenSubtitles' API key and login token were copied by the redirect to whatever host the answer pointed at (reproduced with two local servers). Every lookup now drops a key, token or cookie when a redirect leaves the host, follows only http and https redirects (never ftp or file), and follows at most five. A subtitle or poster download, which carries no key, still follows a CDN redirect.
+- Fixed: **a hostile or broken answer no longer crashes the program**: TMDB, TheTVDB and OpenSubtitles assumed every answer was shaped like the documentation; an answer such as `[]`, `5`, `{"results": "x"}`, a list holding numbers or nothing, or JSON nested a hundred thousand levels deep ended in the crash dialog. A strange entry is skipped, a strange answer is reported as "unreadable response" from that service.
+- Fixed: **a note Create Notes wrote could not be undone from Tools > History**, although the change log said it could: the Restore button stayed grey for every note. It reads "Undo Note..." now and works for a **created** note (the note goes to the Recycle Bin) and for a **refreshed** one (the refreshed note goes to the Recycle Bin and the older text is written back), only while the note is exactly as it was written. With History on, a refresh keeps the older text in a `notes_backup` folder next to the settings file (never in a library folder), as long as the history (90 days); Delete History removes it too; with History off nothing is stored.
+- Fixed: **refreshing notes never worked on a network drive** (no Recycle Bin there, so every refresh was refused): it now uses the Library safety backup folder (Preferences > Library safety) when one is set, for the refresh and for Undo Note, and otherwise says "On a network drive there is no Recycle Bin: set a backup folder in Preferences or updates are refused."
+- Changed (wording only): the Embed Existing Poster Files window now says "The poster is scaled to at most 1000 px and 400 KB; the original file goes to the Recycle Bin." The behaviour is unchanged.
+- Fixed (shared): the folder question of Create Notes counts one folder walk at a time (a tick of "Include subfolders" no longer starts another walk on top of the running one).
+- Tests: tests/test_batch4_network.py (two real local servers: the TheTVDB and OpenSubtitles keys never reach the second host, a subtitle download still follows a CDN redirect; sixteen hostile bodies through twelve parsing entry points) and tests/test_batch4_note_undo.py (undo of a created and of a refreshed note through the real History dialog, a refresh on a faked network drive); each failed before the fix. The Recycle Bin is never touched by tests.
+
 ## 2026-10-16#11 -- Create Notes: the lookup cache no longer keeps an error page as the answer
 
 From the 2026-10-16 independent code review; the fix is in redactor_common 2026-10-16#08.
