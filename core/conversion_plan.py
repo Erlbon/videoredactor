@@ -219,13 +219,66 @@ def audio_bitrate(stream: StreamInfo) -> int:
     return AUDIO_BITRATE_ESTIMATE.get(stream.codec, DEFAULT_AUDIO_ESTIMATE)
 
 
+def video_mbps_from(size_bytes: int | None, duration: float | None, audio_bps: float) -> float | None:
+    """Video bitrate in Mb/s = size*8/duration minus the audio bitrate (the measure the rules and the Bitrate column's
+    colours share). None when the size or the duration is unknown."""
+    if not duration or duration <= 0 or not size_bytes:
+        return None
+    return max(size_bytes * 8 / duration - audio_bps, 0) / 1_000_000
+
+
 def video_mbps(info: MediaInfo) -> float | None:
     """Video bitrate in Mb/s = size*8/duration minus the audio bitrate."""
-    if not info.duration or info.duration <= 0 or not info.size_bytes:
-        return None
-    total = info.size_bytes * 8 / info.duration
-    audio = sum(audio_bitrate(a) for a in info.of("audio"))
-    return max(total - audio, 0) / 1_000_000
+    return video_mbps_from(info.size_bytes, info.duration, sum(audio_bitrate(a) for a in info.of("audio")))
+
+
+@dataclass(frozen=True)
+class BitrateRule:
+    """The bitrate part of the rules for one video: does it want a bitrate re-encode, and why. `exempt` is the reason
+    the rules skip the file ("" = they apply). Used by plan_conversion() AND by the Bitrate column's colours
+    (core/bitrate_bands.py), so the table and Convert to MP4/MKV (Rules) can never disagree."""
+
+    over: bool = False
+    scale: bool = False  # the re-encode scales down to scale_height (the video is tall), else it keeps the size
+    limit_mbps: float | None = None  # the Mb/s limit that applies (None when the size trigger is what fired)
+    reason: str = ""  # the text the plan records
+    exempt: str = ""
+
+
+def rules_cover(ext: str, codec: str) -> bool:
+    """True when plan_conversion() reaches the bitrate rules for a video of this codec in a file with this extension
+    (not a disc image, an unknown container, an unknown codec, or a codec only a full re-encode can fix)."""
+    ext = ext.lower()
+    if ext in DISC_EXTENSIONS or (ext not in SANE_EXTENSIONS and ext not in LEGACY_EXTENSIONS):
+        return False
+    return codec in VIDEO_COPY_ANY or codec in VIDEO_MKV_ONLY
+
+
+def bitrate_rule(
+    height: int, width: int, size_bytes: int, mbps: float | None, s: ConversionSettings, *, is_series: bool = True,
+) -> BitrateRule:
+    """The bitrate/size decision of the rules for a video that is copied otherwise: movies are exempt unless
+    apply_to_movies, files under min_size_mb are ignored, a tall video (above scale_height or wider than
+    scale_if_wider_than) is scaled when it is larger than scale_size_trigger_gb or above scale_video_mbps, a smaller one
+    is re-encoded above reencode_video_mbps (reencode_video_mbps_small under small_height)."""
+    if not is_series and not s.apply_to_movies:
+        return BitrateRule(exempt="movies are exempt from the conversion rules unless 'apply to movies' is on")
+    if size_bytes < s.min_size_mb * 1048576:
+        return BitrateRule(exempt=f"files under {s.min_size_mb} MB are ignored by the conversion rules")
+    if mbps is None:
+        return BitrateRule(exempt="the bitrate (size and duration) is unknown")
+    tall = height > s.scale_height or width > s.scale_if_wider_than
+    if tall:
+        if size_bytes > s.scale_size_trigger_gb * 1073741824 or mbps > s.scale_video_mbps:
+            return BitrateRule(
+                over=True, scale=True, limit_mbps=s.scale_video_mbps,
+                reason=f"{height}p at {mbps:.1f} Mb/s, {size_bytes / 1073741824:.1f} GB: scale to {s.scale_height}p",
+            )
+        return BitrateRule(limit_mbps=s.scale_video_mbps)
+    limit = s.reencode_video_mbps_small if height < s.small_height else s.reencode_video_mbps
+    if mbps > limit:
+        return BitrateRule(over=True, limit_mbps=limit, reason=f"{height}p at {mbps:.1f} Mb/s (limit {limit:g}): re-encode")
+    return BitrateRule(limit_mbps=limit)
 
 
 def is_heavy_audio(info: MediaInfo, s: ConversionSettings) -> bool:
@@ -313,19 +366,11 @@ def plan_conversion(
 
     # --- bitrate / size rules ---
     plan.video_mbps = video_mbps(info)
-    exempt = (not is_series and not s.apply_to_movies) or info.size_bytes < s.min_size_mb * 1048576
-    mbps = plan.video_mbps
-    if not exempt and mbps is not None and plan.video == V_COPY:
-        tall = video.height > s.scale_height or video.width > s.scale_if_wider_than
-        if tall:
-            if info.size_bytes > s.scale_size_trigger_gb * 1073741824 or mbps > s.scale_video_mbps:
-                plan.video, plan.bitrate_driven = V_NVENC_SCALE, True
-                plan.reasons.append(f"{video.height}p at {mbps:.1f} Mb/s, {info.size_bytes / 1073741824:.1f} GB: scale to {s.scale_height}p")
-        else:
-            limit = s.reencode_video_mbps_small if video.height < s.small_height else s.reencode_video_mbps
-            if mbps > limit:
-                plan.video, plan.bitrate_driven = V_NVENC, True
-                plan.reasons.append(f"{video.height}p at {mbps:.1f} Mb/s (limit {limit:g}): re-encode")
+    if plan.video == V_COPY:
+        rule = bitrate_rule(video.height, video.width, info.size_bytes, plan.video_mbps, s, is_series=is_series)
+        if rule.over:
+            plan.video, plan.bitrate_driven = (V_NVENC_SCALE if rule.scale else V_NVENC), True
+            plan.reasons.append(rule.reason)
     return plan
 
 

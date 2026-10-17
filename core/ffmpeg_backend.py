@@ -473,7 +473,9 @@ def probe_technical_info(path: str) -> dict:
     """
     result = _run([
         "ffprobe", "-v", "error",
-        "-show_entries", "stream=codec_type,codec_name,width,height,avg_frame_rate",
+        "-show_entries", "stream=codec_type,codec_name,width,height,avg_frame_rate,bit_rate",
+        "-show_entries", "stream_tags=BPS,BPS-eng",
+        "-show_entries", "stream_disposition=attached_pic",
         "-show_entries", "format=duration,bit_rate,format_name",
         "-of", "json", path,
     ])
@@ -514,12 +516,21 @@ def probe_technical_info(path: str) -> dict:
     streams = data.get("streams") or []
     if not isinstance(streams, list):
         streams = []
+    audio_total = 0
     for stream in streams:
         if not isinstance(stream, dict):
             continue
         codec_type = stream.get("codec_type")
+        disposition = stream.get("disposition") if isinstance(stream.get("disposition"), dict) else {}
+        if codec_type == "video" and disposition.get("attached_pic"):
+            continue  # a poster stored as a video stream is not the video
+        if codec_type == "audio":
+            audio_total += _stream_bit_rate_or_estimate(stream)
         if codec_type == "video" and "video_codec" not in info:
             info["video_codec"] = stream.get("codec_name", "")
+            own = _stream_bit_rate(stream)
+            if own:
+                info["video_bitrate"] = str(own)
             width, height = stream.get("width"), stream.get("height")
             if width and height:
                 info["resolution"] = f"{width}x{height}"
@@ -528,7 +539,31 @@ def probe_technical_info(path: str) -> dict:
         elif codec_type == "audio" and "audio_codec" not in info:
             info["audio_codec"] = stream.get("codec_name", "")
 
+    if audio_total:
+        info["audio_bitrate_total"] = str(audio_total)  # the streams' own rates, else the rules' estimates
     return info
+
+
+def _stream_bit_rate(stream: dict) -> int:
+    """A stream's own bit rate in bits/s: ffprobe's bit_rate, else the BPS tag (MKV); 0 when neither says."""
+    tags = stream.get("tags") if isinstance(stream.get("tags"), dict) else {}
+    lowered = {str(k).lower(): v for k, v in tags.items()}
+    for candidate in (stream.get("bit_rate"), lowered.get("bps"), lowered.get("bps-eng")):
+        try:
+            value = int(candidate)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return 0
+
+
+def _stream_bit_rate_or_estimate(stream: dict) -> int:
+    """An audio stream's bit rate, or the conversion rules' estimate for its codec (core.conversion_plan)."""
+    from core import conversion_plan
+
+    return conversion_plan.audio_bitrate(conversion_plan.StreamInfo(
+        index=0, kind="audio", codec=str(stream.get("codec_name") or "").lower(), bit_rate=_stream_bit_rate(stream) or None))
 
 
 def _format_frame_rate(raw: str) -> str:

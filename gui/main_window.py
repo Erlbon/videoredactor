@@ -31,7 +31,9 @@ from PyQt6.QtGui import QColor, QImage, QKeySequence, QIcon
 from core.video_file import (
     SUPPORTED_EXTENSIONS, VideoFile, discover_convertible_files, discover_video_files, has_subfolders,
 )
+from core import bitrate_bands, conversion_plan
 from core.filename_pattern import PATTERN_FIELDS
+from redactor_common.gui.quality_colour import apply_band_colour
 from core.video_metadata import ContentType, EDITABLE_FIELDS, NUMERIC_FIELDS, TEXT_FIELDS, can_move_track_title
 from core.filename_pattern import (
     DEFAULT_RENAME_PATTERN, PARSE_NUMERIC_FIELDS, PARSE_STRIP_ZEROS_FIELDS, VALID_FIELD_KEYS,
@@ -187,6 +189,9 @@ FILTER_COLUMN_KINDS = {
         "writer", "studio", "collection", "show_title", "network", "artist", "album", "composer", "lyrics",
     )},
 }
+
+BITRATE_HEADER_TIP = ("Bitrate: yellow = poor (check it), green = fine, orange = above the conversion limit. "
+                      "Hover a cell for the details.")
 
 FILE_ROLE = Qt.ItemDataRole.UserRole  # row -> VideoFile mapping, not row index
 TAG_PANEL_COLLAPSED_WIDTH = 32  # slim strip, not zero -- keeps the panel's own toggle button reachable
@@ -997,6 +1002,10 @@ class MainWindow(QMainWindow):
             label_lookup = COLUMN_LABEL_LOOKUP
             headers = [label_lookup.get(f, f) for f in self._column_order]
             self.table.setHorizontalHeaderLabels(headers)
+            if "bitrate" in self._column_order:
+                header_item = self.table.horizontalHeaderItem(self._column_order.index("bitrate"))
+                if header_item is not None:
+                    header_item.setToolTip(BITRATE_HEADER_TIP)
 
             hidden = sanitize_hidden_fields(self._load_hidden_fields())
             widths = self._load_column_widths()
@@ -1436,6 +1445,8 @@ class MainWindow(QMainWindow):
         selected_ids = [id(vf) for vf in self._selected_video_files()]
         with suspend_sorting(self.table):
             self.table.setRowCount(len(self.video_files))
+            band_settings = bitrate_bands.get_band_settings()  # read once per refresh, not per row
+            conversion_settings = conversion_plan.get_conversion_settings()
             for row, vf in enumerate(self.video_files):
                 row_colors = self._row_colors(vf)
                 for col, field_name in enumerate(self._column_order):
@@ -1455,6 +1466,17 @@ class MainWindow(QMainWindow):
                         bg, fg = row_colors
                         item.setBackground(bg)
                         item.setForeground(fg)
+                    if field_name == "bitrate" and not vf.load_error:
+                        # The quality colour goes on AFTER the row tint (so a modified row keeps it) and never on a
+                        # failed file, where the red tint matters more (shared painter, redactor_common).
+                        result = bitrate_bands.classify(
+                            bitrate_bands.input_from_file(
+                                vf, conversion_is_series(vf.metadata.content_type, vf.path.stem)),
+                            band_settings, conversion_settings)
+                        earlier = item.toolTip()  # a save error / check note stays, the band's text follows it
+                        apply_band_colour(item, result, failed=bool(vf.save_error) or vf.scan_status() == "DAMAGED")
+                        if earlier:
+                            item.setToolTip(earlier + "\n" + result.tooltip)
                     self.table.setItem(row, col, item)
         self._reselect_files(selected_ids)
         self._apply_column_filters()  # the rebuild showed every row again

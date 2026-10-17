@@ -29,6 +29,15 @@ More detail, the command line, and the licences of the data sources: [ABOUT.md](
 - Windows exe: `build_exe.bat` (PyInstaller, `videoredactor.spec`); see [BUILD.md](BUILD.md). It must be built on
   Windows. `python bump_version.py` sets the version first.
 
+## The Bitrate column's colours
+
+Every file's Bitrate cell is tinted by its **video bits per pixel per frame** (the video stream's own bit rate, else the file's rate minus the audio), compared as H.264: HEVC counts for about 40 percent less (HEVC 0.6, AV1 0.5, VP9 0.65, older codecs more). **Yellow** (poor) is below 0.05 bpp, **green** is fine, **orange** is above the conversion limit of Media > Convert to MP4/MKV (Rules) for the file's resolution (the same function the rules use, so the table and the rules never disagree; movies are coloured too, but the rules skip them unless "apply to movies" is on, and the tooltip says so). No colour when the resolution, frame rate or bit rate is unknown (the tooltip says which). **Yellow means "check it", not "bad"**: animation and low-motion content compresses better. A failed file keeps its red tint. Hover a cell for the numbers ("1080p HEVC, 2.1 Mb/s video (0.04 bpp, HEVC-equivalent 0.07). Poor below 1.5 Mb/s for HEVC; good from about 3 Mb/s."). The two thresholds (poor 0.05, good 0.10, 0.01 to 0.5, poor below good) are in Tools > Preferences > Conversion > Table colours and in Export / Import Settings.
+
+| H.264, 24 fps | 480p | 720p | 1080p | 4K |
+| --- | --- | --- | --- | --- |
+| poor below | about 0.5 Mb/s | about 1.1 | about 2.5 | about 10 |
+| good from about | about 1 Mb/s | about 2.2 | about 5 | about 20 |
+
 ## Menus
 
 | Menu | Items |

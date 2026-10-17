@@ -33,7 +33,7 @@ from PyQt6.QtWidgets import (
 from redactor_common.core.preferences import PrefAction
 from redactor_common.gui.preferences_dialog import PreferencesDialog
 
-from core import conversion_plan, history, imdb_settings, library_safety, notes_settings
+from core import bitrate_bands, conversion_plan, history, imdb_settings, library_safety, notes_settings
 from core.preferences_backend import (  # noqa: F401 -- HISTORY_CHECKBOX / history_help_text re-exported
     HISTORY_CHECKBOX, KEY_AUDIO_BITRATE, KEY_HISTORY_ENABLED, bitrate_ok, build_sections, history_help_text,
     make_backend,
@@ -342,7 +342,32 @@ class ConversionPage(QWidget):
         self.languages.setToolTip('"all", or ISO codes separated by commas, for example: en, nl, de')
         form.addRow("Subtitle languages to ingest:", self.languages)
         layout.addLayout(form)
+
+        # The Bitrate column's colours (core/bitrate_bands.py): bits per pixel per frame, H.264-equivalent.
+        colours = QGroupBox("Table colours (Bitrate column)")
+        colour_form = QFormLayout(colours)
+        bands = bitrate_bands.get_band_settings()
+        self.poor_bpp = self._bpp_spin(colour_form, "Yellow (poor) below:", bands.poor_bpp)
+        self.good_bpp = self._bpp_spin(colour_form, "Good from about (tooltip only):", bands.good_bpp)
+        self._help(colour_form, (
+            "The Bitrate column is coloured by the video's bits per pixel per frame, compared as H.264 (HEVC counts "
+            "for about 40 percent less). Yellow means 'check it', not 'bad': animation and low-motion content "
+            "compresses better. Orange means above the conversion limit above (Convert to MP4/MKV (Rules) would "
+            "re-encode it). Allowed: 0.01 to 0.5, and poor must be below good. For 1080p at 24 fps, 0.05 is about "
+            "2.5 Mb/s and 0.10 about 5 Mb/s in H.264."))
+        layout.addWidget(colours)
         layout.addStretch(1)
+
+    @staticmethod
+    def _bpp_spin(form: QFormLayout, label: str, value: float) -> QDoubleSpinBox:
+        box = QDoubleSpinBox()
+        box.setRange(*bitrate_bands.BPP_RANGE)
+        box.setDecimals(2)
+        box.setSingleStep(0.01)
+        box.setValue(value)
+        box.setSuffix(" bpp")
+        form.addRow(label, box)
+        return box
 
     @staticmethod
     def _help(form: QFormLayout, text: str) -> QLabel:
@@ -389,6 +414,12 @@ class ConversionPage(QWidget):
         current.disc_images = self.disc.currentData()
         current.subtitle_languages = self.languages.text().strip() or "all"
         conversion_plan.set_conversion_settings(current)
+        poor, good = round(self.poor_bpp.value(), 2), round(self.good_bpp.value(), 2)
+        if bitrate_bands.valid_thresholds(poor, good):
+            bitrate_bands.set_band_settings(bitrate_bands.BandSettings(poor, good))
+        else:
+            QMessageBox.warning(self, "Table colours", "The colour thresholds were not saved: 'poor' must be below "
+                                "'good' (both from 0.01 to 0.5 bpp).")
 
 
 class VideoPreferencesDialog(PreferencesDialog):

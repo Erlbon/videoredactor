@@ -111,6 +111,10 @@ class VideoMetadata:
     video_codec: str = field(default="", compare=False)
     audio_codec: str = field(default="", compare=False)
     bitrate: str = field(default="", compare=False)
+    # The VIDEO stream's own bit rate (bits/s as text; ffprobe's bit_rate or the BPS tag) and the audio streams' total
+    # (their own rates, else the conversion rules' estimates): the Bitrate column's colours use them.
+    video_bitrate: str = field(default="", compare=False)
+    audio_bitrate_total: str = field(default="", compare=False)
     duration_seconds: Optional[float] = field(default=None, compare=False)
     frame_rate: str = field(default="", compare=False)
     container: str = field(default="", compare=False)  # 'mp4' or 'mkv'

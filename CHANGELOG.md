@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-10-17#06 -- The Bitrate column is coloured by quality
+
+The shared parts (the three tints, the bands, the painter, the audio profile for mp3redactor) are in redactor_common 2026-10-17#04.
+- New: **the Bitrate column is coloured** like cbzredactor's Size column, for every file (series, movies, music videos, clips). The measure is the video's **bits per pixel per frame** (the video stream's own bit rate; when there is none, the file's rate minus the audio the conversion rules already estimate), compared as H.264: HEVC counts 0.6, AV1 0.5, VP9 0.65, MPEG-4/Xvid/DivX/WMV/VC-1 1.3, MPEG-2 1.6. **Yellow** (poor) below 0.05 bpp (H.264-equivalent), **green** fine, **orange** above the conversion limit of Convert to MP4/MKV (Rules) for its resolution. Yellow means "check it", not "bad": animation and low-motion content compresses better. No colour when the resolution, frame rate or bit rate is unknown, and the tooltip says which. A movie is coloured too; the tooltip says the rules skip movies unless "apply to movies" is on, so the colour is information only.
+- The orange band can never disagree with the conversion rules: both ask the same function (`conversion_plan.bitrate_rule`); a test compares them on 4000 generated files and on a grid around every limit. A file the rules ignore (under 400 MB, a disc image, a codec they never touch) is not orange.
+- The tooltip gives the numbers ("1080p HEVC, 2.1 Mb/s video (0.04 bpp, HEVC-equivalent 0.07). Poor below 1.5 Mb/s for HEVC; good from about 3 Mb/s."); the column header's tooltip is the legend. The colour goes on after the row tint (a modified row keeps it) and never on a failed file, which keeps its red; sorting by the column is still numeric and the colours follow a refresh (after a conversion or a re-probe).
+- New: **Tools > Preferences > Conversion > Table colours** sets the two thresholds (poor 0.05 bpp, good 0.10 bpp for the tooltip wording; 0.01 to 0.5, poor below good) and Export / Import Settings carries them.
+- Changed: the probe also reads each stream's own bit rate (ffprobe's bit_rate or the MKV BPS tag) and ignores a poster stored as a video stream.
+- Tests: tests/test_bitrate_bands.py.
+
 ## 2026-10-17#05 -- Clear Fields: put a wrongly tagged file back to blank
 
 For a file that got wrong metadata (the TV import bug put show data, a poster and a TMDB id on a file that did not belong) and has to be restored without re-tagging by hand. The shared dialog and planning code are in redactor_common 2026-10-17#03.

@@ -89,6 +89,17 @@ def _bool_codec(default: bool):
     return read, coerce
 
 
+def _float_codec(default: float, low: float, high: float):
+    def read(raw: str) -> float:
+        return sc.parse_float(raw, default, low, high)
+
+    def coerce(value: Any) -> str:
+        number = required(sc.coerce_float(value, low, high), f"expected a number from {low:g} to {high:g}")
+        return f"{number:g}"
+
+    return read, coerce
+
+
 def _int_codec(default: int, low: int, high: int):
     def read(raw: str) -> int:
         return sc.parse_int(raw, default, low, high)
@@ -295,6 +306,12 @@ SECTIONS: dict[str, tuple[str, bool, list[Key]]] = {
     ]),
     "imdb_options": ("IMDb database build options", True, [
         _key("options", "imdb", "options", _imdb_options_codec()),
+    ]),
+    # The Bitrate column's colour thresholds (bits per pixel per frame): 0.01..0.5, poor below good (a pair that breaks
+    # this reads back as the defaults, see core/bitrate_bands.get_band_settings).
+    "bitrate_colours": ("Table colours: the Bitrate column's quality thresholds", True, [
+        _key("poor_bpp", "bitrate_colours", "poor_bpp", _float_codec(0.05, 0.01, 0.5)),
+        _key("good_bpp", "bitrate_colours", "good_bpp", _float_codec(0.10, 0.01, 0.5)),
     ]),
     "tools": ("External tool paths", False, _TOOL_KEYS),
     "imdb": ("IMDb database and dataset file paths", False, [
