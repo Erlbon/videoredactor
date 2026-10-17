@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-17#07 -- API Keys dialog: long labels wrap
+
+- Fixed: **API Keys dialog: long labels wrap, dialog no longer lopsided.** The long LibreTranslate label stretched the form and pushed the key fields off the dialog; the labels are now fixed-width (170 px) and wrap. Test: every key field lies inside the dialog and the label column is at most 170 px.
+
 ## 2026-10-17#06 -- The Bitrate column is coloured by quality
 
 The shared parts (the three tints, the bands, the painter, the audio profile for mp3redactor) are in redactor_common 2026-10-17#04.

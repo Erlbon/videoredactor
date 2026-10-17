@@ -148,3 +148,19 @@ def test_dialog_fallback_write_failure_is_shown_not_raised(app, monkeypatch, tmp
     dlg.save_button.click()
     assert warned and dlg.result() != dlg.DialogCode.Accepted
     assert dlg.fields["tmdb"].edit.text() == "typed"
+
+
+def test_dialog_labels_wrap_and_every_key_field_lies_inside_the_dialog(app, fake_keyring):
+    """2026-10-17: the long LibreTranslate label stretched the form and the dialog came out lopsided."""
+    from PyQt6.QtWidgets import QLabel, QWidget
+    dlg = ApiKeysDialog()
+    dlg.show()
+    QApplication.processEvents()
+    labels = [w for w in dlg.findChildren(QLabel) if w.text().endswith(":") and w.wordWrap()]
+    assert len(labels) >= len(api_keys.KEYS) and all(w.width() <= 170 for w in labels)
+    width = dlg.width()
+    for key_id, field in dlg.fields.items():
+        top_left = field.mapTo(dlg, field.rect().topLeft())
+        assert top_left.x() >= 0 and top_left.x() + field.width() <= width, key_id
+        assert top_left.x() >= max(w.width() for w in labels)  # the fields start right of the label column
+    dlg.close()

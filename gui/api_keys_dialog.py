@@ -55,6 +55,7 @@ class ApiKeysDialog(QDialog):
         layout.addWidget(intro)
 
         form = QFormLayout()
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
         self.fields: dict[str, SecretField] = {}
         self.check_buttons: dict[str, QPushButton] = {}
         for key_id, (name, env_var, _, label) in api_keys.KEYS.items():
@@ -71,14 +72,14 @@ class ApiKeysDialog(QDialog):
                 button.clicked.connect(lambda _checked=False, k=key_id: self._on_check(k))
                 row_layout.addWidget(button)
                 self.check_buttons[key_id] = button
-                form.addRow(f"{label}:", row)
+                form.addRow(self._row_label(label), row)
             else:
-                form.addRow(f"{label}:", field)
+                form.addRow(self._row_label(label), field)
             if key_id == "stashdb":
                 self.stash_endpoint = QLineEdit(scene_lookup.stash_endpoint())
                 self.stash_endpoint.setToolTip("The stash-box server the StashDB key belongs to. The default is "
                                                + scene_lookup.DEFAULT_STASH_ENDPOINT)
-                form.addRow("StashDB address:", self.stash_endpoint)
+                form.addRow(self._row_label("StashDB address"), self.stash_endpoint)
         layout.addLayout(form)
         self.scene_note = QLabel(
             "ThePornDB and StashDB: only a file's hash (OSHASH) and/or the search text you see in the lookup dialog are "
@@ -98,6 +99,15 @@ class ApiKeysDialog(QDialog):
         self.cancel_button.clicked.connect(self.reject)
         button_row.addWidget(self.cancel_button)
         layout.addLayout(button_row)
+
+    @staticmethod
+    def _row_label(text: str) -> QLabel:
+        """A wrapping label of fixed width: a long one ("LibreTranslate API Key (optional, ...)") must not
+        stretch the label column and push the key fields off the dialog."""
+        label = QLabel(f"{text}:")
+        label.setWordWrap(True)
+        label.setFixedWidth(170)
+        return label
 
     def _typed_key(self, key_id: str) -> str:
         return self.fields[key_id].new_value()
