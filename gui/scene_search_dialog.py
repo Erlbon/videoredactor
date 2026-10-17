@@ -377,7 +377,11 @@ class SceneSearchDialog(QDialog):
                 elif col == COL_MATCH:
                     item.setFont(italic)
                 self.table.setItem(row, col, item)
-        make_columns_resizable(self.table, wide_column=COL_TITLE)  # nothing is preselected: the pick is explicit
+        make_columns_resizable(self.table, wide_column=COL_TITLE)
+        # One exact answer (the file's own id or its fingerprint) is preselected so the detail, the poster box and
+        # Use Selected are live at once; several rows, or title guesses, stay for the user to pick.
+        if len(self.results) == 1 and (self.results[0].is_file_match or self.results[0].is_id_match):
+            self.table.selectRow(0)
 
     def _selected(self) -> Optional[SceneResult]:
         rows = self.table.selectionModel().selectedRows() if self.table.selectionModel() else []
@@ -392,6 +396,8 @@ class SceneSearchDialog(QDialog):
         has_poster = result is not None and bool(
             result.cover_url or (self.landscape_box.isChecked() and result.landscape_urls))
         self.cover_box.setEnabled(has_poster)
+        self.cover_box.setText("Save the poster in the file" if has_poster or result is None else
+                               "Save the poster in the file (this result has no portrait poster)")
         if result is None:
             self.detail.clear()
             self.cover_box.setChecked(False)

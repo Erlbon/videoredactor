@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-17#08 -- ThePornDB / StashDB lookup: one exact match is preselected
+
+- Fixed: **Use Selected and Save the poster in the file were dead until a row was clicked**, and with a single exact answer the dialog looked finished but offered nothing (owner report, 2026-10-17). A single result that is the file's own id or its fingerprint is now preselected: the detail shows, Use Selected is live and the poster box is live when the result has a portrait poster. Several rows or title guesses still start unselected.
+- Fixed: when a result has no portrait poster the greyed box now says so ("Save the poster in the file (this result has no portrait poster)"); tick "Accept a landscape cover" to use the wide picture.
+
 ## 2026-10-17#07 -- API Keys dialog: long labels wrap
 
 - Fixed: **API Keys dialog: long labels wrap, dialog no longer lopsided.** The long LibreTranslate label stretched the form and pushed the key fields off the dialog; the labels are now fixed-width (170 px) and wrap. Test: every key field lies inside the dialog and the label column is at most 170 px.

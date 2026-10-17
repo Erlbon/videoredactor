@@ -141,9 +141,9 @@ def test_opening_runs_the_hash_search_and_highlights_the_file_match(window):
     assert dialog.table.item(0, ssd.COL_TITLE).font().bold()
     assert dialog.table.item(0, ssd.COL_TITLE).background().style() != Qt.BrushStyle.NoBrush
     assert dialog.table.item(0, ssd.COL_TITLE).background().color().alpha() > 0
-    assert not dialog.select_button.isEnabled() and dialog.selected_result is None  # nothing is picked for you
-    dialog.table.selectRow(0)
-    assert dialog.select_button.isEnabled()
+    # one exact file match is preselected (owner, 2026-10-17: Use Selected and the poster box were dead until a click)
+    assert dialog.select_button.isEnabled() and dialog.cover_box.isEnabled() and dialog.selected_result is None
+    assert dialog.detail.toPlainText()  # Use Selected still has to be pressed: nothing is applied by itself
     detail = dialog.detail.toPlainText()
     assert "File match" in detail and "Example Studio" in detail and "Performer One, Performer Two" in detail
     assert "match by title" not in detail
@@ -481,3 +481,16 @@ def test_the_real_sources_are_wired_to_the_clients(monkeypatch):
     assert seen == [("tp-hash", "0123456789abcdef"), ("tp-title", "a", "2021", "movie"),
                     ("sd-hash", "0123456789abcdef", "m"), ("sd-title", "b", None)]
     assert [k for k, _label in tp.kinds] == ["scene", "movie", "jav"] and sd.kinds == () and sd.uses_md5 and not tp.uses_md5
+
+
+def test_several_results_or_title_guesses_are_not_preselected(window):
+    several = SceneSearchDialog(make_source(by_hash=[scene(), scene(external_id="id-2")]), window.video_files[0], parent=window)
+    assert several.table.rowCount() == 2 and not several.select_button.isEnabled()
+    guess = SceneSearchDialog(make_source(by_title=[scene(match_kind=MATCH_TITLE)]), window.video_files[0], parent=window)
+    assert guess.table.rowCount() == 1 and not guess.select_button.isEnabled()
+
+
+def test_a_result_without_a_poster_says_why_the_box_is_off(window):
+    dialog = SceneSearchDialog(make_source(by_hash=[scene(cover_url="", poster_urls=[])]), window.video_files[0], parent=window)
+    assert dialog.select_button.isEnabled() and not dialog.cover_box.isEnabled()
+    assert "no portrait poster" in dialog.cover_box.text()
