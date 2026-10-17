@@ -10,7 +10,7 @@ from __future__ import annotations
 import datetime
 import re
 
-from core.video_metadata import EDITABLE_FIELDS, NUMERIC_FIELDS, SOURCE_FIELDS, ContentType
+from core.video_metadata import LYRICS_MAX_BYTES, EDITABLE_FIELDS, NUMERIC_FIELDS, SOURCE_FIELDS, ContentType
 from redactor_common.cli import CliError
 from redactor_common.cli.fields import FieldResolver, spelling_variants
 from redactor_common.cli.values import check_text, is_ascii_number
@@ -70,6 +70,8 @@ def check_value(field: str, value: str) -> str:
     if field == "release_date":
         if not _DATE.match(value) or not _real_date(value):
             raise CliError(f"release_date must be a real date, YYYY, YYYY-MM or YYYY-MM-DD, not {value!r}")
+    if field == "lyrics" and len(value.encode("utf-8")) > LYRICS_MAX_BYTES:
+        raise CliError(f"lyrics are too long: {LYRICS_MAX_BYTES // 1024} KB at most")
     if field == "language" and not _LANGUAGE.match(value):
         raise CliError(f"language must be a language code (en, eng, nb, en-GB), not {value!r}")
     return value

@@ -62,6 +62,9 @@ class VideoMetadata:
     artist: str = ""
     album: str = ""
     composer: str = ""
+    # Song lyrics as plain text (LF line ends, up to LYRICS_MAX_BYTES of UTF-8), from Metadata > Look Up > Get Lyrics
+    # (LRCLIB) or typed in. MP4: the iTunes lyrics atom (copyright sign + "lyr"); MKV: the LYRICS tag.
+    lyrics: str = ""
     # RETIRED field (music videos: the title is the song, as MusicBrainz names it, version included). Old files may
     # still carry a track title; it is READ so nothing is lost, shown read-only in the panel, never written by this
     # app, and can be moved into an empty Title ("Move track title into Title"). Not editable, not compared.
@@ -132,8 +135,11 @@ EDITABLE_FIELDS = [
     "release_date", "language", "personal_rating", "comment",
     "director", "cast", "writer", "studio", "collection",
     "show_title", "season_number", "episode_number", "network",
-    "artist", "album", "composer",
+    "artist", "album", "composer", "lyrics",
 ]
+
+# The most lyrics text (UTF-8 bytes) a file is asked to carry.
+LYRICS_MAX_BYTES = 64 * 1024
 
 # Freeform text fields eligible for the Edit menu's Case
 # Conversion and Search/Replace tools (core/text_transforms.py), and
@@ -164,7 +170,7 @@ TYPE_SPECIFIC_FIELDS = {
     # release_date is already universal and doubles as air date for TV --
     # not repeated here to avoid duplicating it in fields_for_content_type().
     ContentType.TV: ["show_title", "season_number", "episode_number", "network"],
-    ContentType.MUSIC_VIDEO: ["artist", "album", "composer"],
+    ContentType.MUSIC_VIDEO: ["artist", "album", "composer", "lyrics"],
     ContentType.CLIP: [],
     ContentType.MISC: [],
 }

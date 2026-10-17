@@ -28,18 +28,18 @@ def entry(id_, title="Enjoy the Silence", artist="Depeche Mode", duration=399.0,
 
 
 class FakeClient:
-    def __init__(self, signature=None, results=(), error=None):
-        self.signature, self.results, self.error = signature, list(results), error
+    def __init__(self, signature=None, results=(), error=None, get_error=None):
+        self.signature, self.results, self.error, self.get_error = signature, list(results), error, get_error
         self.calls = []
 
-    def get_by_signature(self, artist, title, album="", duration=None):
-        self.calls.append(("get", artist, title, album, duration))
-        if self.error:
-            raise self.error
+    def get_by_signature(self, artist, title, album="", duration=None, retry=True, on_status=None, should_cancel=None):
+        self.calls.append(("get", artist, title, album, duration, retry))
+        if self.get_error or self.error:
+            raise self.get_error or self.error
         return self.signature
 
-    def search(self, artist="", title="", query=""):
-        self.calls.append(("search", artist, title))
+    def search(self, artist="", title="", query="", retry=True, on_status=None, should_cancel=None):
+        self.calls.append(("search", artist, title, query))
         if self.error:
             raise self.error
         return self.results
@@ -66,13 +66,47 @@ def test_query_uses_tags_then_file_name(work):
     assert (q.artist, q.title) == ("", "From Title Tag")
 
 
-def test_find_lyrics_signature_first_then_search_deduplicated_and_ranked(work):
+def test_find_lyrics_searches_first_and_asks_get_only_as_an_extra_without_retries(work):
     hit = entry(1)
-    client = FakeClient(signature=hit, results=[entry(2, duration=300.0), entry(1), entry(3, synced="")])
+    client = FakeClient(signature=hit, results=[entry(2, duration=300.0), entry(3, duration=250.0, synced="")])
     matches = ls.find_lyrics(ls.query_for_video(music_video(work)), client)
-    assert client.calls[0][0] == "get" and client.calls[1][0] == "search"
+    assert [c[0] for c in client.calls] == ["search", "get"] and client.calls[1][-1] is False  # retry=False
     assert [m.lyrics.id for m in matches] == [1, 2, 3]
     assert matches[0].score.kind == "exact" and not matches[2].lyrics.has_timing
+
+
+def test_find_lyrics_skips_get_when_the_search_already_has_an_exact_match(work):
+    client = FakeClient(signature=entry(9), results=[entry(1), entry(2, duration=300.0)])
+    matches = ls.find_lyrics(ls.query_for_video(music_video(work)), client)
+    assert [c[0] for c in client.calls] == ["search"] and matches[0].lyrics.id == 1
+
+
+def test_find_lyrics_get_503_is_a_soft_failure_with_a_note(work):
+    busy = LrclibError("LRCLIB is busy right now (HTTP 503 'The server is busy').", status=503)
+    client = FakeClient(results=[entry(2, duration=300.0)], get_error=busy)
+    notes = []
+    matches = ls.find_lyrics(ls.query_for_video(music_video(work)), client, notes=notes)
+    assert [m.lyrics.id for m in matches] == [2]
+    assert len(notes) == 1 and "HTTP 503" in notes[0]
+
+
+def test_find_lyrics_search_failure_raises_unless_get_rescues(work):
+    busy = LrclibError("busy", status=503)
+    q = ls.query_for_video(music_video(work))
+    with pytest.raises(LrclibError):
+        ls.find_lyrics(q, FakeClient(error=busy))
+    class Rescue(FakeClient):
+        def search(self, *a, **k):
+            raise busy
+    assert [m.lyrics.id for m in ls.find_lyrics(q, Rescue(signature=entry(7)))] == [7]
+
+
+def test_find_lyrics_search_falls_back_to_title_only_then_free_text(work):
+    client = FakeClient(results=[])
+    ls.find_lyrics(ls.query_for_video(music_video(work)), client)
+    searches = [c for c in client.calls if c[0] == "search"]
+    assert [(c[1], c[2], c[3]) for c in searches] == [
+        ("Depeche Mode", "Enjoy the Silence", ""), ("", "Enjoy the Silence", ""), ("", "", "Depeche Mode Enjoy the Silence")]
 
 
 def test_find_lyrics_without_length_skips_the_signature_call(work):
@@ -108,7 +142,7 @@ def test_dialog_defaults_to_lyrics_for_a_music_video_and_opensubtitles_otherwise
 def test_dialog_lists_results_greys_no_timing_previews_and_applies_offset(work):
     vf = music_video(work)
     matches = ls.find_lyrics(ls.query_for_video(vf), FakeClient(
-        signature=entry(1), results=[entry(2, duration=380.0), entry(3, synced="")]))
+        signature=entry(1), results=[entry(2, duration=380.0), entry(3, duration=250.0, synced="")]))
     d = dialog_for(vf, matches)
     panel = d.lyrics_panel
     assert panel.artist_edit.text() == "Depeche Mode" and panel.title_edit.text() == "Enjoy the Silence"

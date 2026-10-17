@@ -63,10 +63,11 @@ FIELD_LABELS = {
     "artist": "Artist",
     "album": "Album",
     "composer": "Composer",
+    "lyrics": "Lyrics",
 }
 
 # Fields long enough to warrant a multi-line text box rather than a single line.
-MULTILINE_FIELDS = {"description", "comment"}
+MULTILINE_FIELDS = {"description", "comment", "lyrics"}
 
 # Fields that are small integers -> spin box, not free text (avoids
 # users typing "Season Two" into a field that needs to write a number).
@@ -297,7 +298,9 @@ class TagPanel(QWidget):
             field_names = fields_for_content_type(content_type)
 
         hidden = self._get_hidden_fields()
-        field_names = [f for f in field_names if is_column_visible(f, hidden)]
+        # The Lyrics COLUMN starts hidden (a whole song per cell), so its hidden state is not the panel's: the
+        # field is part of every Music Video's panel.
+        field_names = [f for f in field_names if f == "lyrics" or is_column_visible(f, hidden)]
 
         for field_name in field_names:
             label = FIELD_LABELS.get(field_name, field_name)
@@ -367,7 +370,10 @@ class TagPanel(QWidget):
 
         if field_name in MULTILINE_FIELDS:
             text_edit = QTextEdit()
-            text_edit.setMaximumHeight(80)
+            text_edit.setMaximumHeight(240 if field_name == "lyrics" else 80)
+            if field_name == "lyrics":
+                text_edit.setMinimumHeight(120)
+                text_edit.setAcceptRichText(False)
             text_edit.textChanged.connect(lambda f=field_name: self._mark_touched(f))
             return text_edit
 

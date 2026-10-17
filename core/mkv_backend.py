@@ -82,6 +82,7 @@ FIELD_TO_MKV_TAG = {
     "artist": "ARTIST",
     "album": "ALBUM",
     "composer": "COMPOSER",
+    "lyrics": "LYRICS",
     # Check Files scan stamp (core.scan_stamp text). Listed here so
     # plan_global_tags treats it as this app's own tag (replaced, and
     # cleared when empty) while other tools' tags are carried over.

@@ -23,7 +23,7 @@ import threading
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
     QTableWidget, QTableWidgetItem, QComboBox, QLabel, QFileDialog,
-    QStatusBar, QMessageBox, QToolBar, QCheckBox,
+    QStatusBar, QMessageBox, QToolBar, QCheckBox, QSizePolicy,
 )
 from PyQt6.QtCore import Qt, QItemSelection, QItemSelectionModel, QSize
 from PyQt6.QtGui import QColor, QImage, QKeySequence, QIcon
@@ -31,6 +31,7 @@ from PyQt6.QtGui import QColor, QImage, QKeySequence, QIcon
 from core.video_file import (
     SUPPORTED_EXTENSIONS, VideoFile, discover_convertible_files, discover_video_files, has_subfolders,
 )
+from core.filename_pattern import PATTERN_FIELDS
 from core.video_metadata import ContentType, EDITABLE_FIELDS, NUMERIC_FIELDS, TEXT_FIELDS, can_move_track_title
 from core.filename_pattern import (
     DEFAULT_RENAME_PATTERN, PARSE_NUMERIC_FIELDS, PARSE_STRIP_ZEROS_FIELDS, VALID_FIELD_KEYS,
@@ -181,7 +182,7 @@ FILTER_COLUMN_KINDS = {
     "personal_rating": KIND_VALUES, "season_number": KIND_VALUES, "episode_number": KIND_VALUES,
     **{f: KIND_TEXT for f in (
         "title", "sort_title", "description", "genre_tags", "release_date", "comment", "director", "cast",
-        "writer", "studio", "collection", "show_title", "network", "artist", "album", "composer",
+        "writer", "studio", "collection", "show_title", "network", "artist", "album", "composer", "lyrics",
     )},
 }
 
@@ -221,7 +222,7 @@ COLUMN_LABEL_LOOKUP = {**FIELD_LABELS, **TECHNICAL_LABELS, "filename": "Filename
 
 # Rename/Export and Parse Filename placeholders: every editable field,
 # labelled the same way as the bulk-edit panel.
-FILENAME_PLACEHOLDERS = [(field, FIELD_LABELS.get(field, field)) for field in EDITABLE_FIELDS]
+FILENAME_PLACEHOLDERS = [(field, FIELD_LABELS.get(field, field)) for field in PATTERN_FIELDS]
 
 
 
@@ -500,6 +501,8 @@ class MainWindow(QMainWindow):
             entry("stashdb", "StashDB…", lambda: self._on_lookup_scene("stashdb"), None),
             # Was Ctrl+Shift+O, which is Open Folder in the rest of the family.
             entry("subtitles", "&Subtitles (OpenSubtitles, Lyrics)…", self._on_import_subtitles, "Ctrl+Shift+L"),
+            # Shown only for exactly one selected Music Video (see _update_get_lyrics_visibility).
+            entry("get_lyrics", "Get L&yrics (LRCLIB)…", self._on_get_lyrics, "Ctrl+Shift+G"),
         ]
 
     def _build_menu_bar(self) -> None:
@@ -604,6 +607,15 @@ class MainWindow(QMainWindow):
         build_standard_menu_bar(self, spec)
         registry = get_action_registry(self)
         self.actions_by_key = registry
+        # Get Lyrics shows only for one selected Music Video: refreshed whenever its menus are about to open.
+        for menu_action in self.menuBar().actions():
+            menu = menu_action.menu()
+            if menu is not None and menu_action.text().replace("&", "") == labels.MENU_METADATA.replace("&", ""):
+                menu.aboutToShow.connect(self._update_get_lyrics_visibility)
+                for sub_action in menu.actions():
+                    if sub_action.menu() is not None:
+                        sub_action.menu().aboutToShow.connect(self._update_get_lyrics_visibility)
+        self._update_get_lyrics_visibility()
 
         # Save All is Ctrl+Shift+A only: the one-release Ctrl+S / Ctrl+Shift+S
         # compatibility aliases were dropped (owner decision 2026-10-14).
@@ -644,7 +656,7 @@ class MainWindow(QMainWindow):
     def _build_toolbar(self) -> None:
         """Toolbar beneath the menu bar for the most-used actions, in the
         skeleton's order: Open Files, Open Folder | Apply | Save, Save All |
-        Redact | Undo, Redo | zoom, Panel. Everything reuses the exact same
+        Redact | Undo, Redo | (far right) Panel, zoom. Everything reuses the exact same
         QAction instances _build_menu_bar created (one source of truth per
         command: enabled state, text and shortcut stay in sync with the menu).
         Apply stays on the toolbar as the prominent path to it even though it
@@ -697,12 +709,6 @@ class MainWindow(QMainWindow):
         for menu_key, button in (("zoom_in", self.zoom.zoom_in_action), ("zoom_out", self.zoom.zoom_out_action)):
             with_aliases(self.actions_by_key[menu_key], *[k.toString() for k in button.shortcuts()])
             button.setShortcuts([])
-        toolbar.addAction(self.zoom.zoom_out_action)
-        toolbar.addWidget(self.zoom.label)
-        toolbar.addAction(self.zoom.zoom_in_action)
-
-        toolbar.addSeparator()
-
         # Minimize/restore the bulk-edit panel, matching the epub tool's
         # toolbar control (this project never had one before -- the
         # panel's own in-corner button and dragging the splitter handle
@@ -711,7 +717,16 @@ class MainWindow(QMainWindow):
         toggle_panel_action = make_action(
             self, "Panel", self._toggle_tag_panel, tooltip="Minimize or restore the bulk-edit panel"
         )
+        # Everything from here on sits at the far right, like in mp3/epub/cbzredactor: an Expanding spacer,
+        # Panel, a separator, then the zoom controls.
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        toolbar.addWidget(spacer)
         toolbar.addAction(toggle_panel_action)
+        toolbar.addSeparator()
+        toolbar.addAction(self.zoom.zoom_out_action)
+        toolbar.addWidget(self.zoom.label)
+        toolbar.addAction(self.zoom.zoom_in_action)
 
     def _check_external_tools_on_startup(self) -> None:
         """Warn once at launch if ffmpeg and/or MKVToolNix aren't on
@@ -957,6 +972,12 @@ class MainWindow(QMainWindow):
             hidden_now.add("sources")
             set_setting("table", "hidden_columns", ",".join(sorted(hidden_now)))
             set_setting("table", "sources_column_seeded", "1")
+        # The Lyrics column starts hidden too (once): a whole song per cell is only wanted on request.
+        if get_setting("table", "lyrics_column_seeded", "") != "1":
+            hidden_now = self._load_hidden_fields()
+            hidden_now.add("lyrics")
+            set_setting("table", "hidden_columns", ",".join(sorted(hidden_now)))
+            set_setting("table", "lyrics_column_seeded", "1")
         field_names = list(FIELD_LABELS.keys())
 
         rest = [f for f in field_names if f != "content_type"]
@@ -1543,6 +1564,9 @@ class MainWindow(QMainWindow):
             return format_bitrate(vf.metadata.bitrate)
         if field_name == "sources":
             return sources_summary(vf.metadata)
+        if field_name == "lyrics":
+            # A whole song in one cell: its non-empty lines on one line (the cell is cut at the column width).
+            return " / ".join(line.strip() for line in (vf.metadata.lyrics or "").splitlines() if line.strip())
         value = getattr(vf.metadata, field_name, "")
         return "" if value is None else str(value)
 
@@ -1567,6 +1591,37 @@ class MainWindow(QMainWindow):
                 files.append(vf)
         return files
 
+    def _table_context_extra_items(self, files: list[VideoFile]) -> list:
+        items: list = [Separator()]
+        # Only offered for a single file -- renaming several files
+        # to the same name doesn't make sense. Also reachable by
+        # double-clicking the Filename cell (see _on_cell_double_clicked()).
+        # Reuses the actual File-menu QAction (F2) rather than
+        # building a fresh one -- same object, so this shows the
+        # real shortcut hint and can never drift out of sync with it.
+        if len(files) == 1 and not files[0].load_error:
+            items.extend([self.rename_file_action, Separator()])
+        # Every lookup from the Metadata menu, so none needs a trip to
+        # the menu bar (no shortcuts here: they already live on the
+        # menu's own actions).
+        if len(files) == 1 and not files[0].load_error:
+            items.extend([self.actions_by_key["play"], Separator()])
+        look_up = self._look_up_entries("ctx_", with_shortcuts=False)
+        if not (len(files) == 1 and files[0].metadata.content_type is ContentType.MUSIC_VIDEO and not files[0].load_error):
+            look_up = [e for e in look_up if e.key != "ctx_get_lyrics"]  # Get Lyrics: one Music Video only
+        items.append(Submenu("Look Up", look_up))
+        items.append(Submenu("Organize", [
+            self.actions_by_key["rename_export_move"],
+            MenuAction("ctx_number_episodes", "Number Episodes…", lambda: self._quick_number_episodes(files)),
+        ]))
+        items.append(Submenu("Subtitles", [
+            self.actions_by_key["translate_subtitles"],
+            self.actions_by_key["compare_subtitles"],
+        ]))
+        items.append(MenuAction("ctx_create_notes", "Create Notes for This Folder…", self._on_create_notes_for_selection))
+        items.extend([Separator(), self.redact_action, Separator(), self.remove_from_list_action])
+        return items
+
     def _show_table_context_menu(self, pos) -> None:
         """New: this project never had a row right-click menu before --
         the shared helper gets it the selection-fix (right-click outside
@@ -1574,39 +1629,11 @@ class MainWindow(QMainWindow):
         two generic file actions (Open Containing Folder, Copy Path) for
         free, same as epub/mp3.
         """
-        def extra_items(files: list[VideoFile]) -> list:
-            items: list = [Separator()]
-            # Only offered for a single file -- renaming several files
-            # to the same name doesn't make sense. Also reachable by
-            # double-clicking the Filename cell (see _on_cell_double_clicked()).
-            # Reuses the actual File-menu QAction (F2) rather than
-            # building a fresh one -- same object, so this shows the
-            # real shortcut hint and can never drift out of sync with it.
-            if len(files) == 1 and not files[0].load_error:
-                items.extend([self.rename_file_action, Separator()])
-            # Every lookup from the Metadata menu, so none needs a trip to
-            # the menu bar (no shortcuts here: they already live on the
-            # menu's own actions).
-            if len(files) == 1 and not files[0].load_error:
-                items.extend([self.actions_by_key["play"], Separator()])
-            items.append(Submenu("Look Up", self._look_up_entries("ctx_", with_shortcuts=False)))
-            items.append(Submenu("Organize", [
-                self.actions_by_key["rename_export_move"],
-                MenuAction("ctx_number_episodes", "Number Episodes…", lambda: self._quick_number_episodes(files)),
-            ]))
-            items.append(Submenu("Subtitles", [
-                self.actions_by_key["translate_subtitles"],
-                self.actions_by_key["compare_subtitles"],
-            ]))
-            items.append(MenuAction("ctx_create_notes", "Create Notes for This Folder…", self._on_create_notes_for_selection))
-            items.extend([Separator(), self.redact_action, Separator(), self.remove_from_list_action])
-            return items
-
         show_table_context_menu(
             self, self.table, pos,
             get_selected_items=self._selected_video_files,
             get_path=lambda vf: vf.path,
-            extra_items=extra_items,
+            extra_items=self._table_context_extra_items,
         )
 
     def _on_play_selected(self) -> None:
@@ -1712,6 +1739,7 @@ class MainWindow(QMainWindow):
 
     def _on_selection_changed(self) -> None:
         selected = self._selected_video_files()
+        self._update_get_lyrics_visibility()
         self._update_play_button(selected)
         set_apply_count(self.apply_action, len(selected))  # 'Apply to N Selected', greyed at 0
         if not selected:
@@ -3198,6 +3226,27 @@ class MainWindow(QMainWindow):
 
         sync_note = "exact match" if candidate.hash_matched else "title match -- sync not guaranteed"
         self.status_bar.showMessage(f"Saved subtitle to {detail.name} ({sync_note})")
+
+    def _update_get_lyrics_visibility(self) -> None:
+        """Metadata > Look Up > Get Lyrics is there only while exactly one file is selected and its Content Type is
+        Music Video (hidden and disabled otherwise, so its shortcut is idle too). Called when the selection changes
+        and whenever the Metadata menu or its Look Up submenu is about to open."""
+        from gui.lyrics_flow import lyrics_target
+
+        try:
+            action = self.actions_by_key["lookup_get_lyrics"]
+        except (AttributeError, KeyError):
+            return
+        show = lyrics_target(self) is not None
+        action.setVisible(show)
+        action.setEnabled(show)
+
+    def _on_get_lyrics(self) -> None:
+        """Metadata > Look Up > Get Lyrics (LRCLIB)...: lyrics for the one selected Music Video, saved inside the
+        file (see gui/lyrics_flow.py)."""
+        from gui.lyrics_flow import run_get_lyrics
+
+        run_get_lyrics(self)
 
     def _one_loaded_video(self, what: str) -> Optional[VideoFile]:
         files = self._selected_video_files()

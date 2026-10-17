@@ -8,13 +8,15 @@ videocli/cmd_tags.py
 from __future__ import annotations
 
 import argparse
+import sys
 
 from core.format_helpers import format_bitrate, format_file_size
 from core.filename_pattern import field_text, set_field_text
 from core.video_file import VideoFile
 from redactor_common.cli import EXIT_OK, EXIT_PARTIAL, CliError, Output, add_common_options
 
-from videocli.fields import DEFAULT_INFO_FIELDS, DEPRECATION_NOTE, INFO_FIELD_NAMES, parse_assignment, resolve_field, resolve_info_field
+from core.video_metadata import LYRICS_MAX_BYTES
+from videocli.fields import check_value, DEFAULT_INFO_FIELDS, DEPRECATION_NOTE, INFO_FIELD_NAMES, parse_assignment, resolve_field, resolve_info_field
 from videocli.files import add_path_arguments, collect, load_videos, skip_reason
 
 
@@ -89,10 +91,23 @@ def add_set_parser(sub) -> None:
     parser.set_defaults(handler=run_set)
 
 
+def _read_lyrics_source(source: str) -> str:
+    """The text for `-s lyrics=@FILE`: the UTF-8 file, or standard input for `@-`."""
+    try:
+        if source == "-":
+            return sys.stdin.read()
+        with open(source, encoding="utf-8-sig") as handle:
+            return handle.read(LYRICS_MAX_BYTES * 2)
+    except (OSError, UnicodeDecodeError) as exc:
+        raise CliError(f"cannot read the lyrics from {source}: {exc}") from exc
+
+
 def run_set(args: argparse.Namespace, out: Output) -> int:
     changes: dict[str, str] = {}
     for text in args.assignments:
         field, value = parse_assignment(text)
+        if field == "lyrics" and value.startswith("@") and len(value) > 1:
+            value = check_value(field, _read_lyrics_source(value[1:]))
         changes[field] = value
     for name in args.clear:
         changes[resolve_field(name)] = ""

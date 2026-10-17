@@ -22,7 +22,9 @@ DEFAULT_RENAME_PATTERN = "%show_title% - S%season_number%E%episode_number% - %ti
 
 # Parse Filename options: numeric fields only match digits, so
 # "S01E03" splits cleanly, and lose their filename zero-padding.
-VALID_FIELD_KEYS = frozenset(EDITABLE_FIELDS)
+# Lyrics (a whole song, many lines) never belong in a file name.
+PATTERN_FIELDS = [f for f in EDITABLE_FIELDS if f != "lyrics"]
+VALID_FIELD_KEYS = frozenset(PATTERN_FIELDS)
 PARSE_NUMERIC_FIELDS = frozenset(NUMERIC_FIELDS)
 PARSE_STRIP_ZEROS_FIELDS = frozenset({"season_number", "episode_number"})
 
@@ -88,7 +90,7 @@ def set_field_text(metadata: VideoMetadata, field_name: str, text: str) -> bool:
 
 
 def placeholder_values(metadata: VideoMetadata) -> dict[str, str]:
-    return {field: field_text(metadata, field) for field in EDITABLE_FIELDS}
+    return {field: field_text(metadata, field) for field in PATTERN_FIELDS}
 
 
 def render_filename(metadata: VideoMetadata, pattern: str) -> str:

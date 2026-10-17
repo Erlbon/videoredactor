@@ -243,7 +243,7 @@ command line records nothing either. The same holds for `redact`.
 
 The fields are: content_type, title, sort_title, description, genre_tags, release_date, language,
 personal_rating, comment, director, cast, writer, studio, collection, show_title, season_number, episode_number,
-network, artist, album, composer. Field names are case-insensitive and the usual spellings work:
+network, artist, album, composer, lyrics. Field names are case-insensitive and the usual spellings work:
 `genre`, `year`, `season`, `episode`, `show`, `type`, `rating`.
 
 Checks: `content_type` is one of Movie, TV, Music Video, Clip, Misc (any capitalisation); `season_number`,
@@ -251,7 +251,9 @@ Checks: `content_type` is one of Movie, TV, Music Video, Clip, Misc (any capital
 others up to 99999; `007` is stored as `7`); `release_date` is a real date, `YYYY`, `YYYY-MM` or `YYYY-MM-DD`
 (`2026-02-30` is refused); `language` is a language code (`en`, `eng`, `nb`, `en-GB`). A value with a control
 character in it (or, outside the description-type fields, a line break or tab) is refused, since no tag format
-can store it. If a field is given both `-s` and `--clear`, `--clear` wins whatever the order.
+can store it. `lyrics` (a music video's song text, up to 64 KB, many lines) takes its text from a file:
+`-s lyrics=@song.txt` (UTF-8; `@-` reads standard input); a value that does not start with `@` is used as it is.
+`info --fields lyrics` prints them. If a field is given both `-s` and `--clear`, `--clear` wins whatever the order.
 
 Each file's result is `changed`, `unchanged` (nothing differed), `planned` (dry run) or `failed`.
 

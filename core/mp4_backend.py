@@ -78,6 +78,7 @@ NATIVE_ATOM_MAP = {
     "album": "\xa9alb",
     "composer": "\xa9wrt",
     "comment": "\xa9cmt",
+    "lyrics": "\xa9lyr",  # the iTunes lyrics atom: plain text, any number of lines
 }
 
 PNG_SIGNATURE = bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])

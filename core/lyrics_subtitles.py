@@ -3,7 +3,7 @@ core/lyrics_subtitles.py
 
 LRCLIB synced lyrics as a subtitle source for MUSIC VIDEOS (Qt-free). The reusable parts (client, LRC parser,
 LRC -> SRT, match scoring) live in redactor_common.core.lrclib; this module adds what is specific to a video:
-the artist / title / album / length to search with, the signature-then-search flow, and the language tag.
+the artist / title / album / length to search with, the search-first flow (/search, then the exact /get only as a soft extra), and the language tag.
 
 The user always picks explicitly in the dialog. In Redact only an "exact" match (names equal, length within
 2 s) is ever written by itself; everything else is a suggestion for the review.
@@ -11,15 +11,17 @@ The user always picks explicitly in the dialog. In Redact only an "exact" match 
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Callable, Optional
 
 from redactor_common.core import lrclib
-from redactor_common.core.lrclib import LrclibClient, LrclibError, Lyrics, Match, rank_matches
+from redactor_common.core.lrclib import LrclibCancelled, LrclibClient, LrclibError, Lyrics, Match, rank_matches
 
 from core.subtitle_ingest import ISO_639_2, language_code
 from core.version import APP_VERSION
 
+_LOG = logging.getLogger(__name__)
 USER_AGENT = f"TheVideoRedactor/{APP_VERSION} (https://github.com/Erlbon)"
 SYNC_WARNING = "Sync is not guaranteed: lyrics are timed to the album version."
 
@@ -63,17 +65,73 @@ def query_for_video(video) -> LyricsQuery:
     return LyricsQuery(artist, title, (md.album or "").strip(), md.duration_seconds or None)
 
 
-def find_lyrics(query: LyricsQuery, client: Optional[LrclibClient] = None) -> list[Match]:
-    """Entries for the query, best first: the exact signature match (when artist, title and length are known)
-    followed by the search results, scored against the video's length. Raises LrclibError."""
+def _search_steps(client: LrclibClient, query: LyricsQuery, hooks: dict) -> list[Lyrics]:
+    """/search only (the cheap call): artist + title, then the title alone, then the free-text form. The next
+    step runs only while the previous one found nothing."""
+    results = client.search(query.artist, query.title, **hooks)
+    if not results and query.artist:
+        results = client.search("", query.title, **hooks)
+    if not results:
+        results = client.search(query=f"{query.artist} {query.title}".strip(), **hooks)
+    return results
+
+
+def find_lyrics(
+    query: LyricsQuery,
+    client: Optional[LrclibClient] = None,
+    on_status: Optional[Callable[[str], None]] = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
+    notes: Optional[list[str]] = None,
+) -> list[Match]:
+    """Entries for the query, best first, scored against the video's length.
+
+    /search comes first (LRCLIB answers it fast even when it is overloaded): artist and title, then the title
+    alone, then free text. The exact-signature call /get is the expensive one LRCLIB overloads first (HTTP 503 for
+    hours, 2026-10-17), so it is only an optional extra: asked once, without retries, when the search found no exact
+    match and artist and length are known; any LrclibError from it is a SOFT failure (a line is appended to `notes`
+    and logged, the search results are used). If the SEARCH itself fails (after the client's short retries) /get is
+    tried once as a last resort, and the search's error is raised when that gives nothing too.
+
+    `on_status(text)` receives 'LRCLIB is busy (HTTP 503), trying again in N s...' during every wait and
+    `should_cancel()` is polled during requests and waits (LrclibCancelled is raised, never swallowed).
+    Raises LrclibError."""
     client = client or get_client()
+    hooks: dict = {}
+    if on_status is not None:
+        hooks["on_status"] = on_status
+    if should_cancel is not None:
+        hooks["should_cancel"] = should_cancel
+    if not query.title:
+        return []
+
     results: list[Lyrics] = []
-    if query.title:
-        if query.artist and query.duration:
-            hit = client.get_by_signature(query.artist, query.title, query.album, query.duration)
+    search_error: Optional[LrclibError] = None
+    try:
+        results = _search_steps(client, query, hooks)
+    except LrclibCancelled:
+        raise
+    except LrclibError as exc:
+        search_error = exc
+
+    wants_get = bool(query.artist and query.duration)
+    if wants_get and (search_error is not None or not any(
+            m.score.is_exact for m in rank_matches(query.artist, query.title, query.duration, results))):
+        try:
+            hit = client.get_by_signature(
+                query.artist, query.title, query.album, query.duration, retry=False,
+                **({"should_cancel": should_cancel} if should_cancel is not None else {}),
+            )
+        except LrclibCancelled:
+            raise
+        except LrclibError as exc:
+            _LOG.info("LRCLIB exact lookup skipped: %s", exc)
+            if notes is not None:
+                notes.append(f"The exact-match lookup was skipped: {exc}")
+        else:
             if hit is not None:
-                results.append(hit)
-        results.extend(client.search(query.artist, query.title))
+                results.insert(0, hit)
+    if search_error is not None and not results:
+        raise search_error
     return rank_matches(query.artist, query.title, query.duration, results)
 
 
@@ -120,6 +178,6 @@ def best_timed(query: LyricsQuery, client: Optional[LrclibClient] = None) -> Opt
 
 
 __all__ = [
-    "LrclibError", "LyricsQuery", "SYNC_WARNING", "USER_AGENT", "find_lyrics", "get_client", "guess_language",
+    "LrclibCancelled", "LrclibError", "LyricsQuery", "SYNC_WARNING", "USER_AGENT", "find_lyrics", "get_client", "guess_language",
     "language_choices", "query_for_video", "best_timed", "set_client", "srt_for",
 ]

@@ -54,7 +54,7 @@ def test_other_menus_hold_what_the_spec_says(window):
     look_up = next(a for a in menus["Metadata"].actions() if a.menu()).menu()
     assert _labels(look_up) == [
         "TMDB (Movie)…", "TMDB (TV Show)…", "TheTVDB (TV Show)…", "IMDb (Local Database)…",
-        "ThePornDB…", "StashDB…", "Subtitles (OpenSubtitles, Lyrics)…",
+        "ThePornDB…", "StashDB…", "Subtitles (OpenSubtitles, Lyrics)…", "Get Lyrics (LRCLIB)…",
     ]
     assert _labels(menus["Media"]) == [
         "Play", "Remux to MP4…", "Convert to MP4 (H.264)…", "Convert to MP4/MKV (Rules)…", "Check Files…", "Find Duplicates…",
@@ -145,7 +145,34 @@ def test_toolbar_reuses_the_menu_actions_in_order(window):
     assert "save" not in reg  # one Save button: Save All
     assert window.zoom.zoom_out_action in acts and window.zoom.zoom_in_action in acts
     assert window.undo_action is reg["undo"] and window.redo_action is reg["redo"]
-    assert acts[-1].text() == "Panel"
+    # Far right: [expanding spacer] Panel | zoom out, zoom label, zoom in (like the other Redactor apps).
+    assert [a.text() for a in acts[-4:-3]] == ["Panel"]
+    assert acts[-3] is window.zoom.zoom_out_action and acts[-1] is window.zoom.zoom_in_action
+
+
+def test_panel_and_zoom_are_at_the_far_right_of_the_toolbar(window):
+    from PyQt6.QtWidgets import QApplication, QSizePolicy
+    toolbar = window.findChildren(QToolBar)[0]
+    window.resize(2400, 700)
+    window.show()
+    QApplication.processEvents()
+    acts = toolbar.actions()
+    last = [a for a in acts if not a.isSeparator()][-4:]
+    panel, zoom_out, zoom_label, zoom_in = last
+    assert panel.text() == "Panel" and zoom_label.defaultWidget() is window.zoom.label
+    spacer = [a for a in acts if getattr(a, "defaultWidget", lambda: None)() is not None
+              and a.defaultWidget().sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding]
+    assert len(spacer) == 1 and acts.index(spacer[0]) < acts.index(panel)
+
+    def x_of(action):
+        return toolbar.widgetForAction(action).geometry().x()
+
+    others = [a for a in acts if not a.isSeparator() and a not in last and a is not spacer[0]]
+    assert max(x_of(a) for a in others) < x_of(panel) < x_of(zoom_out) < x_of(zoom_label) < x_of(zoom_in)
+    assert x_of(window.redact_action) < x_of(panel) and x_of(window.actions_by_key["play"]) < x_of(window.redact_action)
+    right_edge = x_of(zoom_in) + toolbar.widgetForAction(zoom_in).width()
+    assert right_edge > toolbar.width() - 40  # the zoom control touches the right end
+    window.hide()
 
 
 def test_apply_text_follows_the_selection(window):
