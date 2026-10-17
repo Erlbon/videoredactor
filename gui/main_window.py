@@ -1684,12 +1684,27 @@ class MainWindow(QMainWindow):
         two generic file actions (Open Containing Folder, Copy Path) for
         free, same as epub/mp3.
         """
+        # Typed-but-not-applied panel edits belong to the selection as it is NOW (before the right-click may
+        # change it) and count as unsaved changes in "Save Selected (N)", as they do for Save All.
+        self.tag_panel.apply_pending_changes()
         show_table_context_menu(
             self, self.table, pos,
             get_selected_items=self._selected_video_files,
             get_path=lambda vf: vf.path,
             extra_items=self._table_context_extra_items,
+            save_selected=self._on_save_selected,
+            is_dirty=lambda vf: vf.dirty and not vf.load_error,
         )
+
+    def _on_save_selected(self, files: list[VideoFile]) -> None:
+        """Right-click > Save Selected (N): the same save path as File > Save All (progress, journal, failure
+        box, status text), for just these changed files."""
+        self.tag_panel.apply_pending_changes()
+        wanted = {id(vf) for vf in files}
+        dirty = [vf for vf in self.video_files if id(vf) in wanted and vf.dirty]
+        saveable, skipped = self._split_saveable(dirty)
+        if saveable:
+            self._save_files(saveable, skipped_error_count=len(skipped))
 
     def _on_play_selected(self) -> None:
         """Media > Play (and the toolbar Play button): opens the shared player window for the one selected

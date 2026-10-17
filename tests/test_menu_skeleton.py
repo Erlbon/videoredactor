@@ -299,7 +299,7 @@ def test_open_files_cancelled_changes_nothing(window, monkeypatch):
 def test_context_menu_follows_the_skeleton(window, monkeypatch):
     seen = {}
 
-    def fake_show(win, table, pos, get_selected_items, get_path, extra_items=None):
+    def fake_show(win, table, pos, get_selected_items, get_path, extra_items=None, **_kw):
         seen["single"] = extra_items(window.video_files[:1])
         seen["multi"] = extra_items(list(window.video_files))
 

@@ -12,7 +12,7 @@ from tests.test_batch_operations_and_undo import _app, window  # noqa: E402,F401
 def test_every_lookup_is_in_the_right_click_menu(window, monkeypatch):
     seen = {}
 
-    def fake_show(win, table, pos, get_selected_items, get_path, extra_items=None):
+    def fake_show(win, table, pos, get_selected_items, get_path, extra_items=None, **_kw):
         seen["items"] = extra_items([])
 
     monkeypatch.setattr(mw, "show_table_context_menu", fake_show)
