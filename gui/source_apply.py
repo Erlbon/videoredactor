@@ -87,6 +87,7 @@ def apply_stage(vf, stage: SourceStage, accepted: dict[str, str]) -> bool:
         if attr == COVER_ATTR:
             if stage.poster is not None:
                 vf.metadata.cover_pending = stage.poster.jpeg
+                vf.metadata.cover_remove = False  # a new poster replaces the old one; no removal is needed
                 changed = True
         elif attr in SOURCE_FIELDS and attr in stage.values:
             if getattr(vf.metadata, attr, "") != stage.values[attr]:

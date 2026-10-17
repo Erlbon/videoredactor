@@ -99,6 +99,7 @@ class TagPanel(QWidget):
 
     apply_requested = pyqtSignal(dict)  # {field_name: value}
     move_track_title_requested = pyqtSignal()  # "Move track title into Title" for the selected music video
+    clear_fields_requested = pyqtSignal()  # the "Clear All Fields..." button (MainWindow opens the Clear Fields dialog)
     collapseToggleRequested = pyqtSignal()  # the panel doesn't control its own width -- MainWindow does
 
     def __init__(self, parent: Optional[QWidget] = None):
@@ -193,6 +194,12 @@ class TagPanel(QWidget):
         preview_layout.addWidget(self.play_button)
         self._vertical_splitter = ImagePanelSplitter(self.scroll_area, preview_column, initial_sizes=(500, 300))
         outer.addWidget(self._vertical_splitter, 1)
+        self.clear_fields_button = QPushButton("Clear All Fields...")
+        self.clear_fields_button.setToolTip(
+            "Empty fields, source ids and the poster of the selected files (you choose which; nothing is written until "
+            "you Save, and Undo takes it back)")
+        self.clear_fields_button.clicked.connect(self.clear_fields_requested.emit)
+        outer.addWidget(self.clear_fields_button)
 
         self.set_content_type_filter(None)  # builds the initial (all-fields) form
 

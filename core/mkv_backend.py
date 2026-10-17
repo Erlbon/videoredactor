@@ -400,6 +400,16 @@ def write_mkv_cover(path: str, image: bytes) -> subprocess.CompletedProcess:
             os.remove(tmp_path)
 
 
+def remove_mkv_cover(path: str) -> subprocess.CompletedProcess:
+    """Deletes the cover attachment (the one _find_cover_attachment detects), BY ITS ATTACHMENT ID (or its exact file
+    name when the id is unknown): `mkvpropedit --delete-attachment <id>`. No cover in the file: nothing to do, success."""
+    old = _find_cover_attachment(_identify(path))
+    if old is None:
+        return subprocess.CompletedProcess(["mkvpropedit"], 0, "", "")
+    selector = str(old["id"]) if isinstance(old.get("id"), int) else f"name:{old['file_name']}"
+    return run_mkvpropedit(path, ["--delete-attachment", selector])
+
+
 def _extract_tags_xml(path: str) -> Optional[str]:
     """The file's current Tags XML ("" when it has none), or None when
     mkvextract couldn't be read (the caller then leaves tags alone rather
@@ -537,6 +547,11 @@ def write_mkv_metadata(path: str, meta: VideoMetadata) -> subprocess.CompletedPr
     # applied and a save that keeps reporting an error.
     if getattr(meta, "cover_pending", None):
         cover_result = write_mkv_cover(path, bytes(meta.cover_pending))
+        if cover_result.returncode not in (0, 1):
+            return cover_result
+        results.append(cover_result)
+    elif getattr(meta, "cover_remove", False):
+        cover_result = remove_mkv_cover(path)
         if cover_result.returncode not in (0, 1):
             return cover_result
         results.append(cover_result)

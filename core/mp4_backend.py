@@ -284,6 +284,10 @@ def _apply_mp4_tags(path: str, meta: VideoMetadata) -> None:
     if meta.content_type is ContentType.MUSIC_VIDEO and not mp4.tags.get(MEDIA_TYPE_ATOM):
         mp4.tags[MEDIA_TYPE_ATOM] = [MEDIA_TYPE_MUSIC_VIDEO]
 
+    # Clear Fields staged the removal of the poster: the cover atom goes (a poster staged after that replaces it below).
+    if getattr(meta, "cover_remove", False) and not getattr(meta, "cover_pending", None) and "covr" in mp4.tags:
+        del mp4.tags["covr"]
+
     # A staged poster (core.poster JPEG): the standard cover atom. Nothing staged leaves the existing cover alone.
     if getattr(meta, "cover_pending", None):
         pending = bytes(meta.cover_pending)

@@ -310,6 +310,9 @@ class VideoFile:
         if self.metadata.cover_pending:  # embedded and read back: it is the file's cover now
             self.metadata.cover_info = self._cover_info_now()
             self.metadata.cover_pending = None
+        if self.metadata.cover_remove:  # deleted and read back: the file has no poster now
+            self.metadata.cover_remove = False
+            self.metadata.cover_info = self._cover_info_now()
         self.dirty = False
 
     def _cover_info_now(self) -> str:
@@ -416,6 +419,14 @@ class VideoFile:
             else:
                 if embedded != pending:
                     mismatches.append("'cover' (the poster is not in the file after the save)")
+        if self.metadata.cover_remove and not pending:
+            try:
+                still_there = self.read_cover() is not None
+            except Exception as e:  # noqa: BLE001
+                still_there = False
+                mismatches.append(f"'cover' (could not be read back: {e})")
+            if still_there:
+                mismatches.append("'cover' (cleared, the poster is still in the file)")
         for field_name in EDITABLE_FIELDS:
             expected = getattr(self.metadata, field_name, None)
             actual = getattr(reread, field_name, None)

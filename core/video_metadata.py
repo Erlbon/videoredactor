@@ -102,6 +102,9 @@ class VideoMetadata:
     # staged change like any other field, so it IS compared).
     cover_info: str = field(default="", compare=False)
     cover_pending: Optional[bytes] = field(default=None, repr=False)
+    # Clear Fields staged the removal of the poster the file carries: the next Save deletes the cover atom (MP4) or the
+    # cover attachment (MKV). A poster staged afterwards (cover_pending) replaces it instead. Reset after a good save.
+    cover_remove: bool = False
 
     # --- Read-only / technical (populated from file, never hand-edited) ---
     resolution: str = field(default="", compare=False)

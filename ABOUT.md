@@ -257,6 +257,20 @@ can store it. `lyrics` (a music video's song text, up to 64 KB, many lines) take
 
 Each file's result is `changed`, `unchanged` (nothing differed), `planned` (dry run) or `failed`.
 
+### clear
+
+`videoredactor clear PATH... [--groups LIST] [-n] --yes`
+
+Empties groups of fields on each video and saves it in place (the tags only; the video is not re-encoded), with the same plan as Edit > Clear Fields in the window. Without `--yes` (and without `--dry-run`) it refuses to run: there is no question to answer on a command line, and a cleared file cannot be undone once saved. A file that is read-only is reported as `failed`; the save is read back and compared.
+
+| Option | Meaning |
+| --- | --- |
+| `--groups LIST` | Comma-separated groups: `descriptive` (title, description, genre, cast, season, episode, lyrics...), `sources` (TMDB, IMDb, TheTVDB, ThePornDB and StashDB ids, the source link and the match note), `poster` (the embedded cover), `type` (the content type: only cleared when named). Default `descriptive,sources,poster`. |
+| `-n`, `--dry-run` | Show what would be cleared, write nothing. |
+| `--yes` | Really clear and save (required unless `--dry-run`). |
+
+The scan stamp, the technical fields, the retired track title, subtitle files and the MP4 media type atom are never touched.
+
 ### rename
 
 `videoredactor rename PATH... [-p PATTERN] [--zero-pad N] [--ascii] [-n]`

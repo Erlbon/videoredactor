@@ -34,9 +34,9 @@ More detail, the command line, and the licences of the data sources: [ABOUT.md](
 | Menu | Items |
 | --- | --- |
 | File | Open Files (Ctrl+O), Open Folder (Ctrl+Shift+O), Include Subfolders (also a checkbox on the toolbar next to Open Folder), Import and Convert; Save All (Ctrl+Shift+A); Rename File (F2), Undo Last Rename, Rename / Export / Move (Ctrl+E); Export Settings, Import Settings; Remove from List (Del), Clear List; Exit |
-| Edit | Undo (Ctrl+Z), Redo (Ctrl+Y); Apply to N Selected (Ctrl+Return); Redact (Ctrl+Shift+E), Edit Redact Recipe; Search and Replace (Ctrl+H), Change Case, Auto-Number |
+| Edit | Undo (Ctrl+Z), Redo (Ctrl+Y); Apply to N Selected (Ctrl+Return); Redact (Ctrl+Shift+E), Edit Redact Recipe; Search and Replace (Ctrl+H), Change Case, Auto-Number, Clear Fields (empties descriptive fields, source ids and the embedded poster of the selected files; staged and undoable until Save; the content type only if ticked) |
 | View | Show Metadata Panel; Zoom In / Out / Reset (Ctrl++, Ctrl+-, Ctrl+0); Clear All Filters; Refresh List (F5, Ctrl+R); Command Palette (Ctrl+K) |
-| Metadata | Parse Filename (Ctrl+I); Look Up: TMDB (Movie) (Ctrl+M), TMDB (TV Show) (Ctrl+T), TheTVDB (TV Show) (Ctrl+Shift+T), IMDb (Local Database), ThePornDB, StashDB, Subtitles (OpenSubtitles, Lyrics) (Ctrl+Shift+L); Number Episodes |
+| Metadata | Parse Filename (Ctrl+I); Look Up: TMDB (Movie) (Ctrl+M), TMDB (TV Show) (Ctrl+T), TheTVDB (TV Show) (Ctrl+Shift+T), IMDb (Local Database), ThePornDB, StashDB, Subtitles (OpenSubtitles, Lyrics) (Ctrl+Shift+L), Get Lyrics (LRCLIB) (Ctrl+Shift+G, one Music Video only); Number Episodes |
 | Media | Play (Ctrl+Shift+P, also a toolbar button and a large button under the side-panel thumbnail), Remux to MP4 (Ctrl+Shift+M), Convert to MP4 (H.264) (Ctrl+Shift+C), Convert to MP4/MKV (Rules); Check Files, Find Duplicates |
 | Tools | Preferences (Ctrl+,); API Keys, External Tools, IMDb Database; Columns, Genres, Languages; History |
 | Help | Changelog, Credits, About |

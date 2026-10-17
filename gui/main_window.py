@@ -23,7 +23,7 @@ import threading
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
     QTableWidget, QTableWidgetItem, QComboBox, QLabel, QFileDialog,
-    QStatusBar, QMessageBox, QToolBar, QCheckBox, QSizePolicy,
+    QStatusBar, QMessageBox, QToolBar, QCheckBox, QSizePolicy, QDialog,
 )
 from PyQt6.QtCore import Qt, QItemSelection, QItemSelectionModel, QSize
 from PyQt6.QtGui import QColor, QImage, QKeySequence, QIcon
@@ -434,6 +434,7 @@ class MainWindow(QMainWindow):
         self.tag_panel = TagPanel()
         self.tag_panel.apply_requested.connect(self._on_apply_to_selected)
         self.tag_panel.move_track_title_requested.connect(self._on_move_track_title)
+        self.tag_panel.clear_fields_requested.connect(self._on_clear_fields)
         self.tag_panel.collapseToggleRequested.connect(self._toggle_tag_panel)
         self.tag_panel.play_button.clicked.connect(lambda _checked=False: self.actions_by_key["play"].trigger())
         # Deliberately low minimum -- lets the panel be dragged down to a
@@ -547,6 +548,8 @@ class MainWindow(QMainWindow):
                 search_replace=self._on_search_replace,
                 change_case=self._on_case_conversion,
                 auto_number=self._on_auto_numbering,
+                extra_text_tools=[MenuAction("clear_fields", "Clear F&ields…", self._on_clear_fields,
+                                             tooltip="Empty fields, source ids and the poster of the selected files")],
             ),
             view=standard_view_items(
                 show_metadata_panel=self._on_show_panel_toggled,
@@ -1612,6 +1615,7 @@ class MainWindow(QMainWindow):
         if not (len(files) == 1 and files[0].metadata.content_type is ContentType.MUSIC_VIDEO and not files[0].load_error):
             look_up = [e for e in look_up if e.key != "ctx_get_lyrics"]  # Get Lyrics: one Music Video only
         items.append(Submenu("Look Up", look_up))
+        items.append(MenuAction("ctx_clear_fields", "Clear Fields…", self._on_clear_fields))
         items.append(Submenu("Organize", [
             self.actions_by_key["rename_export_move"],
             MenuAction("ctx_number_episodes", "Number Episodes…", lambda: self._quick_number_episodes(files)),
@@ -3283,6 +3287,42 @@ class MainWindow(QMainWindow):
         show = lyrics_target(self) is not None
         action.setVisible(show)
         action.setEnabled(show)
+
+    def _on_clear_fields(self) -> None:
+        """Edit > Clear Fields... (also the side panel's Clear All Fields button and the right-click entry): empties
+        the chosen groups of fields on the selected files, STAGED like any other edit (one undo entry, nothing written
+        until Save). The groups and what is never cleared: core/clear_plan.py."""
+        from redactor_common.gui.clear_fields_dialog import ClearFieldsDialog
+
+        from core import clear_plan
+
+        selected = self._selected_video_files()
+        if not selected:
+            self.status_bar.showMessage("Clear Fields: select at least one file first")
+            return
+        targets = [vf for vf in selected if not vf.load_error]
+        if not targets:
+            self.status_bar.showMessage("Clear Fields: the selected files failed to load")
+            return
+        dialog = ClearFieldsDialog(
+            clear_plan.plan_for(targets), lambda vf: vf.path.name,
+            lambda name: "Poster" if name == clear_plan.POSTER_FIELD else FIELD_LABELS.get(name, name.replace("_", " ").title()),
+            parent=self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            self.status_bar.showMessage("Clear Fields: cancelled, nothing changed")
+            return
+        keys = dialog.chosen_groups()
+        affected = [p.item for p in clear_plan.plan_for(targets).selected(keys)]
+        if not affected:
+            self.status_bar.showMessage("Clear Fields: nothing to clear")
+            return
+        self._push_undo("Clear Fields", affected)
+        cleared = sum(1 for vf in affected if clear_plan.stage_clear(vf, keys))
+        self._refresh_table_rows()
+        if self._selected_video_files():
+            self._on_selection_changed()
+        self.status_bar.showMessage(f"Cleared fields of {cleared} file(s), not yet saved to disk (Undo takes it back)")
 
     def _on_get_lyrics(self) -> None:
         """Metadata > Look Up > Get Lyrics (LRCLIB)...: lyrics for the one selected Music Video, saved inside the

@@ -44,7 +44,7 @@ def test_other_menus_hold_what_the_spec_says(window):
     menus = _menus(window)
     assert _labels(menus["Edit"]) == [
         "Undo", "Redo", "Apply to 0 Selected", "Redact", "Edit Redact Recipe…",
-        "Search and Replace…", "Change Case…", "Auto-Number…",
+        "Search and Replace…", "Change Case…", "Auto-Number…", "Clear Fields…",
     ]
     assert _labels(menus["View"]) == [
         "Show Metadata Panel", "Zoom In", "Zoom Out", "Reset Zoom", "Clear All Filters", "Refresh List",
@@ -319,10 +319,10 @@ def test_context_menu_follows_the_skeleton(window, monkeypatch):
         return out
 
     assert shape(seen["single"]) == [
-        "-", "Rename File…", "-", "Play", "-", "Look Up", "Organize", "Subtitles", "Create Notes for This Folder…", "-",
+        "-", "Rename File…", "-", "Play", "-", "Look Up", "Clear Fields…", "Organize", "Subtitles", "Create Notes for This Folder…", "-",
         "Redact", "-", "Remove from List",
     ]
-    assert shape(seen["multi"]) == ["-", "Look Up", "Organize", "Subtitles", "Create Notes for This Folder…", "-", "Redact", "-",
+    assert shape(seen["multi"]) == ["-", "Look Up", "Clear Fields…", "Organize", "Subtitles", "Create Notes for This Folder…", "-", "Redact", "-",
                                     "Remove from List"]
     organize = next(i for i in seen["single"] if isinstance(i, mw.Submenu) and i.text == "Organize")
     assert organize.items[0] is reg["rename_export_move"]

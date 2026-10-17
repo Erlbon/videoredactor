@@ -24,7 +24,7 @@ from __future__ import annotations
 from core.version import APP_VERSION
 from redactor_common.cli.main_factory import make_main
 
-from videocli import COMMANDS, cmd_check, cmd_files, cmd_lookup, cmd_notes, cmd_redact, cmd_tags
+from videocli import COMMANDS, cmd_check, cmd_clear, cmd_files, cmd_lookup, cmd_notes, cmd_redact, cmd_tags
 
 PROG = "videoredactor"
 
@@ -33,6 +33,6 @@ build_parser, main = make_main(
     "The Video Redactor on the command line: inspect, tag, rename, check and redact video files.",
     [cmd_tags.add_info_parser, cmd_tags.add_set_parser, cmd_files.add_rename_parser,
      cmd_files.add_move_parser, cmd_check.add_check_parser, cmd_redact.add_redact_parser, cmd_notes.add_notes_parser,
-     cmd_lookup.add_lookup_check_parser],
+     cmd_lookup.add_lookup_check_parser, cmd_clear.add_clear_parser],
     commands=COMMANDS,
 )
