@@ -150,8 +150,19 @@ class EpisodePickerDialog(QDialog):
             "and show id, but no season, episode, episode title or episode description")
         self.show_only_button.clicked.connect(self._on_show_only)
         button_row.addWidget(self.show_only_button)
-        self.cancel_button = QPushButton("Skip This File")
-        self.cancel_button.setToolTip("This file stays completely untouched (Esc does the same)")
+        batch = bool(self.file_header is not None and self.file_header.context.is_batch)
+        if batch:
+            # Four buttons in a batch: Use This Episode / Show Information Only / Skip This File (this file stays
+            # untouched, the next is asked) / Cancel Lookup (Esc and the window's X too: this file and the rest stay
+            # untouched, the files confirmed earlier keep their results).
+            self.skip_button = QPushButton("Skip This File")
+            self.skip_button.setToolTip("This file stays completely untouched; the next file is asked")
+            self.skip_button.clicked.connect(lambda: self.skip_file())
+            button_row.addWidget(self.skip_button)
+        self.cancel_button = QPushButton("Cancel Lookup" if batch else "Cancel")
+        self.cancel_button.setToolTip(
+            "End the lookup here: this file and every file after it stay untouched (Esc does the same)" if batch
+            else "Close without choosing anything (Esc does the same)")
         self.cancel_button.clicked.connect(self.reject)
         button_row.addWidget(self.cancel_button)
         layout.addLayout(button_row)
@@ -163,12 +174,12 @@ class EpisodePickerDialog(QDialog):
             seasons = self.source.seasons(self)
         except self.source.errors as e:
             QMessageBox.warning(self, self.source.seasons_error_title, str(e))
-            self.reject()
+            self.skip_file()
             return
 
         if not seasons:
             QMessageBox.information(self, self.source.empty_title, self.source.empty_text)
-            self.reject()
+            self.skip_file()
             return
 
         for number, label in seasons:
@@ -237,7 +248,7 @@ class EpisodePickerDialog(QDialog):
         self.choice = CHOICE_SHOW_ONLY
         self.accept()
 
-    def reject(self) -> None:  # Esc, the window's X and Skip This File: nothing is applied
+    def reject(self) -> None:  # the window's closing paths (Skip, and in a batch Cancel/Esc/X): nothing is applied
         self.choice = CHOICE_SKIP
         self.selected_season = None
         self.selected_episode = None

@@ -494,3 +494,19 @@ def test_a_result_without_a_poster_says_why_the_box_is_off(window):
     dialog = SceneSearchDialog(make_source(by_hash=[scene(cover_url="", poster_urls=[])]), window.video_files[0], parent=window)
     assert dialog.select_button.isEnabled() and not dialog.cover_box.isEnabled()
     assert "no portrait poster" in dialog.cover_box.text()
+
+
+def test_batch_buttons_skip_leaves_the_file_cancel_cancels_the_lookup(window):
+    from gui.lookup_file_header import file_context
+
+    vf = window.video_files[0]
+    skipped = SceneSearchDialog(make_source(), vf, parent=window, context=file_context(vf, 2, 4))
+    assert [b.text() for b in (skipped.skip_button, skipped.select_button, skipped.cancel_button)] == [
+        "Skip This File", "Use Selected", "Cancel"]
+    skipped.skip_button.click()
+    assert skipped.stop_requested is False and skipped.result() == QDialog.DialogCode.Rejected
+    cancelled = SceneSearchDialog(make_source(), vf, parent=window, context=file_context(vf, 2, 4))
+    cancelled.cancel_button.click()
+    assert cancelled.stop_requested is True and cancelled.result() == QDialog.DialogCode.Rejected
+    single = SceneSearchDialog(make_source(), vf, parent=window, context=file_context(vf))
+    assert not hasattr(single, "skip_button")

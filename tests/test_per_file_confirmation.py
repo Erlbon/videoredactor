@@ -1,7 +1,7 @@
 """Nothing is written to a file until THAT file is confirmed (2026-10-17, the owner's TV import bug): the TMDB TV import
 used to apply the show-level fields, the show poster and the TMDB show id to EVERY selected file before the per-file
 episode question, so a file the owner skipped still got them. Now each file gets one of three explicit choices
-(Use This Episode / Show Information Only / Skip This File; Esc and X = skip) and a skipped file stays COMPLETELY
+(Use This Episode / Show Information Only / Skip This File; in a batch Cancel, Esc and X cancel the whole lookup) and a skipped file stays COMPLETELY
 untouched. The same scenario for the IMDb (local) TV import, the TheTVDB import and the ThePornDB/StashDB lookup, the
 Stop Here button, undo, and the header every lookup dialog shows (file x of N, full name, what was parsed, ids it
 already has). Real MainWindow offscreen, fake clients, real MP4s for the Save read-back."""
@@ -175,7 +175,7 @@ def test_show_information_only_gives_the_show_but_no_episode_data(monkeypatch, t
     close(w)
 
 
-def test_escape_and_the_window_close_button_mean_skip_never_show_only(monkeypatch, tmp_path):
+def test_escape_and_the_window_close_button_cancel_the_lookup_never_show_only(monkeypatch, tmp_path):
     class Source(EpisodeSource):
         def seasons(self, owner):
             return [(1, "Season 1")]
@@ -200,7 +200,7 @@ def test_escape_and_the_window_close_button_mean_skip_never_show_only(monkeypatc
     setup_tmdb(monkeypatch, Script({}))
     monkeypatch.setattr(mw, "TVEpisodePickerDialog", Real)
     w._import_tmdb_tv(w.video_files, 0)
-    assert escaped == [CHOICE_SKIP, CHOICE_SKIP]
+    assert escaped == [CHOICE_SKIP]  # Esc in a batch cancels the whole lookup: the second file is never asked
     assert [state(vf) for vf in w.video_files] == before
     assert "0 episode(s) matched" in w.status_bar.currentMessage()
     close(w)
@@ -350,10 +350,10 @@ def test_the_header_shows_file_x_of_n_the_full_name_the_guess_and_the_ids_it_has
     assert "22:14" in header.details_label.text() and "2.0 KB" in header.details_label.text()
     assert header.searching_label.text() == "Searching for: The Office US S02E04"
     assert header.existing_label.text() == "This file already has TMDB movie:603"
-    assert not header.skip_button.isHidden() and not header.stop_button.isHidden()
+    assert not header.skip_button.isHidden() and not hasattr(header, "stop_button")
     single = LookupFileHeader(file_context(vf))
     single.show()
-    assert single.counter_label.isHidden() and single.skip_button.isHidden() and single.stop_button.isHidden()
+    assert single.counter_label.isHidden() and single.skip_button.isHidden()
     header.close()
     single.close()
 
@@ -363,7 +363,7 @@ def test_the_guess_text():
     assert searching_for_text("Show.S02E04.720p") == "Show S02E04"
 
 
-def test_skip_and_stop_buttons_close_the_dialog_without_choosing(monkeypatch, tmp_path):
+def test_skip_and_cancel_close_the_dialog_without_choosing(monkeypatch, tmp_path):
     from gui.tmdb_search_dialog import TMDBSearchDialog
 
     path = tmp_path / "Inception.2010.mp4"
@@ -371,13 +371,16 @@ def test_skip_and_stop_buttons_close_the_dialog_without_choosing(monkeypatch, tm
     vf = VideoFile(path=path, metadata=VideoMetadata())
     dialog = TMDBSearchDialog("movie", initial_query="Inception", context=file_context(vf, 2, 5))
     assert dialog.file_header is not None and dialog.stop_requested is False
-    dialog.file_header.stop_button.click()
+    dialog.file_header.skip_button.click()  # Skip: this file only
+    assert dialog.stop_requested is False and dialog.result() == QDialog.DialogCode.Rejected
+    dialog = TMDBSearchDialog("movie", initial_query="Inception", context=file_context(vf, 2, 5))
+    dialog.cancel_button.click()  # Cancel: the whole lookup
     assert dialog.stop_requested is True and dialog.result() == QDialog.DialogCode.Rejected
     plain = TMDBSearchDialog("movie", initial_query="Inception")  # no context: no header, still has the attribute
     assert plain.file_header is None and plain.stop_requested is False
 
 
-def test_the_real_picker_has_three_choices_and_esc_is_skip(tmp_path):
+def test_the_real_picker_has_three_choices_plus_cancel_lookup(tmp_path):
     class Source(EpisodeSource):
         def seasons(self, owner):
             return [(1, "Season 1")]
@@ -389,8 +392,8 @@ def test_the_real_picker_has_three_choices_and_esc_is_skip(tmp_path):
     path.write_bytes(b"x")
     vf = VideoFile(path=path, metadata=VideoMetadata())
     d = EpisodePickerDialog(Source(), context=file_context(vf, 1, 3))
-    assert [d.select_button.text(), d.show_only_button.text(), d.cancel_button.text()] == [
-        "Use This Episode", "Show Information Only", "Skip This File"]
+    assert [d.select_button.text(), d.show_only_button.text(), d.skip_button.text(), d.cancel_button.text()] == [
+        "Use This Episode", "Show Information Only", "Skip This File", "Cancel Lookup"]
     assert not d.select_button.isEnabled() and d.show_only_button.isEnabled()
     d.episode_list.setCurrentRow(0)
     d.select_button.click()

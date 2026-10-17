@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-17#11 -- Lookups: Cancel really cancels, new Skip button
+
+- Changed: **Cancel in a batch lookup cancels the whole lookup** (owner request, 2026-10-17). In every lookup dialog opened from a batch (TMDB movies and TV, TheTVDB, IMDb local, ThePornDB, StashDB, and the episode pickers), the bottom Cancel button, Esc and the window's X now end the lookup: this file and every file after it stay untouched, the files confirmed earlier in the run keep their staged results (and the Undo for them), and the status line says how many files were not asked. Before, they only skipped the current file and the loop went on.
+- New: **Skip This File in the bottom row** of the search dialogs in a batch: [Skip This File] [Use Selected] [Cancel]. It is what Cancel used to do: this file stays untouched, the next file is asked. The header's Skip This File button stays.
+- Changed: **the episode picker has four buttons in a batch**: Use This Episode / Show Information Only / Skip This File / Cancel Lookup (Esc and X = Cancel Lookup). For a single file there is no Skip button and the last button is a plain Cancel.
+- Removed: the header's **Stop Here** button (Cancel replaces it). A single-file lookup has no Skip button and Cancel just closes the dialog. The progress dialogs of the lookups already had a Cancel that stops; unchanged.
+- Tests: tests/test_lookup_cancel.py (real MainWindow, real picker and search dialog, real Esc key and window close: Cancel/Esc/X on file 2 of 4 => files 3 and 4 never get a dialog, file 1 kept and undoable, 2-4 untouched; Skip on file 2 => file 3 is asked; the button rows); nine of its ten tests fail on the old code.
+
 ## 2026-10-17#10 -- Path column: shared, right after Filename
 
 Shared part: redactor_common 2026-10-17#05 (core/path_column.py, gui/path_column.py); all four Redactor apps now use the same Path column.

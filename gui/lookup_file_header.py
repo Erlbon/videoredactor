@@ -3,7 +3,7 @@ gui/lookup_file_header.py
 
 The header every lookup dialog and queue step shows, so you always know WHICH FILE you are approving:
 
-    File 3 of 12                                  [Skip This File] [Stop Here]    (counter and buttons: batches only)
+    File 3 of 12                                  [Skip This File]                (counter and button: batches only)
     The.Office.US.S02E04.Halloween.1080p.mkv      (bold, selectable; cut in the middle when very long, the full path
                                                    is the tooltip)
     D:\\Shows\\The Office  |  22:14  |  1920x1080  |  1.2 GB
@@ -11,10 +11,16 @@ The header every lookup dialog and queue step shows, so you always know WHICH FI
     This file already has TMDB movie:603          (when the file carries a source id)
 
 A FileContext (the file, its place in the queue, what is searched for) is passed to a dialog as `context=`; the dialog
-calls add_file_header(dialog, layout, context). In a batch ("File 3 of 12") the header has "Skip This File" (the
-dialog closes as cancelled, the loop goes on with the next file, this one untouched) and "Stop Here" (sets
-`dialog.stop_requested`, closes it, and the loop ends without touching the rest). Cancel, Esc and the window's X
-mean Skip, never "apply something".
+calls add_file_header(dialog, layout, context). In a batch ("File 3 of 12"):
+
+- "Skip This File" (here in the header, and `add_bottom_skip_button` for the bottom row: [Skip This File] [Use
+  Selected] [Cancel]) = `dialog.skip_file()`: the dialog closes as rejected, this file stays untouched and the loop
+  goes on with the next file;
+- Cancel, Esc and the window's X = `dialog.reject()` = cancel the WHOLE lookup (owner, 2026-10-17): it sets
+  `dialog.stop_requested`, so this file and every file after it stay untouched while the files confirmed earlier in
+  the run keep their staged results. The loops test `stop_requested` after exec().
+
+In a single-file lookup there is no Skip button and Cancel simply closes the dialog. Neither ever applies anything.
 """
 
 from __future__ import annotations
@@ -24,7 +30,7 @@ from typing import Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFontMetrics
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
 from core.format_helpers import format_duration, format_file_size
 from core.release_name_parser import parse_release_name
@@ -105,7 +111,6 @@ class _ElidedLabel(QLabel):
 
 class LookupFileHeader(QWidget):
     skip_clicked = pyqtSignal()
-    stop_clicked = pyqtSignal()
 
     def __init__(self, context: FileContext, parent=None):
         super().__init__(parent)
@@ -125,13 +130,8 @@ class LookupFileHeader(QWidget):
         self.skip_button.setToolTip("Leave this file completely untouched and go on with the next one")
         self.skip_button.setAutoDefault(False)
         self.skip_button.clicked.connect(self.skip_clicked)
-        self.stop_button = QPushButton("Stop Here")
-        self.stop_button.setToolTip("End the queue here: this file and every file after it stay untouched")
-        self.stop_button.setAutoDefault(False)
-        self.stop_button.clicked.connect(self.stop_clicked)
-        for button in (self.skip_button, self.stop_button):
-            button.setVisible(context.is_batch)
-            top.addWidget(button)
+        self.skip_button.setVisible(context.is_batch)
+        top.addWidget(self.skip_button)
         layout.addLayout(top)
 
         self.name_label = _ElidedLabel(vf.path.name)
@@ -158,20 +158,65 @@ class LookupFileHeader(QWidget):
 
 
 def add_file_header(dialog, layout, context: Optional[FileContext]) -> Optional[LookupFileHeader]:
-    """Puts the header at the top of `layout` (a QVBoxLayout of `dialog`) and wires Skip / Stop. Also gives the dialog
-    `stop_requested` (False until Stop Here). No context: nothing is added."""
+    """Puts the header at the top of `layout` (a QVBoxLayout of `dialog`) and wires Skip and Cancel (see the module
+    docstring). Also gives the dialog `stop_requested` (False until the lookup is cancelled) and `skip_file()`.
+    Call it BEFORE the dialog's buttons are connected to `self.reject`, so that they get the batch-aware reject.
+    No context: no header; the dialog is a plain single-file one."""
     dialog.stop_requested = False
     dialog.file_header = None
+    dialog.skip_file = dialog.reject  # replaced below in a batch, where reject() itself means "cancel the lookup"
     if context is None:
         return None
     header = LookupFileHeader(context, dialog)
     layout.insertWidget(0, header)
-    header.skip_clicked.connect(dialog.reject)
-
-    def stop() -> None:
-        dialog.stop_requested = True
-        dialog.reject()
-
-    header.stop_clicked.connect(stop)
+    header.skip_clicked.connect(lambda: dialog.skip_file())
+    if context.is_batch:
+        _install_batch_reject(dialog)
     dialog.file_header = header
     return header
+
+
+def _install_batch_reject(dialog) -> None:
+    """In a batch reject() (the Cancel button, Esc, the window's X) cancels the whole lookup, and skip_file() is the
+    old behaviour. Qt calls reject() virtually, and PyQt finds an instance attribute for that, so one instance-level
+    reject covers all three; a flag tells the two apart, and a re-entry guard keeps the dialog's own reject (which may
+    call super().reject(), dispatching back here) from recursing."""
+    state = {"busy": False, "skip": False}
+    own_reject = type(dialog).reject
+
+    def reject() -> None:
+        if state["busy"]:  # re-entered from own_reject's super().reject(): Qt's implementation
+            QDialog.reject(dialog)
+            return
+        state["busy"] = True
+        try:
+            if not state["skip"]:
+                dialog.stop_requested = True
+            own_reject(dialog)
+        finally:
+            state["busy"] = False
+
+    def skip_file() -> None:
+        state["skip"] = True
+        try:
+            dialog.reject()
+        finally:
+            state["skip"] = False
+
+    dialog.reject = reject
+    dialog.skip_file = skip_file
+
+
+def add_bottom_skip_button(dialog, row, label: str = "Skip This File", index: int = 1):
+    """In a batch, adds the bottom row's Skip button to `row` (a QHBoxLayout that starts with a stretch), left of
+    the other buttons: [Skip This File] [Use Selected] [Cancel]. Returns it (None outside a batch)."""
+    header = getattr(dialog, "file_header", None)
+    if header is None or not header.context.is_batch:
+        return None
+    button = QPushButton(label)
+    button.setToolTip("Leave this file completely untouched and go on with the next one")
+    button.setAutoDefault(False)
+    button.clicked.connect(lambda: dialog.skip_file())
+    row.insertWidget(index, button)
+    dialog.skip_button = button
+    return button

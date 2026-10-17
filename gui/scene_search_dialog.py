@@ -36,7 +36,7 @@ from core.scene_lookup import (
 )
 from core.video_file import VideoFile
 from gui.lookup import CANCELLED, run_cancellable_lookup
-from gui.lookup_file_header import add_file_header, file_context
+from gui.lookup_file_header import add_bottom_skip_button, add_file_header, file_context
 
 HEADERS = ["Match", "Title", "Studio", "Date", "Performers"]
 COL_MATCH, COL_TITLE, COL_STUDIO, COL_DATE, COL_PERFORMERS = range(5)
@@ -208,6 +208,7 @@ class SceneSearchDialog(QDialog):
 
         buttons = QHBoxLayout()
         buttons.addStretch()
+        add_bottom_skip_button(self, buttons)  # batches only: [Skip This File] [Use Selected] [Cancel]
         self.select_button = QPushButton("Use Selected")
         self.select_button.setEnabled(False)
         self.select_button.clicked.connect(self._on_accept)

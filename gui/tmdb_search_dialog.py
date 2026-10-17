@@ -23,7 +23,7 @@ from PyQt6.QtCore import Qt
 
 from core.config import get_setting, set_setting
 from gui.lookup import run_lookup
-from gui.lookup_file_header import add_file_header
+from gui.lookup_file_header import add_bottom_skip_button, add_file_header
 from gui.tmdb_attribution import TmdbAttributionFooter
 from core.tmdb_client import (
     search_movies, search_tv, MovieCandidate, TVCandidate, TMDBError,
@@ -69,8 +69,9 @@ class TMDBSearchDialog(QDialog):
     (`accept_landscape`, off by default).
 
     `context` (gui.lookup_file_header.FileContext): the file being looked up, shown as a header (file x of N, full
-    name, what was parsed from it, ids it already has); in a batch it adds Skip This File / Stop Here
-    (`stop_requested`). Cancel, Esc and X always mean "this file is skipped".
+    name, what was parsed from it, ids it already has); in a batch it adds Skip This File (this file is left
+    untouched, the next one is asked). Cancel, Esc and X cancel the whole lookup in a batch (`stop_requested`) and
+    just close the dialog for a single file.
     """
 
     def __init__(self, mode: str, initial_query: str = "", initial_year: str = "", parent=None,
@@ -159,6 +160,7 @@ class TMDBSearchDialog(QDialog):
 
         button_row = QHBoxLayout()
         button_row.addStretch()
+        add_bottom_skip_button(self, button_row)  # batches only: [Skip This File] [Use Selected] [Cancel]
         self.select_button = QPushButton("Use Selected")
         self.select_button.setEnabled(False)
         self.select_button.clicked.connect(self._on_accept)
