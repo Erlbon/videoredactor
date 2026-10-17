@@ -19,6 +19,10 @@ The check (seconds per file, no decoding):
 4. Tracks: several audio tracks with no default or more than one
    default; audio/subtitle tracks with no language (reported only --
    which language it is can't be guessed).
+5. Zero-filled blocks inside the media data (pieces a torrent never delivered): the ordinary check reads the first
+   and last 8 MB of the media data and says "run Deep scan" when it sees any; with `deep=True` the whole file is
+   read (core/deep_scan.py) and the damaged time spans are reported. Such damage is DAMAGED and NOT repairable (a
+   remux can't bring the missing pictures back): core/cut_damaged.py cuts the damaged parts out instead.
 
 Repair = a lossless remux with ffmpeg (-map 0 -c copy: every track,
 chapter and attachment): writes the container fresh, which
@@ -50,9 +54,14 @@ import dataclasses
 
 from redactor_common.core.trash import TrashError, move_to_trash
 
+from core.deep_scan import DeepScanResult, deep_scan, edge_zero_blocks
 from core.external_tools import MKVTOOLNIX, is_tool_available
 from core.ffmpeg_backend import REMUX_TIMEOUT_SECONDS, _run
 from core.file_access import remove_scratch, unique_temp_path
+
+# Findings that mean pictures/sound are GONE (zero-filled blocks inside the media data): no remux can fix these,
+# only Cut Out Damaged Parts (core/cut_damaged.py) drops them.
+DATA_DAMAGE_CODES = frozenset({"data_damage", "zero_blocks_edge"})
 
 DAMAGED = "damaged"      # the content itself is incomplete or unreadable
 REPAIRABLE = "repairable"  # fixed by a lossless remux
@@ -79,6 +88,7 @@ class CheckResult:
     declared_seconds: Optional[float] = None
     readable_seconds: Optional[float] = None
     openable: bool = True
+    deep: Optional[DeepScanResult] = None  # the Deep scan, when it was run (core/deep_scan.py)
 
     @property
     def status(self) -> str:
@@ -90,13 +100,31 @@ class CheckResult:
         return "CHECKED OK"
 
     @property
+    def has_data_damage(self) -> bool:
+        return any(f.code in DATA_DAMAGE_CODES for f in self.findings)
+
+    @property
     def can_repair(self) -> bool:
         """A remux helps: the file opens and something is fixable -- a
-        damaged-but-openable file keeps what's readable."""
+        damaged-but-openable file keeps what's readable. Not when pictures or sound are missing inside the media
+        data: a remux can't bring them back (the repair would only refuse)."""
+        if self.has_data_damage:
+            return False
         return self.openable and any(f.severity in (DAMAGED, REPAIRABLE) for f in self.findings)
+
+    @property
+    def can_cut(self) -> bool:
+        """Cut Out Damaged Parts applies: a Deep scan found damaged spans."""
+        return self.openable and self.deep is not None and bool(self.deep.spans)
 
     def summary(self) -> str:
         return "; ".join(f.message for f in self.findings) or "No problems found"
+
+    def tooltip(self) -> str:
+        """The summary, plus up to 10 damaged ranges when a Deep scan found some (the Status cell's tooltip)."""
+        if self.deep is not None and self.deep.spans:
+            return self.summary() + chr(10) + deep_tooltip(self.deep)
+        return self.summary()
 
 
 # ---------------------------------------------------------------------------
@@ -267,9 +295,43 @@ def _format_seconds(seconds: float) -> str:
     return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
 
 
-def quick_check(path: str, run: Callable = _run) -> CheckResult:
+def _deep_finding(deep: DeepScanResult) -> Optional[Finding]:
+    """The finding for a Deep scan that found damage (None when it found none)."""
+    if not deep.spans:
+        return None
+    blocks = len(deep.media_runs)
+    first = _format_seconds(deep.spans[0].start_s)
+    video = int(round(deep.video_seconds))
+    audio = int(round(deep.audio_seconds))
+    approx = " (approximate for this container)" if deep.approximate else ""
+    return Finding(
+        "data_damage", DAMAGED,
+        f"{blocks} zero-filled block(s) inside the video: about {video} s of video and {audio} s of audio are "
+        f"missing (first at {first}){approx}",
+    )
+
+
+def deep_tooltip(deep: DeepScanResult, limit: int = 10) -> str:
+    """The damaged ranges (up to `limit`) for a tooltip."""
+    lines = [f"{len(deep.spans)} damaged range(s), {deep.total_seconds:.0f} s in all ({deep.percent:.1f}% of the file):"]
+    for span in deep.spans[:limit]:
+        lines.append(f"{_format_seconds(span.start_s)} - {_format_seconds(span.end_s)}  ({span.seconds:.1f} s)")
+    if len(deep.spans) > limit:
+        lines.append(f"... and {len(deep.spans) - limit} more")
+    return chr(10).join(lines)
+
+
+def quick_check(
+    path: str,
+    run: Callable = _run,
+    deep: bool = False,
+    progress: Optional[Callable[[int, int], None]] = None,
+    cancel=None,
+) -> CheckResult:
     """The quick check (see the module docstring). `run` is ffmpeg_backend's
-    tool runner (returns None when the tool is missing or times out)."""
+    tool runner (returns None when the tool is missing or times out). With `deep`, the whole file is read for
+    zero-filled blocks (core/deep_scan.py; `progress(done_bytes, total_bytes)` and the `cancel` Event, which raises
+    DeepScanCancelled); without it only the first and last 8 MB of the media data are looked at."""
     result = CheckResult()
     suffix = Path(path).suffix.lower()
 
@@ -328,6 +390,23 @@ def quick_check(path: str, run: Callable = _run) -> CheckResult:
                 "index_at_end", REPAIRABLE, "Index at the end (can't start playing until fully loaded)",
             ))
     except (OSError, ValueError, struct.error):
+        pass
+
+    try:
+        if deep:
+            result.deep = deep_scan(path, run, progress, cancel, duration=result.declared_seconds)
+            finding = _deep_finding(result.deep)
+            if finding:
+                result.findings.append(finding)
+        else:
+            edge = edge_zero_blocks(path)
+            if edge:
+                result.findings.append(Finding(
+                    "zero_blocks_edge", DAMAGED,
+                    f"{edge} zero-filled block(s) at the start or end of the media data -- run Deep scan to see "
+                    f"how much is lost",
+                ))
+    except OSError:
         pass
 
     streams = info.get("streams") or []
@@ -493,6 +572,30 @@ def build_repaired_copy(
     return RepairOutcome(check=after, note=note)
 
 
+def swap_in(path: str, target: str, trash: Callable[[str], None]) -> None:
+    """Commits a verified copy: the original goes to the Recycle Bin (`trash`; never deleted outright), then the
+    copy at `target` takes its name. Raises RepairError, the copy removed and the original untouched, when the
+    original can't be trashed. Shared by the repair and Cut Out Damaged Parts."""
+    try:
+        try:
+            trash(path)
+        except TrashError as exc:
+            raise RepairError(str(exc)) from exc
+    except BaseException:
+        if os.path.exists(target):
+            remove_scratch(target)
+        raise
+    try:
+        os.replace(target, path)
+    except OSError as exc:
+        # The original is already in the Recycle Bin: keep the new copy under its temporary name rather than lose
+        # both.
+        raise RepairError(
+            f"the original is in the Recycle Bin, but the new copy couldn't take its name "
+            f"({exc}); it's kept as {os.path.basename(target)}"
+        ) from exc
+
+
 def repair(
     path: str,
     before: CheckResult,
@@ -506,22 +609,5 @@ def repair(
     original untouched, the copy removed) when anything fails."""
     target = repair_path(path)
     built = build_repaired_copy(path, before, target, run, restore)
-    try:
-        try:
-            trash(path)
-        except TrashError as exc:
-            raise RepairError(str(exc)) from exc
-    except BaseException:
-        if os.path.exists(target):
-            remove_scratch(target)
-        raise
-    try:
-        os.replace(target, path)
-    except OSError as exc:
-        # The original is already in the Recycle Bin: keep the repaired
-        # copy under its temporary name rather than lose both.
-        raise RepairError(
-            f"the original is in the Recycle Bin, but the repaired copy couldn't take its name "
-            f"({exc}); it's kept as {os.path.basename(target)}"
-        ) from exc
+    swap_in(path, target, trash)
     return RepairOutcome(check=quick_check(path, run), note=built.note)

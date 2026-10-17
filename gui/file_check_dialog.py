@@ -18,10 +18,12 @@ Save writes it inside the file.
 
 from __future__ import annotations
 
+import os
 from typing import Optional
 
 from PyQt6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QLabel,
@@ -34,31 +36,77 @@ from PyQt6.QtWidgets import (
 from redactor_common.gui.background_call import call_in_background
 from redactor_common.gui.progress import run_with_progress
 from redactor_common.gui.table_columns import make_columns_resizable
+from redactor_common.gui.work_progress import run_work_with_progress
 
-from core.file_check import quick_check, repair
+from core.config import get_setting, set_setting
+from core.cut_damaged import CutCancelled, cut_out_damaged, plan_cut
+from core.deep_scan import DeepScanCancelled
+from core.file_check import deep_tooltip, quick_check, repair
 from core.video_file import VideoFile
 from core.video_fingerprint import video_fingerprint
 
 TITLE = "Check Files"
+DEEP_SCAN_LABEL = "Deep scan (reads the whole file)"
+CUT_BUTTON = "Cut Out Damaged Parts"
+_SETTINGS_SECTION = "file_check"
+_DEEP_KEY = "deep_scan"
+
+
+def remembered_deep_scan() -> bool:
+    return get_setting(_SETTINGS_SECTION, _DEEP_KEY, "0") == "1"
+
+
+def ask_check_options(window, count: int) -> Optional[bool]:
+    """The small Check Files dialog before the check: the "Deep scan (reads the whole file)" checkbox, default OFF and
+    remembered. Returns whether to deep scan, or None when cancelled."""
+    dialog = QDialog(window)
+    dialog.setWindowTitle(TITLE)
+    layout = QVBoxLayout(dialog)
+    label = QLabel(
+        f"Check {count} file(s) for damage?<br>The ordinary check looks at the index, the tracks and the first and "
+        "last 8 MB of the media data (seconds per file)."
+    )
+    label.setWordWrap(True)
+    layout.addWidget(label)
+    box = QCheckBox(DEEP_SCAN_LABEL)
+    box.setChecked(remembered_deep_scan())
+    box.setToolTip(
+        "Reads every byte once to find blocks of zeros inside the video data (pieces that were never downloaded). "
+        "Slow on big files and on a network share; the quick check can't see those blocks."
+    )
+    layout.addWidget(box)
+    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+    buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Check")
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    layout.addWidget(buttons)
+    dialog.checkbox = box  # for the tests
+    if dialog.exec() != QDialog.DialogCode.Accepted:
+        return None
+    set_setting(_SETTINGS_SECTION, _DEEP_KEY, "1" if box.isChecked() else "0")
+    return box.isChecked()
 
 
 class FileCheckResultsDialog(QDialog):
-    """The files with findings, worst first; "Repair" accepts the dialog."""
+    """The files with findings, worst first; "Repair" accepts the dialog (`action` "repair"), "Cut Out Damaged
+    Parts..." accepts it with `action` "cut"."""
 
     def __init__(self, checked: list[VideoFile], parent=None):
         super().__init__(parent)
         self.setWindowTitle(TITLE)
         self.resize(900, 420)
+        self.action = "repair"
         order = {"DAMAGED": 0, "REPAIRABLE": 1, "NOTE": 2, "CHECKED OK": 3}
         reported = sorted(
             (vf for vf in checked if vf.check and vf.check.findings),
             key=lambda vf: (order.get(vf.check.status, 9), vf.path.name.lower()),
         )
         self.repairable = [vf for vf in checked if vf.check and vf.check.can_repair]
+        self.cuttable = [vf for vf in checked if vf.check and getattr(vf.check, "can_cut", False)]
         counts = {status: sum(1 for vf in checked if vf.check and vf.check.status == status) for status in order}
 
         layout = QVBoxLayout(self)
-        summary = QLabel(
+        text = (
             f"Checked {len(checked)} file(s): {counts['CHECKED OK']} OK, {counts['DAMAGED']} damaged, "
             f"{counts['REPAIRABLE']} repairable, {counts['NOTE']} with notes only.<br>"
             "<b>Repair</b> rewrites a file losslessly (no re-encoding): it rebuilds a missing seek "
@@ -66,6 +114,13 @@ class FileCheckResultsDialog(QDialog):
             "for a damaged file keeps everything readable -- what's missing can't be restored. "
             "Tags and cover are kept; each original goes to the Recycle Bin."
         )
+        if self.cuttable:
+            text += (
+                f"<br><b>{CUT_BUTTON}</b> is for a file with zero-filled blocks inside the video (a Deep scan "
+                "found them): a repair can't bring those parts back, but this removes just them, losslessly, and "
+                "keeps the rest; the original goes to the Recycle Bin."
+            )
+        summary = QLabel(text)
         summary.setWordWrap(True)
         layout.addWidget(summary)
 
@@ -75,38 +130,60 @@ class FileCheckResultsDialog(QDialog):
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.verticalHeader().setVisible(False)
         for row, vf in enumerate(reported):
-            for col, text in enumerate((vf.path.name, vf.check.status, vf.check.summary())):
-                item = QTableWidgetItem(text)
-                item.setToolTip(text)
+            for col, cell in enumerate((vf.path.name, vf.check.status, vf.check.summary())):
+                item = QTableWidgetItem(cell)
+                tip = cell if col != 2 or vf.check.deep is None or not vf.check.deep.spans else (
+                    cell + chr(10) + deep_tooltip(vf.check.deep))
+                item.setToolTip(tip)
                 self.table.setItem(row, col, item)
         make_columns_resizable(self.table, wide_column=2)
         layout.addWidget(self.table)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         self.repair_button: Optional[QPushButton] = None
+        self.cut_button: Optional[QPushButton] = None
         if self.repairable:
             self.repair_button = buttons.addButton(
                 f"Repair {len(self.repairable)} File(s)...", QDialogButtonBox.ButtonRole.AcceptRole
             )
+        if self.cuttable:
+            self.cut_button = buttons.addButton(f"{CUT_BUTTON}...", QDialogButtonBox.ButtonRole.ActionRole)
+            self.cut_button.clicked.connect(self._choose_cut)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
+    def _choose_cut(self) -> None:
+        self.action = "cut"
+        self.accept()
 
-def _check_and_fingerprint(path: str):
-    """The quick check plus the video fingerprint it is stamped with, for
+
+def _check_and_fingerprint(path: str, deep: bool = False, progress=None, cancel=None):
+    """The check plus the video fingerprint it is stamped with, for
     one worker call. The fingerprint is skipped when there was no real scan."""
-    result = quick_check(path)
+    result = quick_check(path, deep=True, progress=progress, cancel=cancel) if deep else quick_check(path)
     if not result.openable:
         return result, ""
     return result, video_fingerprint(path)
 
 
-def check_files(window, files: list[VideoFile], errors: Optional[list[str]] = None) -> list[VideoFile]:
-    """Runs the quick check on `files`; returns the ones checked (fewer
+def _file_size(vf: VideoFile) -> int:
+    try:
+        return max(os.path.getsize(vf.path), 1)
+    except OSError:
+        return 1
+
+
+def check_files(
+    window, files: list[VideoFile], errors: Optional[list[str]] = None, deep: bool = False,
+) -> list[VideoFile]:
+    """Runs the check on `files`; returns the ones checked (fewer
     if cancelled). A file whose check blows up (OSError, a timeout...) is
-    appended to `errors` and the rest still run."""
+    appended to `errors` and the rest still run. With `deep` the whole of every file is read (one counted progress
+    dialog over all the bytes, Cancel takes effect within a chunk)."""
     checked: list[VideoFile] = []
+    if deep:
+        return _deep_check_files(window, files, errors, checked)
 
     def step(vf: VideoFile, _index: int) -> None:
         try:
@@ -120,6 +197,43 @@ def check_files(window, files: list[VideoFile], errors: Optional[list[str]] = No
 
     run_with_progress(window, files, step, "Checking files...", threshold=1,
                       label_for=lambda vf: f"Checking {vf.path.name}")
+    return checked
+
+
+def _deep_check_files(window, files, errors, checked) -> list[VideoFile]:
+    sizes = [_file_size(vf) for vf in files]
+    total = sum(sizes)
+
+    def work(progress):
+        done: list[tuple[VideoFile, object, str, Optional[str]]] = []
+        base = 0
+        for vf, size in zip(files, sizes):
+            if progress.cancelled.is_set():
+                break
+            progress.set_label(f"Deep scan: {vf.path.name} (reads the whole file)")
+
+            def on_bytes(read, of, base=base, size=size):
+                progress.set_value(base + int(size * min(read / max(of, 1), 1.0)))
+
+            try:
+                result, fingerprint = _check_and_fingerprint(str(vf.path), True, on_bytes, progress.cancelled)
+                done.append((vf, result, fingerprint, None))
+            except DeepScanCancelled:
+                break
+            except Exception as exc:  # OSError, a timeout...: the rest still run
+                done.append((vf, None, "", str(exc)))
+            base += size
+            progress.set_value(base)
+        return done
+
+    done, _cancelled = run_work_with_progress(window, total, "Deep scan...", work, cancellable=True, show_after_ms=0)
+    for vf, result, fingerprint, error in done:
+        if error is not None:
+            if errors is not None:
+                errors.append(f"{vf.path.name}: {error}")
+            continue
+        vf.record_check(result, fingerprint)
+        checked.append(vf)
     return checked
 
 
@@ -156,11 +270,145 @@ def repair_files(window, files: list[VideoFile]) -> tuple[list[VideoFile], list[
     return repaired, errors, notes
 
 
-def run_check_and_repair(window, files: list[VideoFile], error_details) -> None:
+def build_cut_confirmation(window, files: list[VideoFile]):
+    """The confirmation before Cut Out Damaged Parts: exactly what will be lost, per file for a batch. Returns
+    (message box, cut button, cancel button, heavy). A file where more than 25% of the duration would be lost makes it
+    a strong warning with Cancel as the default button. Never run silently: the caller executes the box."""
+    plans = [(vf, plan_cut(vf.check)) for vf in files]
+    heavy = [(vf, plan) for vf, plan in plans if plan.heavy]
+    if len(plans) == 1:
+        body = plans[0][1].sentence()
+    else:
+        lines = [f"Cut out the damaged parts of {len(plans)} files? Per file:"]
+        for vf, plan in plans:
+            n = len(plan.spans)
+            lines.append(
+                f"- {vf.path.name}: {n} part{'s' if n != 1 else ''}, {plan.removed_seconds:.0f} s "
+                f"({plan.fraction * 100:.0f}%): {plan.ranges_text(6)}"
+            )
+        lines.append("The rest of each file is kept unchanged. Each original goes to the Recycle Bin.")
+        body = chr(10).join(lines)
+    box = QMessageBox(window)
+    box.setWindowTitle(CUT_BUTTON)
+    if heavy:
+        names = ", ".join(vf.path.name for vf, _plan in heavy)
+        body = (
+            f"WARNING: more than 25% of the length would be lost in: {names}." + chr(10) + chr(10) + body
+            + chr(10) + chr(10) + "Check that this is what you want before going on."
+        )
+        box.setIcon(QMessageBox.Icon.Warning)
+    else:
+        box.setIcon(QMessageBox.Icon.Question)
+    box.setText(body + chr(10) + chr(10) + "To undo, restore the original from the Recycle Bin.")
+    cut_button = box.addButton(CUT_BUTTON, QMessageBox.ButtonRole.AcceptRole)
+    cancel_button = box.addButton(QMessageBox.StandardButton.Cancel)
+    box.setDefaultButton(cancel_button if heavy else cut_button)
+    box.setEscapeButton(cancel_button)
+    return box, cut_button, cancel_button, bool(heavy)
+
+
+def cut_files(window, files: list[VideoFile]) -> tuple[list[tuple[VideoFile, object]], list[str], bool]:
+    """Cuts the damaged parts out of `files` (each already deep scanned): one counted progress dialog with Cancel;
+    returns ([(file, CutOutcome)], errors, cancelled). Cancel leaves the file in progress untouched. Files with
+    unsaved edits are skipped -- save or discard those first."""
+    errors: list[str] = []
+    ready = []
+    for vf in files:
+        if vf.dirty and not vf.stamp_only_dirty:
+            errors.append(f"{vf.path.name}: has unsaved changes -- save or discard them first")
+        else:
+            ready.append(vf)
+    per_file = 1000
+
+    def work(progress):
+        results: list[tuple[VideoFile, object, str, Optional[str]]] = []
+        for index, vf in enumerate(ready):
+            if progress.cancelled.is_set():
+                break
+            base = index * per_file
+            name = vf.path.name
+
+            def on_progress(done, total, base=base):
+                progress.set_value(base + int(per_file * done / max(total, 1)))
+
+            def on_status(message, name=name, index=index):
+                progress.set_label(f"{name} ({index + 1} of {len(ready)}): {message}")
+
+            on_status("starting")
+            try:
+                outcome = cut_out_damaged(str(vf.path), vf.check, cancel=progress.cancelled,
+                                          progress=on_progress, status=on_status)
+                fingerprint = video_fingerprint(str(vf.path))
+                results.append((vf, outcome, fingerprint, None))
+            except CutCancelled:
+                break
+            except Exception as exc:  # RepairError or anything unexpected: keep going with the rest
+                results.append((vf, None, "", str(exc)))
+            progress.set_value(base + per_file)
+        return results
+
+    results, cancelled = run_work_with_progress(
+        window, max(len(ready), 1) * per_file, "Cutting out the damaged parts...", work, cancellable=True,
+        show_after_ms=0, cancelling_text="Cancelling... (the original stays untouched)",
+    )
+    cut: list[tuple[VideoFile, object]] = []
+    for vf, outcome, fingerprint, error in results:
+        if error is not None:
+            errors.append(f"{vf.path.name}: {error}")
+            continue
+        vf.load()  # fresh duration and technical details from the new file
+        vf.record_check(outcome.check, fingerprint)
+        vf._thumbnail_path = None
+        cut.append((vf, outcome))
+    return cut, errors, cancelled
+
+
+def cut_report(cut: list[tuple[VideoFile, object]]) -> list[str]:
+    """One line per file: the removed ranges, the new duration, the verify result."""
+    from core.file_check import _format_seconds
+
+    lines = []
+    for vf, outcome in cut:
+        ranges = ", ".join(f"{_format_seconds(s.start_s)}-{_format_seconds(s.end_s)}" for s in outcome.removed)
+        n = len(outcome.removed)
+        lines.append(
+            f"{vf.path.name}: removed {n} part{'s' if n != 1 else ''} ({ranges}), {outcome.removed_seconds:.0f} s; "
+            f"new duration {_format_seconds(outcome.new_duration)}; {outcome.verify}"
+        )
+    return lines
+
+
+def _run_cut(window, targets: list[VideoFile], error_details) -> None:
+    box, cut_button, _cancel, _heavy = build_cut_confirmation(window, targets)
+    box.exec()
+    if box.clickedButton() is not cut_button:
+        return
+    cut, errors, cancelled = cut_files(window, targets)
+    window._refresh_table_rows()
+    parts = [f"Cut damaged parts out of {len(cut)} of {len(targets)} file(s)"]
+    if cancelled:
+        parts.append("cancelled (the file being cut is untouched)")
+    if errors:
+        parts.append(f"{len(errors)} not cut")
+    window.status_bar.showMessage(", ".join(parts))
+    if errors:
+        QMessageBox.warning(window, "Some files weren't cut", error_details(errors))
+    if cut:
+        QMessageBox.information(
+            window, "Damaged parts cut out",
+            error_details(cut_report(cut) + ["", "Each original is in the Recycle Bin; restore it from there to undo."]),
+        )
+
+
+def run_check_and_repair(window, files: list[VideoFile], error_details, deep: Optional[bool] = None) -> None:
     """The whole Media > Check Files... flow. `error_details` formats
-    a list of lines for a message box (the main window's helper)."""
+    a list of lines for a message box (the main window's helper). `deep` None asks (the remembered checkbox)."""
+    if deep is None:
+        deep = ask_check_options(window, len(files))
+        if deep is None:
+            return
     check_errors: list[str] = []
-    checked = check_files(window, files, check_errors)
+    checked = check_files(window, files, check_errors, deep=deep)
     window._refresh_table_rows()
     if check_errors:
         QMessageBox.warning(window, "Some files couldn't be checked", error_details(check_errors))
@@ -169,7 +417,13 @@ def run_check_and_repair(window, files: list[VideoFile], error_details) -> None:
     dialog = FileCheckResultsDialog(checked, window)
     reported = sum(1 for vf in checked if vf.check.findings)
     window.status_bar.showMessage(f"Checked {len(checked)} file(s), {reported} with findings")
-    if dialog.exec() != QDialog.DialogCode.Accepted or not dialog.repairable:
+    if dialog.exec() != QDialog.DialogCode.Accepted:
+        return
+    if dialog.action == "cut":
+        if dialog.cuttable:
+            _run_cut(window, dialog.cuttable, error_details)
+        return
+    if not dialog.repairable:
         return
     targets = dialog.repairable
     answer = QMessageBox.question(

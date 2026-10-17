@@ -10,7 +10,7 @@ library into MP4/MKV with ffmpeg. Part of the Redactor family; shared code comes
 - Optional scene metadata from ThePornDB and StashDB (your own key under Tools > API Keys): the dialog asks for the exact file by its OSHASH fingerprint first (a file match is highlighted, a title match is flagged), then you pick, review each field and optionally embed the poster in the file. Only the hash and/or the search text leave your computer. `videoredactor lookup-check theporndb|stashdb` tests a key.
 - Fetch subtitles from OpenSubtitles (hash match first; a title match is flagged as sync-not-guaranteed), or, for music videos, time-synced lyrics from LRCLIB (free, no key) turned into an .srt with an adjustable offset. The Redact subtitle step can use LRCLIB too (option off by default; it only saves a same-artist, same-title, same-length match, everything else is a suggestion).
 - Music videos: the title is the song; the track title field is gone, old values are kept and can be moved into the title. MP4 music videos also carry the iTunes media type (`stik` 6; MKV has no equivalent and keeps the custom content-type tag only).
-- Check files for damage and repair them losslessly; find duplicates; rename and move files by tag patterns.
+- Check files for damage and repair them losslessly (an optional **Deep scan** reads the whole file for zero-filled blocks inside the video, the pieces a torrent never delivered, and **Cut Out Damaged Parts** removes just those parts, losslessly, when the file can't be fetched again); find duplicates; rename and move files by tag patterns.
 - Redact: one click runs a saved recipe of steps on the selected (or all loaded) files.
 - Convert other formats (AVI, WMV, MOV, FLV, MPG, WebM...) to MP4 or MKV with conversion rules that copy streams
   where they can, verify every result and keep the original in the Recycle Bin or a quarantine folder.
@@ -46,7 +46,7 @@ Every file's Bitrate cell is tinted by its **video bits per pixel per frame** (t
 | Edit | Undo (Ctrl+Z), Redo (Ctrl+Y); Apply to N Selected (Ctrl+Return); Redact (Ctrl+Shift+E), Edit Redact Recipe; Search and Replace (Ctrl+H), Change Case, Auto-Number, Clear Fields (empties descriptive fields, source ids and the embedded poster of the selected files; staged and undoable until Save; the content type only if ticked) |
 | View | Show Metadata Panel; Zoom In / Out / Reset (Ctrl++, Ctrl+-, Ctrl+0); Clear All Filters; Refresh List (F5, Ctrl+R); Command Palette (Ctrl+K) |
 | Metadata | Parse Filename (Ctrl+I); Look Up: TMDB (Movie) (Ctrl+M), TMDB (TV Show) (Ctrl+T), TheTVDB (TV Show) (Ctrl+Shift+T), IMDb (Local Database), ThePornDB, StashDB, Subtitles (OpenSubtitles, Lyrics) (Ctrl+Shift+L), Get Lyrics (LRCLIB) (Ctrl+Shift+G, one Music Video only); Number Episodes |
-| Media | Play (Ctrl+Shift+P, also a toolbar button and a large button under the side-panel thumbnail), Remux to MP4 (Ctrl+Shift+M), Convert to MP4 (H.264) (Ctrl+Shift+C), Convert to MP4/MKV (Rules); Check Files, Find Duplicates |
+| Media | Play (Ctrl+Shift+P, also a toolbar button and a large button under the side-panel thumbnail), Remux to MP4 (Ctrl+Shift+M), Convert to MP4 (H.264) (Ctrl+Shift+C), Convert to MP4/MKV (Rules); Check Files (with the optional Deep scan; Cut Out Damaged Parts for files it finds damaged), Find Duplicates |
 | Tools | Preferences (Ctrl+,); API Keys, External Tools, IMDb Database; Columns, Genres, Languages; History |
 | Help | Changelog, Credits, About |
 

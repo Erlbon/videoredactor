@@ -245,7 +245,7 @@ def test_check_and_repair_flow(videos, tmp_path, qapp, monkeypatch):
     # repair() took move_to_trash as a default argument at import time:
     monkeypatch.setattr(fc.repair, "__defaults__", (fc._run, lambda _p: None, fc.restore_app_metadata))
 
-    flow.run_check_and_repair(window, files, lambda lines: "\n".join(lines))
+    flow.run_check_and_repair(window, files, lambda lines: "\n".join(lines), deep=False)
     assert shown == {"rows": 2, "repairable": ["late_index.mp4"]}  # good.mkv has nothing to report
     assert [vf.check.status for vf in files] == ["CHECKED OK", "CHECKED OK", "DAMAGED"]
     assert "Repaired 1 of 1" in window.status_bar.currentMessage()

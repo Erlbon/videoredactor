@@ -1480,7 +1480,7 @@ class MainWindow(QMainWindow):
                         # Store the VideoFile reference on the filename cell --
                         # row->file mapping via UserRole, not row index.
                         item.setData(FILE_ROLE, vf)
-                    check_note = vf.check.summary() if vf.check is not None and vf.check.findings else ""
+                    check_note = vf.check.tooltip() if vf.check is not None and vf.check.findings else ""
                     stamp = vf.stamp
                     stamp_note = stamp.tooltip() if stamp is not None and field_name == "status" else ""
                     path_note = str(vf.path) if field_name == PATH_KEY else ""
