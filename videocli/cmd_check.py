@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 
+from core import container_check
 from core.file_check import DAMAGED, REPAIRABLE, CheckResult, RepairError, quick_check, repair
 from core.video_file import VideoFile
 from core.video_fingerprint import video_fingerprint
@@ -24,7 +25,7 @@ from redactor_common.core.trash import TrashError, trash_with_retries
 
 from videocli.files import add_path_arguments, collect, load_videos
 
-PROBLEM_STATUSES = {"DAMAGED", "REPAIRABLE"}
+PROBLEM_STATUSES = {"DAMAGED", "REPAIRABLE", "WRONG CONTAINER"}
 
 
 def add_check_parser(sub) -> None:
@@ -62,6 +63,9 @@ def run_check(args: argparse.Namespace, out: Output) -> int:
         }
         if video.load_error:
             row["status"], row["message"], row["problem"] = "UNREADABLE", video.load_error, True
+            verdict = container_check.check_container(path)  # an .mp4 that is really an FLV fails to load as an MP4
+            if verdict is not None and verdict.wrong:
+                row["message"] += f"; {verdict.message}: run fix-container"
         else:
             result = quick_check(path)
             if any(f.code == "no_tool" for f in result.findings):
@@ -97,6 +101,8 @@ def _say(row: dict, text: str) -> None:
 def _maybe_repair(path: str, result: CheckResult, args, trash, row: dict) -> tuple[CheckResult, bool]:
     """(the result after --repair, whether a repair was tried and failed). Only a REPAIRABLE file is remuxed
     losslessly; anything else is left alone."""
+    if args.repair and result.can_remux_container:
+        _say(row, "wrong container: not repaired here; run fix-container (lossless remux, quarantines the original)")
     if not args.repair or result.status != "REPAIRABLE" or not result.can_repair:
         if args.repair and any(f.severity == DAMAGED for f in result.findings):
             _say(row, "damaged: not repaired automatically (a repair would drop the unreadable end); use Media > Check Files")

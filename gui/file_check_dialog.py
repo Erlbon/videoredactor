@@ -10,7 +10,9 @@ Each file is checked/repaired on a worker thread
 (redactor_common's call_in_background), so the window keeps painting
 while ffmpeg reads a multi-GB file; Cancel takes effect between files.
 Results land on VideoFile.check and show in the Status column
-(DAMAGED / REPAIRABLE / NOTE / CHECKED OK, the findings as a tooltip).
+(DAMAGED / WRONG CONTAINER / REPAIRABLE / NOTE / CHECKED OK, the findings as a tooltip).
+A WRONG CONTAINER file (an .mp4 that is really an FLV) is fixed by "Remux to Real Container"
+(core/container_remux.py): lossless, verified, original moved to a quarantine folder, TSV undo log.
 Each real result is also stamped into the file's metadata (status, time,
 video fingerprint -- VideoFile.record_check), which marks the file unsaved;
 Save writes it inside the file.
@@ -19,6 +21,8 @@ Save writes it inside the file.
 from __future__ import annotations
 
 import os
+import threading
+from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtWidgets import (
@@ -38,6 +42,7 @@ from redactor_common.gui.progress import run_with_progress
 from redactor_common.gui.table_columns import make_columns_resizable
 from redactor_common.gui.work_progress import run_work_with_progress
 
+from core import container_remux, library_safety
 from core.config import get_setting, set_setting
 from core.cut_damaged import CutCancelled, cut_out_damaged, plan_cut
 from core.deep_scan import DeepScanCancelled
@@ -48,6 +53,7 @@ from core.video_fingerprint import video_fingerprint
 TITLE = "Check Files"
 DEEP_SCAN_LABEL = "Deep scan (reads the whole file)"
 CUT_BUTTON = "Cut Out Damaged Parts"
+REMUX_BUTTON = "Remux to Real Container"
 _SETTINGS_SECTION = "file_check"
 _DEEP_KEY = "deep_scan"
 
@@ -96,19 +102,21 @@ class FileCheckResultsDialog(QDialog):
         self.setWindowTitle(TITLE)
         self.resize(900, 420)
         self.action = "repair"
-        order = {"DAMAGED": 0, "REPAIRABLE": 1, "NOTE": 2, "CHECKED OK": 3}
+        order = {"DAMAGED": 0, "WRONG CONTAINER": 1, "REPAIRABLE": 1, "NOTE": 2, "CHECKED OK": 3}
         reported = sorted(
             (vf for vf in checked if vf.check and vf.check.findings),
             key=lambda vf: (order.get(vf.check.status, 9), vf.path.name.lower()),
         )
         self.repairable = [vf for vf in checked if vf.check and vf.check.can_repair]
         self.cuttable = [vf for vf in checked if vf.check and getattr(vf.check, "can_cut", False)]
+        self.remuxable = [vf for vf in checked if vf.check and getattr(vf.check, "can_remux_container", False)]
         counts = {status: sum(1 for vf in checked if vf.check and vf.check.status == status) for status in order}
 
         layout = QVBoxLayout(self)
         text = (
             f"Checked {len(checked)} file(s): {counts['CHECKED OK']} OK, {counts['DAMAGED']} damaged, "
-            f"{counts['REPAIRABLE']} repairable, {counts['NOTE']} with notes only.<br>"
+            f"{counts['REPAIRABLE']} repairable, {counts['WRONG CONTAINER']} with a wrong container, "
+            f"{counts['NOTE']} with notes only.<br>"
             "<b>Repair</b> rewrites a file losslessly (no re-encoding): it rebuilds a missing seek "
             "index or duration, moves an MP4's index to the front, fixes default audio tracks, and "
             "for a damaged file keeps everything readable -- what's missing can't be restored. "
@@ -119,6 +127,14 @@ class FileCheckResultsDialog(QDialog):
                 f"<br><b>{CUT_BUTTON}</b> is for a file with zero-filled blocks inside the video (a Deep scan "
                 "found them): a repair can't bring those parts back, but this removes just them, losslessly, and "
                 "keeps the rest; the original goes to the Recycle Bin."
+            )
+        if self.remuxable:
+            text += (
+                f"<br><b>{REMUX_BUTTON}</b> is for a file whose container is not what its extension says (an .mp4 "
+                "that is really an FLV: players report file errors, the content is intact). It is remuxed "
+                "losslessly into a real MP4/MKV, verified (container, length, tracks, a full decode), and only then "
+                "swapped in; the original is MOVED to a 'remuxed originals' folder (never deleted) and a log "
+                "allows an undo. You can choose a dry run first."
             )
         summary = QLabel(text)
         summary.setWordWrap(True)
@@ -149,9 +165,18 @@ class FileCheckResultsDialog(QDialog):
         if self.cuttable:
             self.cut_button = buttons.addButton(f"{CUT_BUTTON}...", QDialogButtonBox.ButtonRole.ActionRole)
             self.cut_button.clicked.connect(self._choose_cut)
+        self.remux_button: Optional[QPushButton] = None
+        if self.remuxable:
+            self.remux_button = buttons.addButton(
+                f"{REMUX_BUTTON} ({len(self.remuxable)})...", QDialogButtonBox.ButtonRole.ActionRole)
+            self.remux_button.clicked.connect(self._choose_remux)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _choose_remux(self) -> None:
+        self.action = "remux"
+        self.accept()
 
     def _choose_cut(self) -> None:
         self.action = "cut"
@@ -442,6 +467,108 @@ def _run_cut(window, targets: list[VideoFile], error_details) -> None:
         )
 
 
+def remux_confirmation(window, files: list[VideoFile], safety=None):
+    """(box, remux_button, dry_run_box): the confirmation before a wrong-container remux. It lists every file and where
+    the originals go, and carries the 'Dry run (report only)' choice, ticked by default."""
+    safety = safety or library_safety.get_safety_settings()
+    where = (
+        f"the quarantine folder {safety.quarantine_root}" if safety.quarantine_root
+        else "a 'remuxed originals <date>' folder beside each file"
+    )
+    box = QMessageBox(window)
+    box.setIcon(QMessageBox.Icon.Question)
+    box.setWindowTitle(TITLE)
+    box.setText(
+        f"Remux {len(files)} file(s) into the container their extension says?\n\n"
+        "Each is rewritten losslessly (no re-encoding) to a temporary name, verified (real container, length, tracks, "
+        f"a full decode with zero errors) and only then swapped in. The original is moved to {where}, never deleted, "
+        "and a TSV log lets you undo it (command line: undo-remux). Files modified in the last "
+        f"{safety.recent_minutes} minutes are skipped.\n\nThe files:\n"
+        + "\n".join(f"  {vf.path}" for vf in files[:25]) + (f"\n  ... and {len(files) - 25} more" if len(files) > 25 else "")
+    )
+    box.setDetailedText("\n".join(str(vf.path) for vf in files))
+    dry_box = QCheckBox("Dry run (report only): list what would be remuxed, write nothing")
+    dry_box.setChecked(True)
+    box.setCheckBox(dry_box)
+    remux_button = box.addButton("Remux", QMessageBox.ButtonRole.AcceptRole)
+    box.addButton(QMessageBox.StandardButton.Cancel)
+    return box, remux_button, dry_box
+
+
+def remux_files(window, files: list[VideoFile], dry_run: bool) -> tuple[list, str, bool]:
+    """Runs container_remux.remux_file for each file under a cancellable progress dialog (Cancel kills ffmpeg).
+    Returns (results, the log's path or "", cancelled). A file with unsaved edits is skipped, not remuxed."""
+    safety = library_safety.get_safety_settings()
+    cancel_event = threading.Event()
+    results: list = []
+    log = None if dry_run or not files else container_remux.RemuxLog(
+        container_remux.default_log_path(str(files[0].path), safety))
+
+    def step(vf: VideoFile, _index: int) -> None:
+        if cancel_event.is_set():
+            return
+        if vf.dirty and not vf.stamp_only_dirty:
+            results.append(container_remux.RemuxResult(
+                str(vf.path), container_remux.SKIPPED, "it has unsaved edits: save them first"))
+            return
+        try:
+            result = call_in_background(
+                container_remux.remux_file, str(vf.path), dry_run=dry_run, safety=safety, log=log,
+                cancel_event=cancel_event,
+            )
+        except Exception as exc:  # visible in the report, and the rest still run
+            result = container_remux.RemuxResult(str(vf.path), container_remux.FAILED, f"the original is untouched: {exc}")
+        results.append(result)
+        if result.status == container_remux.REMUXED:
+            vf.path = Path(result.new_path)
+            vf.dirty = False
+            vf.load()
+            vf.check = None
+            vf._thumbnail_path = None
+
+    finished = run_with_progress(
+        window, files, step, "Remuxing to the right container...", threshold=1, cancellable=True,
+        label_for=lambda vf: f"Remuxing {vf.path.name}", on_cancel=cancel_event.set,
+    )
+    log_path = log.path if log is not None and os.path.isfile(log.path) else ""
+    return results, log_path, cancel_event.is_set() or not finished
+
+
+def _run_remux(window, targets: list[VideoFile], error_details) -> None:
+    box, remux_button, dry_box = remux_confirmation(window, targets)
+    box.exec()
+    if box.clickedButton() is not remux_button:
+        return
+    dry_run = dry_box.isChecked()
+    results, log_path, cancelled = remux_files(window, targets, dry_run)
+    window._refresh_table_rows()
+    done = [r for r in results if r.status in (container_remux.REMUXED, container_remux.WOULD)]
+    failed = [r for r in results if r.status == container_remux.FAILED]
+    skipped = [r for r in results if r.status == container_remux.SKIPPED]
+    verb = "would be remuxed" if dry_run else "remuxed"
+    parts = [("Dry run: " if dry_run else "") + f"{len(done)} of {len(targets)} file(s) {verb}"]
+    if skipped:
+        parts.append(f"{len(skipped)} skipped")
+    if failed:
+        parts.append(f"{len(failed)} failed")
+    if cancelled:
+        parts.append("cancelled (the file being remuxed is untouched)")
+    summary = ", ".join(parts)
+    window.status_bar.showMessage(summary)
+    lines = [r.line() for r in results]
+    if log_path:
+        lines += ["", f"Undo log: {log_path}", f'Undo: videoredactor undo-remux "{log_path}"']
+    if dry_run:
+        lines += ["", "DRY RUN: nothing was changed or written."]
+    report = QMessageBox(window)
+    report.setIcon(QMessageBox.Icon.Warning if failed else QMessageBox.Icon.Information)
+    report.setWindowTitle("Dry run" if dry_run else TITLE)
+    report.setText(summary + ".")
+    report.setDetailedText("\n".join(lines))
+    report.setStandardButtons(QMessageBox.StandardButton.Ok)
+    report.exec()
+
+
 def run_check_and_repair(window, files: list[VideoFile], error_details, deep: Optional[bool] = None) -> None:
     """The whole Media > Check Files... flow. `error_details` formats
     a list of lines for a message box (the main window's helper). `deep` None asks (the remembered checkbox)."""
@@ -460,6 +587,10 @@ def run_check_and_repair(window, files: list[VideoFile], error_details, deep: Op
     reported = sum(1 for vf in checked if vf.check.findings)
     window.status_bar.showMessage(f"Checked {len(checked)} file(s), {reported} with findings")
     if dialog.exec() != QDialog.DialogCode.Accepted:
+        return
+    if dialog.action == "remux":
+        if dialog.remuxable:
+            _run_remux(window, dialog.remuxable, error_details)
         return
     if dialog.action == "cut":
         if dialog.cuttable:

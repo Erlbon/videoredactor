@@ -573,6 +573,8 @@ class CheckRepairStep(VideoStep):
                 note += " -- not repaired automatically (a repair would drop what can't be read); use Check Files"
             elif status == "REPAIRABLE":
                 note += " -- repair is off in the recipe"
+            elif status == "WRONG CONTAINER":
+                note += " -- the Convert step fixes it with a lossless remux, or Media > Check Files > Remux"
         if stamped:
             what = "checked OK" if status == "CHECKED OK" else status
             return _with_note(StepResult.applied(f"{what} (stamped)"), note)
@@ -1777,7 +1779,8 @@ class ConvertStep(VideoStep):
         "limits are re-encoded and scaled to 720p; external .srt files beside the video are muxed in (an MP4 "
         "becomes an MKV) and removed afterwards. Every result is verified before the swap and the original goes "
         "to the Recycle Bin or the quarantine folder (or is deleted, if you turned that on). Disc images are "
-        "left alone. An MKV stays an MKV (so 'Remux MKV to MP4' is not run while this step is on). All limits "
+        "left alone. A file whose container does not match its extension (an .mp4 that is really an FLV) is converted "
+        "despite its name, by a lossless remux. An MKV stays an MKV (so 'Remux MKV to MP4' is not run while this step is on). All limits "
         "are in Preferences > Conversion. Every Redact run with this step on asks 'Dry run the conversion step' "
         "in its confirm question (ticked by default): the report then shows a 'DRY RUN: would ...' line per file "
         "and nothing is converted; untick it to convert for real. On the command line, redact --convert-dry-run "

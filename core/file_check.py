@@ -54,6 +54,7 @@ import dataclasses
 
 from redactor_common.core.trash import TrashError, move_to_trash
 
+from core import container_check
 from core.deep_scan import DeepScanResult, deep_scan, edge_zero_blocks
 from core.external_tools import MKVTOOLNIX, is_tool_available
 from core.ffmpeg_backend import REMUX_TIMEOUT_SECONDS, _run
@@ -66,6 +67,10 @@ DATA_DAMAGE_CODES = frozenset({"data_damage", "zero_blocks_edge"})
 DAMAGED = "damaged"      # the content itself is incomplete or unreadable
 REPAIRABLE = "repairable"  # fixed by a lossless remux
 NOTE = "note"            # worth knowing, nothing to repair
+# The file's container is not what its extension says (an .mp4 that is really an FLV): fixed by a lossless remux
+# into the right container (core/container_remux.py), not by repair(); severity REPAIRABLE, status WRONG CONTAINER.
+WRONG_CONTAINER_CODE = "wrong_container"
+WRONG_CONTAINER_STATUS = "WRONG CONTAINER"
 
 # A file "ends early" when readable content stops more than this short
 # of its declared length (seconds, or fraction of the length).
@@ -94,6 +99,8 @@ class CheckResult:
     def status(self) -> str:
         """For the Status column: DAMAGED, REPAIRABLE, NOTE or CHECKED OK."""
         severities = {f.severity for f in self.findings}
+        if DAMAGED not in severities and any(f.code == WRONG_CONTAINER_CODE and f.severity == REPAIRABLE for f in self.findings):
+            return WRONG_CONTAINER_STATUS
         for severity, label in ((DAMAGED, "DAMAGED"), (REPAIRABLE, "REPAIRABLE"), (NOTE, "NOTE")):
             if severity in severities:
                 return label
@@ -110,7 +117,17 @@ class CheckResult:
         data: a remux can't bring them back (the repair would only refuse)."""
         if self.has_data_damage:
             return False
-        return self.openable and any(f.severity in (DAMAGED, REPAIRABLE) for f in self.findings)
+        return self.openable and any(
+            f.severity in (DAMAGED, REPAIRABLE) and f.code != WRONG_CONTAINER_CODE for f in self.findings
+        )
+
+    @property
+    def can_remux_container(self) -> bool:
+        """The file opens and its container is the wrong one: the lossless remux into the right container
+        (core/container_remux.py) fixes it, along with every other REPAIRABLE finding (it writes the file fresh)."""
+        if self.has_data_damage or not self.openable:
+            return False
+        return any(f.code == WRONG_CONTAINER_CODE and f.severity == REPAIRABLE for f in self.findings)
 
     @property
     def can_cut(self) -> bool:
@@ -337,7 +354,7 @@ def quick_check(
 
     probe = run([
         "ffprobe", "-v", "error", "-show_entries",
-        "format=duration:stream=index,codec_type:stream_tags=language:stream_disposition=default",
+        "format=duration,format_name:stream=index,codec_type:stream_tags=language:stream_disposition=default",
         "-of", "json", path,
     ])
     if probe is None:
@@ -349,11 +366,24 @@ def quick_check(
         reason = _clean((_error_lines(probe.stderr) or ["unreadable"])[-1])
         reason = reason.replace(f"{path}: ", "")
         result.findings.append(Finding("unreadable", DAMAGED, f"Can't be opened ({reason}) -- not repairable here"))
+        try:  # ffprobe failed: the magic bytes may still say what the file really is (a hint, nothing to fix here)
+            verdict = container_check.check_container(path, "")
+        except OSError:
+            verdict = None
+        if verdict is not None and verdict.wrong:
+            result.findings.append(Finding(
+                "wrong_container_unreadable", NOTE, f"Looks like {verdict.label}, not {verdict.extension} (by its first bytes)",
+            ))
         return result
     try:
         info = json.loads(probe.stdout or "{}")
     except json.JSONDecodeError:
         info = {}
+    verdict = container_check.check_container(path, str((info.get("format") or {}).get("format_name") or ""))
+    if verdict is not None and verdict.wrong:
+        result.findings.append(Finding(
+            WRONG_CONTAINER_CODE, REPAIRABLE, f"{verdict.message[0].upper()}{verdict.message[1:]}: fixable by a lossless remux",
+        ))
     duration = (info.get("format") or {}).get("duration")
     try:
         result.declared_seconds = float(duration) if duration not in (None, "N/A") else None

@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from core import container_check
 from core import conversion_plan as cp
 from core import encoder_detect, history
 from core.ffmpeg_backend import _run_ffmpeg, probe_media
@@ -101,6 +102,20 @@ def _streams_agree(result: cp.MediaInfo) -> bool:
     return abs(video.duration - audio.duration) <= DURATION_TOLERANCE
 
 
+def decode_problem(path: str) -> str:
+    """"" when ffmpeg decodes every stream of `path` with no error at all (a full decode to the null muxer), else the
+    first error line. Used to verify a remux of a file whose container was wrong."""
+    from core.ffmpeg_backend import _run  # noqa: PLC0415
+
+    result = _run(["ffmpeg", "-v", "error", "-i", path, "-map", "0:V", "-map", "0:a?", "-f", "null", "-"], timeout=CONVERT_TIMEOUT_SECONDS)
+    if result is None:
+        return "the full decode could not run (ffmpeg missing or timed out)"
+    lines = [line.strip() for line in (result.stderr or "").splitlines() if line.strip()]
+    if result.returncode != 0 or lines:
+        return f"the result does not decode cleanly: {lines[0] if lines else 'ffmpeg failed'}"
+    return ""
+
+
 @dataclass
 class ConversionOutcome:
     converted: bool
@@ -122,6 +137,7 @@ def convert_file(
     runner: Callable = _run_ffmpeg,
     probe: Callable[[str], cp.MediaInfo | None] = probe_media,
     resolve_encoder: Callable[[cp.ConversionSettings], str] = encoder_detect.resolve_encoder,
+    decode_check: Callable[[str], str] = decode_problem,
 ) -> ConversionOutcome:
     """Convert `source` per `plan` through `run` (dry-run, recent-file guard, verified swap, Recycle Bin /
     quarantine). `runner`/`probe`/`resolve_encoder` are injectable for tests. A bitrate re-encode uses the
@@ -165,10 +181,20 @@ def convert_file(
 
     def verify(src: str, temp: str) -> str:
         size = os.path.getsize(temp) if os.path.exists(temp) else None
+        result_info = probe(temp)
         problem = verify_result(
-            info, probe(temp), plan, settings, added_subtitles=added_subtitles, result_size=size,
+            info, result_info, plan, settings, added_subtitles=added_subtitles, result_size=size,
             tolerance_seconds=run.tolerance_seconds, tolerance_fraction=run.tolerance_fraction,
         )
+        if not problem and plan.wrong_container:
+            # A wrong-container fix is only done when the result really is the container its name says, and the
+            # whole result decodes with zero errors (the content was intact before: it must stay so).
+            expected = container_check.container_key_from_format_name(result_info.format_name) if result_info else None
+            want = ".mkv" if plan.container == ".mkv" else ".mp4"
+            if expected != ("matroska" if want == ".mkv" else "mp4"):
+                problem = f"the result is not a real {want[1:].upper()} file (ffprobe says {result_info.format_name if result_info else '?'})"
+            else:
+                problem = decode_check(temp)
         if not problem and cover:
             problem = verify_cover(temp, cover)
         return problem

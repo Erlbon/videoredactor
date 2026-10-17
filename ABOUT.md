@@ -183,6 +183,8 @@ videoredactor redact  [PATH...] [--recipe FILE] [--enable STEP] [--disable STEP]
                                 [--trash-dir FOLDER] [--list-steps]
 videoredactor notes   PATH...  [--kind KIND] [--write] [--include-uncertain] [--update] [--no-wikipedia] [-n]
 videoredactor lookup-check  theporndb|stashdb  [--endpoint URL]
+videoredactor fix-container PATH... [--apply] [--log FILE]
+videoredactor undo-remux LOG.tsv
 ```
 
 The command line uses the same code as the window, so the results are the same. It reads the same settings file
@@ -403,6 +405,32 @@ stash-box server (StashDB only) for this run; the saved address is under Tools >
 | Option | Meaning |
 | --- | --- |
 | `--endpoint URL` | StashDB only: check another stash-box server's GraphQL address for this run. |
+
+### fix-container
+
+`videoredactor fix-container PATH... [--apply] [--log FILE]`
+
+Finds files whose container is not what their extension says (an `.mp4` that is really an FLV: players report file
+errors, the content is intact) and remuxes them losslessly into a real MP4/MKV, the same fix as Media > Check Files >
+Remux to Real Container. It is a **dry run unless you add `--apply`**: it lists what would be remuxed and writes
+nothing. A real run converts to a temp name, verifies it (real container, length, same tracks, a full decode with
+zero errors), then swaps; the original is moved (never deleted) to a `remuxed originals <date>` folder (the quarantine
+folder of Preferences > Library safety when one is set, else beside the file) and a UTF-8 TSV row is written. Files
+modified in the last 10 minutes are skipped, an existing target is never overwritten, a file that would need a
+re-encode is skipped. Exit code 1 when a file failed.
+
+| Option | Meaning |
+| --- | --- |
+| `--apply` | Really remux. Without it nothing is changed or written. |
+| `--log FILE` | With `--apply`: the TSV undo log to write (default: beside the quarantine folder). |
+
+### undo-remux
+
+`videoredactor undo-remux LOG.tsv`
+
+Reads the log of a `fix-container --apply` (or the window's remux) and puts each original back; the remuxed copy is
+moved to an `undone remux <date>` folder beside it, never deleted. An original whose name is taken again is left in
+quarantine and reported. Undoing twice does nothing. Exit code 1 when something could not be put back.
 
 ### JSON output
 

@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field, fields
 
+from core import container_check
 from core.config import get_setting, set_setting
 
 # --- file kinds --------------------------------------------------------------
@@ -89,6 +90,7 @@ class MediaInfo:
     size_bytes: int
     duration: float | None
     streams: list[StreamInfo] = field(default_factory=list)
+    format_name: str = ""  # ffprobe's container name(s), "" when unknown (hand-made infos): see core/container_check.py
 
     @property
     def ext(self) -> str:
@@ -140,7 +142,9 @@ def parse_ffprobe(path: str, data: dict) -> MediaInfo:
             attached_pic=bool(disp.get("attached_pic")), duration=stream_duration,
             filename=str(tags.get("filename") or ""),
         ))
-    return MediaInfo(path=path, size_bytes=size, duration=duration, streams=streams)
+    return MediaInfo(
+        path=path, size_bytes=size, duration=duration, streams=streams, format_name=str(fmt.get("format_name") or ""),
+    )
 
 
 # --- settings ----------------------------------------------------------------
@@ -201,6 +205,7 @@ class Plan:
     bitrate_driven: bool = False  # the 85 percent size check applies
     video_mbps: float | None = None
     needs_review: str = ""  # a disc image listed for the user, not acted on
+    wrong_container: str = ""  # the real container's label (FLV...) of a file whose extension lies: see container_check
 
     @property
     def does_something(self) -> bool:
@@ -302,6 +307,12 @@ def plan_conversion(
     s = settings or ConversionSettings()
     plan = Plan()
     ext = info.ext
+    # A file whose extension lies about its container (an .mp4 that is really an FLV) is judged by what it IS: it is
+    # treated like a legacy container, whatever its name says. Needs ffprobe's format_name (hand-made infos have none).
+    lying = container_check.wrong_container(info.path, info.format_name) if info.format_name else None
+    if lying is not None:
+        plan.wrong_container = lying.label
+        ext = ".flv"  # any LEGACY extension: the rules below only need "not already a sane container"
 
     if ext in DISC_EXTENSIONS:
         if s.disc_images == DISC_REMUX_VOB and ext == ".vob":
@@ -353,7 +364,12 @@ def plan_conversion(
     plan.container = ".mkv" if needs_mkv else ".mp4"
 
     # --- container change? ---
-    if ext in LEGACY_EXTENSIONS:
+    if lying is not None:
+        plan.reasons.append(f"wrong container: the {info.ext} file is really {lying.label}")
+        plan.reasons += why_mkv
+        if info.ext in (".mkv", ".webm"):
+            plan.container = ".mkv"  # an .mkv keeps its extension: the lossless remux makes it a real Matroska file
+    elif ext in LEGACY_EXTENSIONS:
         plan.reasons.append(f"legacy container {ext}")
         plan.reasons += why_mkv
     elif ext == ".mkv":
@@ -478,6 +494,8 @@ def build_ffmpeg_args(
             args += [f"-metadata:s:s:{position}", f"title={extra.title}"]
         flags = [f for f, on in (("default", extra.default), ("hearing_impaired", extra.hearing_impaired)) if on]
         args += [f"-disposition:s:{position}", "+".join(flags) if flags else "0"]
+    if mp4 and plan.wrong_container:
+        args += ["-movflags", "+faststart"]  # a fixed file should play at once, and not read as 'index at the end'
     args += [out]
     return args
 

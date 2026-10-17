@@ -324,7 +324,8 @@ def test_redact_rejects_unknown_steps_and_thresholds(video):
 def test_a_command_name_starts_the_command_line_and_a_path_starts_the_window():
     from videocli import COMMANDS, cli_requested
 
-    assert set(COMMANDS) == {"info", "set", "rename", "move", "check", "redact", "notes", "lookup-check", "clear"}
+    assert set(COMMANDS) == {"info", "set", "rename", "move", "check", "redact", "notes", "lookup-check", "clear",
+                              "fix-container", "undo-remux"}
     assert cli_requested(["videoredactor.exe", "info", "x.mp4"]) and cli_requested(["videoredactor.exe", "--version"])
     assert not cli_requested(["videoredactor.exe"]) and not cli_requested(["videoredactor.exe", "D:/Films/a.mkv"])
 

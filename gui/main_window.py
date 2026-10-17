@@ -1579,7 +1579,7 @@ class MainWindow(QMainWindow):
         scan_status = vf.scan_status()
         if scan_status == "DAMAGED":
             return (ERROR_COLOR, HIGHLIGHT_TEXT_COLOR)
-        if scan_status == "REPAIRABLE":
+        if scan_status in ("REPAIRABLE", "WRONG CONTAINER"):
             return (SAVE_FAILED_COLOR, HIGHLIGHT_TEXT_COLOR)
         return None
 
@@ -1595,7 +1595,7 @@ class MainWindow(QMainWindow):
                 # damaged/repairable result is what to act on, so it wins
                 # (the load error stays in the tooltip); otherwise a
                 # damaged file would look like any other load error.
-                if vf.check is not None and vf.check.status in ("DAMAGED", "REPAIRABLE"):
+                if vf.check is not None and vf.check.status in ("DAMAGED", "REPAIRABLE", "WRONG CONTAINER"):
                     return vf.check.status
                 return "LOAD ERROR"
             if vf.save_error:
@@ -3122,7 +3122,11 @@ class MainWindow(QMainWindow):
         MKV, re-encode only what no container can hold, external .srt files muxed in), the same engine as
         the Redact recipe's convert step and Media > Convert to MP4/MKV (Rules). The H.264 re-encode is
         only Media > Convert to MP4 (H.264), chosen on purpose. Additive to the loaded list."""
-        self._convert_with_rules(self._pick_videos_to_convert("Import and Convert", IMPORTABLE_EXTENSIONS))
+        # .mp4/.mkv/.m4v are offered too: a file whose container does not match its extension (an .mp4 that is really
+        # an FLV) is converted despite it, a genuine MP4/MKV simply reports "nothing to do" (core/container_check.py).
+        self._convert_with_rules(self._pick_videos_to_convert(
+            "Import and Convert", set(IMPORTABLE_EXTENSIONS) | set(SUPPORTED_EXTENSIONS) | {".m4v"},
+        ))
 
     def _pick_videos_to_convert(self, title: str, extensions) -> list[str]:
         extensions_filter = " ".join(f"*{ext}" for ext in sorted(extensions))
