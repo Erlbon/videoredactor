@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-17#22 -- Deep scan no longer crashes on big files
+
+- Fixed: **Check Files with Deep scan crashed ('Something went wrong ... OverflowError: argument 4 overflowed') on a file over 2 GB.** The progress bar counted bytes and Qt's progress dialog only takes numbers up to 2,147,483,647. The shared progress helper (redactor_common 2026-10-17#13) now scales large totals; regression test in tests/test_deep_scan_big_files.py.
+
 ## 2026-10-17#21 -- An audio-track selector in the Player, and "Play this track" in Set Track Language
 
 Owner request: to decide a track's language you have to hear it.
