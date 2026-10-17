@@ -41,6 +41,24 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from gui.lookup_file_header import add_file_header
+
+
+CHOICE_EPISODE = "episode"
+CHOICE_SHOW_ONLY = "show_only"
+CHOICE_SKIP = "skip"
+
+
+def picker_choice(dialog, accepted: bool) -> str:
+    """The decision of a picker dialog as one of the CHOICE_* words. Works for the real dialogs and for simple stand-ins:
+    a dialog that was not accepted is a skip; one without a `choice` that picked an episode is "episode"."""
+    if not accepted:
+        return CHOICE_SKIP
+    choice = getattr(dialog, "choice", None)
+    if choice in (CHOICE_EPISODE, CHOICE_SHOW_ONLY, CHOICE_SKIP):
+        return choice
+    return CHOICE_EPISODE if getattr(dialog, "selected_episode", None) is not None else CHOICE_SKIP
+
 
 class EpisodeSource:
     """Where a picker's seasons and episodes come from, plus the texts that differ per source.
@@ -76,7 +94,7 @@ def episode_label(ep) -> str:
 class EpisodePickerDialog(QDialog):
     def __init__(
         self, source: EpisodeSource, parent=None, initial_season: Optional[int] = None,
-        initial_episode: Optional[int] = None, title: Optional[str] = None,
+        initial_episode: Optional[int] = None, title: Optional[str] = None, context=None,
     ):
         super().__init__(parent)
         self.source = source
@@ -84,11 +102,16 @@ class EpisodePickerDialog(QDialog):
         self._initial_episode = initial_episode
         self.selected_season: Optional[int] = None
         self.selected_episode = None
+        # What the user decided for THIS file: "episode" (use the picked episode), "show_only" (the show's
+        # information but no season/episode data) or "skip" (the file stays completely untouched). Closing the
+        # window (Esc, X, Skip This File) is "skip", never "show_only".
+        self.choice = CHOICE_SKIP
 
         self.setWindowTitle(title or source.window_title)
         self.resize(450, 500)
 
         layout = QVBoxLayout(self)
+        add_file_header(self, layout, context)
         if source.heading:
             layout.addWidget(QLabel(f"<b>{source.heading}</b>"))
 
@@ -115,11 +138,20 @@ class EpisodePickerDialog(QDialog):
 
         button_row = QHBoxLayout()
         button_row.addStretch()
-        self.select_button = QPushButton("Use Selected Episode")
+        self.select_button = QPushButton("Use This Episode")
+        self.select_button.setToolTip(
+            "The file gets the show's information, the poster and ids, and this episode's details")
         self.select_button.setEnabled(False)
         self.select_button.clicked.connect(self._on_accept)
         button_row.addWidget(self.select_button)
-        self.cancel_button = QPushButton("Cancel")
+        self.show_only_button = QPushButton("Show Information Only")
+        self.show_only_button.setToolTip(
+            "For extras, 'Making of' or specials that are not in the episode list: the show's information, poster "
+            "and show id, but no season, episode, episode title or episode description")
+        self.show_only_button.clicked.connect(self._on_show_only)
+        button_row.addWidget(self.show_only_button)
+        self.cancel_button = QPushButton("Skip This File")
+        self.cancel_button.setToolTip("This file stays completely untouched (Esc does the same)")
         self.cancel_button.clicked.connect(self.reject)
         button_row.addWidget(self.cancel_button)
         layout.addLayout(button_row)
@@ -196,4 +228,17 @@ class EpisodePickerDialog(QDialog):
             return
         self.selected_season = self.season_combo.currentData()
         self.selected_episode = items[0].data(Qt.ItemDataRole.UserRole)
+        self.choice = CHOICE_EPISODE
         self.accept()
+
+    def _on_show_only(self) -> None:
+        self.selected_season = None
+        self.selected_episode = None
+        self.choice = CHOICE_SHOW_ONLY
+        self.accept()
+
+    def reject(self) -> None:  # Esc, the window's X and Skip This File: nothing is applied
+        self.choice = CHOICE_SKIP
+        self.selected_season = None
+        self.selected_episode = None
+        super().reject()

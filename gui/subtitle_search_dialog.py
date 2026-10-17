@@ -28,6 +28,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 
 from gui.lookup import run_lookup
+from gui.lookup_file_header import add_file_header, file_context
 from gui.lyrics_panel import LyricsPanel
 from core.video_metadata import ContentType
 from core.opensubtitles_client import (
@@ -58,7 +59,7 @@ class SubtitleSearchDialog(QDialog):
     `video` (a VideoFile) enables the Lyrics (LRCLIB) source; it is the default for a Music Video."""
 
     def __init__(self, video_path: str, language: str = "en", parent=None, video=None, lyrics_search=None,
-                 source: Optional[str] = None):
+                 source: Optional[str] = None, context=None):
         super().__init__(parent)
         self.video_path = video_path
         self.language = language
@@ -76,6 +77,8 @@ class SubtitleSearchDialog(QDialog):
         self.resize(560, 560)
 
         outer = QVBoxLayout(self)
+        if video is not None or context is not None:
+            add_file_header(self, outer, context if context is not None else file_context(video))
         source_row = QHBoxLayout()
         source_row.addWidget(QLabel("Source:"))
         self.source_combo = QComboBox()

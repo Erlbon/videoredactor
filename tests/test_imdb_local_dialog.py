@@ -163,7 +163,7 @@ class FakeSearch:
 
     seen = []
 
-    def __init__(self, mode, initial_query="", initial_year="", parent=None, source=None):
+    def __init__(self, mode, initial_query="", initial_year="", parent=None, source=None, existing=None, context=None):
         self.mode = mode
         FakeSearch.seen.append((mode, initial_query, initial_year))
         results = (source.tv if mode == "tv" else source.movies)(initial_query, initial_year or None)
@@ -186,7 +186,7 @@ def test_the_import_confirms_a_show_once_and_fills_episodes(window, monkeypatch,
     picks = []
 
     class Picker:
-        def __init__(self, db_path, series, name, initial_season=None, initial_episode=None, parent=None):
+        def __init__(self, db_path, series, name, initial_season=None, initial_episode=None, parent=None, context=None):
             picks.append((series, initial_season, initial_episode))
             self.selected_episode = imdb_local.find_episode(imdb_local.open_database(db_path), series,
                                                             initial_season, initial_episode)
@@ -257,3 +257,67 @@ def test_the_redact_env_carries_the_database_path(window, monkeypatch, tmp_path)
     window.table.selectAll()
     window._on_redact()
     assert seen["env"].imdb_local == str(tmp_path / "x.db")
+
+
+def _imdb_two_episodes(window):
+    for vf, name in zip(window.video_files, ("Harbor Lights (2005) S02E05.mkv", "Harbor Lights (2005) S01E01.mkv")):
+        vf.metadata.show_title = vf.metadata.title = ""
+        vf.path = vf.path.with_name(name)
+    window.table.selectAll()
+
+
+def test_imdb_skipped_file_is_untouched_and_show_only_has_no_episode_data(window, monkeypatch, imdb):
+    """2026-10-17: the show fields and content type used to land on the file before its episode was confirmed."""
+    import copy
+    from gui.episode_picker_dialog import CHOICE_EPISODE, CHOICE_SHOW_ONLY, CHOICE_SKIP
+    configure_db(imdb)
+    FakeSearch.seen = []
+    _imdb_two_episodes(window)
+    answers = iter([CHOICE_SKIP, CHOICE_SHOW_ONLY])
+    seen = []
+
+    class Picker:
+        def __init__(self, db_path, series, name, initial_season=None, initial_episode=None, parent=None, context=None):
+            seen.append((context.file.path.name, context.index, context.total))
+            self.choice = next(answers)
+            self.selected_episode = None
+            self.stop_requested = False
+
+        def exec(self):
+            return self.choice != CHOICE_SKIP
+
+    monkeypatch.setattr(mw, "TMDBSearchDialog", FakeSearch)
+    import gui.imdb_episode_picker_dialog as picker_module
+    monkeypatch.setattr(picker_module, "ImdbEpisodePickerDialog", Picker)
+    first, second = window.video_files
+    before = copy.deepcopy(first.metadata), first.dirty
+    window._on_import_imdb_local()
+    assert seen == [("Harbor Lights (2005) S02E05.mkv", 1, 2), ("Harbor Lights (2005) S01E01.mkv", 2, 2)]
+    assert (first.metadata, first.dirty) == before and first.metadata.content_type is not ContentType.TV
+    assert first.metadata.imdb_id == ""
+    assert second.metadata.show_title == "Harbor Lights" and second.metadata.content_type is ContentType.TV
+    assert second.metadata.episode_number is None and second.metadata.title == "" and second.dirty
+    window.undo_last_action()
+    assert not second.dirty and second.metadata.show_title == ""
+
+
+def test_imdb_stop_here_ends_the_queue(window, monkeypatch, imdb):
+    import copy
+    configure_db(imdb)
+    FakeSearch.seen = []
+    _imdb_two_episodes(window)
+
+    class Picker:
+        def __init__(self, *a, context=None, **k):
+            self.choice, self.selected_episode, self.stop_requested = "skip", None, True
+
+        def exec(self):
+            return False
+
+    monkeypatch.setattr(mw, "TMDBSearchDialog", FakeSearch)
+    import gui.imdb_episode_picker_dialog as picker_module
+    monkeypatch.setattr(picker_module, "ImdbEpisodePickerDialog", Picker)
+    before = [(copy.deepcopy(vf.metadata), vf.dirty) for vf in window.video_files]
+    window._on_import_imdb_local()
+    assert [(vf.metadata, vf.dirty) for vf in window.video_files] == before
+    assert "stopped: 2 file(s) not asked" in window.status_bar.currentMessage()

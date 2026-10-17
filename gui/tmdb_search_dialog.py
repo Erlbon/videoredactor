@@ -23,6 +23,7 @@ from PyQt6.QtCore import Qt
 
 from core.config import get_setting, set_setting
 from gui.lookup import run_lookup
+from gui.lookup_file_header import add_file_header
 from gui.tmdb_attribution import TmdbAttributionFooter
 from core.tmdb_client import (
     search_movies, search_tv, MovieCandidate, TVCandidate, TMDBError,
@@ -66,10 +67,14 @@ class TMDBSearchDialog(QDialog):
     `selected_how` is then "manual" (else "title"). With a poster-capable source the dialog also has the "Save the
     poster in the file" box (`save_poster`) and "Accept a landscape cover when there is no poster"
     (`accept_landscape`, off by default).
+
+    `context` (gui.lookup_file_header.FileContext): the file being looked up, shown as a header (file x of N, full
+    name, what was parsed from it, ids it already has); in a batch it adds Skip This File / Stop Here
+    (`stop_requested`). Cancel, Esc and X always mean "this file is skipped".
     """
 
     def __init__(self, mode: str, initial_query: str = "", initial_year: str = "", parent=None,
-                 source: Optional[SearchSource] = None, existing: Optional[tuple] = None):
+                 source: Optional[SearchSource] = None, existing: Optional[tuple] = None, context=None):
         super().__init__(parent)
         self.mode = mode  # 'movie' or 'tv'
         self.source = source  # None: TMDB
@@ -84,6 +89,7 @@ class TMDBSearchDialog(QDialog):
         self.resize(500, 500)
 
         layout = QVBoxLayout(self)
+        add_file_header(self, layout, context)  # which file this is (gui/lookup_file_header.py)
 
         if source is not None and source.note:
             note = QLabel(source.note)

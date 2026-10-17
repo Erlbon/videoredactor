@@ -36,6 +36,7 @@ from core.scene_lookup import (
 )
 from core.video_file import VideoFile
 from gui.lookup import CANCELLED, run_cancellable_lookup
+from gui.lookup_file_header import add_file_header, file_context
 
 HEADERS = ["Match", "Title", "Studio", "Date", "Performers"]
 COL_MATCH, COL_TITLE, COL_STUDIO, COL_DATE, COL_PERFORMERS = range(5)
@@ -120,7 +121,7 @@ class SceneSearchDialog(QDialog):
     if dialog.exec(): result, save_cover = dialog.selected_result, dialog.save_cover"""
 
     def __init__(self, source: SceneSource, video: VideoFile, parent=None,
-                 open_api_keys: Optional[Callable[[], None]] = None, auto_search: bool = True):
+                 open_api_keys: Optional[Callable[[], None]] = None, auto_search: bool = True, context=None):
         super().__init__(parent)
         self.source = source
         self.video = video
@@ -136,6 +137,7 @@ class SceneSearchDialog(QDialog):
         self.resize(820, 600)
 
         layout = QVBoxLayout(self)
+        add_file_header(self, layout, context if context is not None else file_context(video))
         self.privacy_label = QLabel(PRIVACY_NOTE.format(name=source.name))
         self.privacy_label.setWordWrap(True)
         self.privacy_label.setStyleSheet("color: gray;")

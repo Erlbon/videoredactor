@@ -117,6 +117,8 @@ from redactor_common.core.version import REDACTOR_COMMON_REPO_URL, REDACTOR_COMM
 from gui.lookup import run_lookup
 from gui.tag_panel import TagPanel, FIELD_LABELS
 from gui.tmdb_search_dialog import SearchSource, TMDBSearchDialog
+from gui.episode_picker_dialog import CHOICE_EPISODE, CHOICE_SHOW_ONLY, CHOICE_SKIP, picker_choice
+from gui.lookup_file_header import file_context
 from gui.tmdb_episode_picker_dialog import TVEpisodePickerDialog
 from gui.tmdb_attribution import AppCreditsDialog
 from gui.tvdb_search_dialog import TVDBSearchDialog
@@ -2008,6 +2010,7 @@ class MainWindow(QMainWindow):
     def _import_tmdb_movies(self, files: list, skipped_load_errors: int) -> None:
         imported = 0
         skipped_no_match = 0
+        not_asked = 0
         poster_staged = 0
         fetch_failures: list[tuple] = []
         stages: dict[int, SourceStage] = {}
@@ -2023,9 +2026,14 @@ class MainWindow(QMainWindow):
                         f"TMDB movie {ref.id}") if ref is not None else None
             dialog = TMDBSearchDialog(
                 mode="movie", initial_query=guess.title, initial_year=guess.year or "",
-                parent=self, **({"existing": existing} if existing else {}),
+                parent=self, context=file_context(vf, index + 1, len(files)),
+                **({"existing": existing} if existing else {}),
             )
-            if not dialog.exec() or dialog.selected_candidate is None:
+            accepted = dialog.exec()
+            if getattr(dialog, "stop_requested", False):
+                not_asked = len(files) - index  # Stop Here: this file and the rest are not touched
+                break
+            if not accepted or dialog.selected_candidate is None:
                 skipped_no_match += 1
                 continue
             candidate = dialog.selected_candidate
@@ -2069,6 +2077,8 @@ class MainWindow(QMainWindow):
             parts.append(f"{poster_staged} poster(s) will be embedded on Save")
         if skipped_no_match:
             parts.append(f"{skipped_no_match} skipped (no match confirmed)")
+        if not_asked:
+            parts.append(f"stopped: {not_asked} file(s) not asked, untouched")
         if skipped_load_errors:
             parts.append(f"{skipped_load_errors} skipped (load errors)")
         if fetch_failures:
@@ -2086,7 +2096,8 @@ class MainWindow(QMainWindow):
         existing = (TVCandidate(int(show_id), f"TMDB show {show_id}", "",
                                 "The id this file already carries; its details are fetched when you use it.", None),
                     f"TMDB show {show_id}") if show_id else None
-        dialog = TMDBSearchDialog(mode="tv", initial_query=guess.title, parent=self, **({"existing": existing} if existing else {}))
+        dialog = TMDBSearchDialog(mode="tv", initial_query=guess.title, parent=self, context=file_context(files[0]),
+                                  **({"existing": existing} if existing else {}))
         if not dialog.exec() or dialog.selected_candidate is None:
             return
         candidate = dialog.selected_candidate
@@ -2108,33 +2119,34 @@ class MainWindow(QMainWindow):
                 accept_landscape=dialog.accept_landscape, errors=(TMDBError,),
             )
 
-        self._push_undo("TMDB Import", files)
-        for vf in files:
-            vf.metadata.content_type = ContentType.TV
-            for field_name, value in show_details.items():
-                setattr(vf.metadata, field_name, value)
-            vf.dirty = True
-
-        # Episode-level details still need per-file confirmation --
-        # each episode genuinely is different, so this deliberately
-        # doesn't try to skip the picker even for files that already
-        # have season/episode numbers set from some other source (e.g.
-        # Parse Filename to Metadata run earlier) -- matching this
-        # project's consistent "always confirm explicitly, never
-        # auto-apply" principle for anything that writes to a file.
+        # NOTHING is written to a file until THAT file is confirmed (2026-10-17: the show-level fields, the poster and
+        # the show id used to go onto every selected file before any per-file question, so a file the owner skipped
+        # still got them). The show data is fetched once above and applied per file, at the moment of its choice:
+        #   Use This Episode      the show-level fields, poster and ids + the episode's details and ids
+        #   Show Information Only the show-level fields, poster and show-level ids, no season/episode data
+        #   Skip This File        (also Esc / X / Cancel) the file stays completely untouched
+        # Each file is confirmed by hand, even one that already has season/episode numbers: "always confirm
+        # explicitly, never auto-apply" for anything that writes to a file.
         episode_failures: list[tuple] = []
-        episodes_set = 0
-        episode_of: dict[int, tuple[int, int]] = {}
+        decided: list[tuple] = []  # (file, season or None, episode or None, episode details)
+        skipped = not_asked = 0
         for index, vf in enumerate(files):
-            # Parsed per-file (not reused from the show-level `guess`
-            # above) since each episode's own filename is what carries
-            # its season/episode number -- e.g. "Show S02E04.mkv".
+            # Parsed per-file since each episode's own file name carries its season/episode number.
             file_guess = parse_release_name(vf.path.stem)
             episode_dialog = TVEpisodePickerDialog(
                 candidate.tmdb_id, initial_season=file_guess.season,
-                initial_episode=file_guess.episode, parent=self,
+                initial_episode=file_guess.episode, parent=self, context=file_context(vf, index + 1, len(files)),
             )
-            if not episode_dialog.exec() or episode_dialog.selected_episode is None:
+            accepted = episode_dialog.exec()
+            if getattr(episode_dialog, "stop_requested", False):
+                not_asked = len(files) - index  # this file and the rest stay untouched
+                break
+            choice = picker_choice(episode_dialog, accepted)
+            if choice == CHOICE_SKIP:
+                skipped += 1
+                continue
+            if choice == CHOICE_SHOW_ONLY:
+                decided.append((vf, None, None, {}))
                 continue
             try:
                 episode_details = run_lookup(
@@ -2142,30 +2154,41 @@ class MainWindow(QMainWindow):
                     episode_dialog.selected_episode.episode_number,
                 )
             except TMDBError as e:
-                episode_failures.append((vf, str(e)))
+                episode_failures.append((vf, str(e)))  # confirmed but not fetched: the file stays untouched
                 continue
-            for field_name, value in episode_details.items():
-                setattr(vf.metadata, field_name, value)
-            episode_of[index] = (episode_dialog.selected_season, episode_dialog.selected_episode.episode_number)
-            episodes_set += 1
+            decided.append((vf, episode_dialog.selected_season, episode_dialog.selected_episode.episode_number,
+                            episode_details))
 
-        # The source ids (the episode when one was chosen, else the show) and the one poster for all the files.
-        stages = {}
-        for index, vf in enumerate(files):
-            season, episode = episode_of.get(index, (None, None))
-            stages[index] = SourceStage(
-                values=tmdb_values("tv", candidate.tmdb_id, season, episode, imdb_id=imdb_id, tvdb_id=tvdb_id,
-                                   how=dialog.selected_how),
-                poster=poster,
-            )
-        apply_sources(self, files, stages)
+        if decided:
+            confirmed = [item[0] for item in decided]
+            self._push_undo("TMDB Import", confirmed)  # only the files that change; skipped ones are not in it
+            stages = {}
+            for index, (vf, season, episode, episode_details) in enumerate(decided):
+                vf.metadata.content_type = ContentType.TV
+                for field_name, value in show_details.items():
+                    setattr(vf.metadata, field_name, value)
+                for field_name, value in episode_details.items():
+                    setattr(vf.metadata, field_name, value)
+                vf.dirty = True
+                # The source ids (the episode when one was chosen, else the show) and the poster, for this file only.
+                stages[index] = SourceStage(
+                    values=tmdb_values("tv", candidate.tmdb_id, season, episode, imdb_id=imdb_id, tvdb_id=tvdb_id,
+                                       how=dialog.selected_how),
+                    poster=poster,
+                )
+            apply_sources(self, confirmed, stages)
 
         self._refresh_table_rows()
         if self._selected_video_files():
             self._on_selection_changed()
 
-        parts = [f"Imported \"{candidate.name}\" show-level metadata for {len(files)} file(s)", f"{episodes_set} episode(s) matched"]
-        if poster is not None:
+        episodes_set = sum(1 for item in decided if item[1] is not None)
+        show_only = len(decided) - episodes_set
+        parts = [f"TMDB \"{candidate.name}\": {episodes_set} episode(s) matched", f"{show_only} show information only",
+                 f"{skipped + len(episode_failures) + not_asked} skipped"]
+        if not_asked:
+            parts.append(f"stopped, {not_asked} file(s) not asked")
+        if poster is not None and decided:
             parts.append("poster will be embedded on Save")
         if poster_error:
             parts.append(f"poster problem: {poster_error}")
@@ -2243,7 +2266,7 @@ class MainWindow(QMainWindow):
                  "title, year, genres and (for shows) episode data are filled in.\n\n" + imdb_import.ATTRIBUTION,
             switchable=True,
         )
-        imported = episodes_set = skipped_no_match = 0
+        imported = episodes_set = skipped_no_match = not_asked = 0
         shows: dict[str, object] = {}  # a show confirmed once is reused for the rest of the batch
         self._push_undo("IMDb Import", files)
         stages: dict[int, SourceStage] = {}
@@ -2263,23 +2286,38 @@ class MainWindow(QMainWindow):
                     is_tv = isinstance(found_local, imdb_local.ImdbTVCandidate)
                 dialog = TMDBSearchDialog(
                     mode="tv" if is_tv else "movie", initial_query=title, initial_year=year,
-                    parent=self, source=source, **({"existing": existing} if existing else {}),
+                    parent=self, source=source, context=file_context(vf, index + 1, len(files)),
+                    **({"existing": existing} if existing else {}),
                 )
-                if not dialog.exec() or dialog.selected_candidate is None:
+                accepted = dialog.exec()
+                if getattr(dialog, "stop_requested", False):
+                    not_asked = len(files) - index
+                    break
+                if not accepted or dialog.selected_candidate is None:
                     skipped_no_match += 1
                     continue
                 candidate = dialog.selected_candidate
             how = "manual" if getattr(dialog, "selected_how", "title") == "manual" else "title"
             if isinstance(candidate, imdb_local.ImdbTVCandidate):
                 shows[normalize_words(title)] = shows[normalize_words(candidate.name)] = candidate
-                vf.metadata.content_type = ContentType.TV
-                self._apply_imdb_fields(vf, imdb_local.show_fields(candidate))
+                # Nothing is written to the file until THIS file is confirmed in the picker (2026-10-17).
                 episode_dialog = ImdbEpisodePickerDialog(
                     path, candidate.tconst, candidate.name, initial_season=vf.metadata.season_number or guess.season,
                     initial_episode=vf.metadata.episode_number or guess.episode, parent=self,
+                    context=file_context(vf, index + 1, len(files)),
                 )
+                accepted = episode_dialog.exec()
+                if getattr(episode_dialog, "stop_requested", False):
+                    not_asked = len(files) - index
+                    break
+                choice = picker_choice(episode_dialog, accepted)
+                if choice == CHOICE_SKIP:
+                    skipped_no_match += 1
+                    continue
+                vf.metadata.content_type = ContentType.TV
+                self._apply_imdb_fields(vf, imdb_local.show_fields(candidate))
                 imdb_ref = candidate.imdb_id
-                if episode_dialog.exec() and episode_dialog.selected_episode is not None:
+                if choice == CHOICE_EPISODE:
                     self._apply_imdb_fields(vf, imdb_local.episode_fields(episode_dialog.selected_episode), replace_date=True)
                     episodes_set += 1
                     imdb_ref = getattr(episode_dialog.selected_episode, "imdb_id", "") or imdb_ref
@@ -2300,6 +2338,8 @@ class MainWindow(QMainWindow):
             parts.append(f"{episodes_set} episode(s) matched")
         if skipped_no_match:
             parts.append(f"{skipped_no_match} skipped (no match confirmed)")
+        if not_asked:
+            parts.append(f"stopped: {not_asked} file(s) not asked, untouched")
         if skipped_load_errors:
             parts.append(f"{skipped_load_errors} skipped (load errors)")
         self.status_bar.showMessage(", ".join(parts))
@@ -2315,25 +2355,23 @@ class MainWindow(QMainWindow):
                     continue
             setattr(vf.metadata, name, value)
 
-    def _apply_tvdb_episode_details(self, tvdb_id: int, details: dict, filename_stem: str = "") -> None:
-        """Follow-up step after a TVDB show match: prompt for season +
-        episode, then merge episode-level fields into `details` in
-        place. Deliberate partial-import-on-cancel behavior -- if the
-        user cancels the episode picker, `details` is left as
-        show-level-only rather than aborting the whole import. Uses
-        TVDBEpisodePickerDialog (which fetches all episodes once, no
-        per-season network call) rather than the TMDB picker.
+    def _apply_tvdb_episode_details(self, tvdb_id: int, details: dict, filename_stem: str = "", context=None) -> str:
+        """Follow-up step after a TVDB show match: the season + episode picker with its three explicit choices, and
+        the episode-level fields merged into `details` in place when "Use This Episode" is chosen. Returns the
+        choice: "episode", "show_only" (`details` stays show-level) or "skip" (Skip This File, Esc, X, or the
+        episode could not be loaded: the caller must then leave the file completely untouched). Uses
+        TVDBEpisodePickerDialog (which fetches all episodes once, no per-season network call).
 
-        `filename_stem`, when given, is parsed for a season/episode
-        number to pre-select in the picker (see core.release_name_parser).
-        """
+        `filename_stem`, when given, is parsed for a season/episode number to pre-select in the picker (see
+        core.release_name_parser); `context` is the file header (gui/lookup_file_header.py)."""
         file_guess = parse_release_name(filename_stem)
         episode_dialog = TVDBEpisodePickerDialog(
             tvdb_id, initial_season=file_guess.season,
-            initial_episode=file_guess.episode, parent=self,
+            initial_episode=file_guess.episode, parent=self, context=context,
         )
-        if not episode_dialog.exec() or episode_dialog.selected_episode is None:
-            return
+        choice = picker_choice(episode_dialog, episode_dialog.exec())
+        if choice != CHOICE_EPISODE:
+            return choice
 
         try:
             episode_details = run_lookup(
@@ -2342,9 +2380,10 @@ class MainWindow(QMainWindow):
             )
         except TVDBError as e:
             QMessageBox.warning(self, "Could Not Load Episode Details", str(e))
-            return
+            return CHOICE_SKIP
 
         details.update(episode_details)
+        return CHOICE_EPISODE
 
     def _on_import_tvdb(self) -> None:
         """Import metadata from TheTVDB for exactly one selected file --
@@ -2381,7 +2420,8 @@ class MainWindow(QMainWindow):
         existing = (TVCandidate(int(held.id), f"TheTVDB series {held.id}", "",
                                 "The id this file already carries; its details are fetched when you use it.", None),
                     f"TheTVDB series {held.id}") if held is not None else None
-        dialog = TVDBSearchDialog(initial_query=guess.title, parent=self, **({"existing": existing} if existing else {}))
+        dialog = TVDBSearchDialog(initial_query=guess.title, parent=self, context=file_context(vf),
+                                  **({"existing": existing} if existing else {}))
         if not dialog.exec() or dialog.selected_candidate is None:
             return
         candidate = dialog.selected_candidate
@@ -2390,9 +2430,12 @@ class MainWindow(QMainWindow):
         # until the fetch has succeeded.
         try:
             details = run_lookup(self, get_series_details, candidate.tvdb_id)
-            self._apply_tvdb_episode_details(candidate.tvdb_id, details, vf.path.stem)
+            choice = self._apply_tvdb_episode_details(candidate.tvdb_id, details, vf.path.stem, context=file_context(vf))
         except TVDBError as e:
             QMessageBox.warning(self, "TheTVDB Fetch Failed", str(e))
+            return
+        if choice == CHOICE_SKIP:
+            self.status_bar.showMessage("TheTVDB: file skipped, nothing changed")
             return
 
         self._push_undo("TheTVDB Import", [vf])

@@ -37,5 +37,5 @@ class TVDBSearchDialog(TMDBSearchDialog):
     if dialog.exec(): selected = dialog.selected_candidate
     """
 
-    def __init__(self, initial_query: str = "", parent=None, existing=None):
-        super().__init__("tv", initial_query, parent=parent, source=TVDB_SOURCE, existing=existing)
+    def __init__(self, initial_query: str = "", parent=None, existing=None, context=None):
+        super().__init__("tv", initial_query, parent=parent, source=TVDB_SOURCE, existing=existing, context=context)

@@ -49,8 +49,9 @@ class ImdbEpisodePickerDialog(EpisodePickerDialog):
 
     def __init__(
         self, db_path: str, series: int, series_name: str = "", initial_season: Optional[int] = None,
-        initial_episode: Optional[int] = None, parent=None,
+        initial_episode: Optional[int] = None, parent=None, context=None,
     ):
-        super().__init__(ImdbEpisodeSource(db_path, series, series_name), parent, initial_season, initial_episode)
+        super().__init__(ImdbEpisodeSource(db_path, series, series_name), parent, initial_season, initial_episode,
+                         context=context)
         self.db_path = db_path
         self.series = series

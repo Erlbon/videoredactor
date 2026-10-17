@@ -22,6 +22,7 @@ from core.lookup_sources import scene_values
 from core.scene_lookup import CONTENT_TYPE, SceneLookupError, SceneResult, scene_fields
 from core.video_metadata import ContentType
 from gui.scene_search_dialog import SOURCE_FACTORIES, SceneSearchDialog, SceneSource
+from gui.lookup_file_header import file_context
 from gui.source_apply import SourceStage, apply_stage, fetch_prepared_poster, review_label
 from gui.tag_panel import FIELD_LABELS
 
@@ -49,8 +50,12 @@ def run_scene_lookup(window, key: str, source_factory: Optional[Callable[[], Sce
 
     picks: dict[int, tuple[SceneResult, bool, bool]] = {}
     for index, vf in enumerate(files):
-        dialog = dialog_class(source, vf, parent=window, open_api_keys=window._on_add_external_apis)
-        if dialog.exec() and dialog.selected_result is not None:
+        dialog = dialog_class(source, vf, parent=window, open_api_keys=window._on_add_external_apis,
+                              context=file_context(vf, index + 1, len(files)))
+        accepted = dialog.exec()
+        if getattr(dialog, "stop_requested", False):
+            break  # Stop Here: this file and the rest are not touched (the picks so far still go to the review)
+        if accepted and dialog.selected_result is not None:
             picks[index] = (dialog.selected_result, dialog.save_cover, dialog.accept_landscape)
         elif not source.has_key():
             break  # no key and the dialog was closed: asking again for every other file would only repeat that

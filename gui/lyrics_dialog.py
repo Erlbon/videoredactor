@@ -22,11 +22,12 @@ from typing import Callable, Optional
 
 from PyQt6.QtWidgets import QDialog, QHBoxLayout, QPushButton, QVBoxLayout
 
+from gui.lookup_file_header import add_file_header, file_context
 from gui.lyrics_panel import LyricsPanel
 
 
 class LyricsDialog(QDialog):
-    def __init__(self, video, parent=None, search: Optional[Callable] = None):
+    def __init__(self, video, parent=None, search: Optional[Callable] = None, context=None):
         super().__init__(parent)
         self.video = video
         self.selected_match = None
@@ -39,6 +40,7 @@ class LyricsDialog(QDialog):
         self.resize(620, 720)
 
         outer = QVBoxLayout(self)
+        add_file_header(self, outer, context if context is not None else file_context(video))
         self.panel = LyricsPanel(video, search=search, text_mode=True)
         self.panel.selection_changed.connect(self._update_button)
         self.panel.save_lyrics_box.toggled.connect(self._update_button)

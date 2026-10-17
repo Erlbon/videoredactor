@@ -41,7 +41,7 @@ class TVEpisodePickerDialog(EpisodePickerDialog):
 
     def __init__(
         self, tmdb_id: int, initial_season: Optional[int] = None,
-        initial_episode: Optional[int] = None, parent=None,
+        initial_episode: Optional[int] = None, parent=None, context=None,
     ):
-        super().__init__(TmdbEpisodeSource(tmdb_id), parent, initial_season, initial_episode)
+        super().__init__(TmdbEpisodeSource(tmdb_id), parent, initial_season, initial_episode, context=context)
         self.tmdb_id = tmdb_id
