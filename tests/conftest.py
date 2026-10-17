@@ -8,6 +8,15 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _isolated_save_log(monkeypatch, tmp_path):
+    """With History on, Save All appends one line to save_log.txt next to the crash log (the project folder when
+    running from source): tests point the crash log at a temporary folder so no test writes there."""
+    from core import crash_log
+
+    monkeypatch.setattr(crash_log, "log_path", lambda: str(tmp_path / "logs" / "videoredactor_crash.log"))
+
+
+@pytest.fixture(autouse=True)
 def _no_install_dir_tool_lookup(monkeypatch):
     import core.external_tools as external_tools
 

@@ -17,3 +17,6 @@ videoredactor_rename_log.json
 
 # Tools > Create Notes' lookup cache -- per-user data, next to the settings.
 videoredactor_notes_cache.sqlite*
+
+# Written next to the crash log when History is on (one line per Save All)
+save_log.txt

@@ -417,4 +417,4 @@ def test_old_save_keys_trigger_save_all(window, monkeypatch):
 
 def test_save_all_with_nothing_changed_says_so(window):
     window.actions_by_key["save_all"].trigger()
-    assert window.status_bar.currentMessage() == "Nothing to save -- no unsaved changes"
+    assert window.status_bar.currentMessage() == "Nothing to save: no file has unsaved changes"

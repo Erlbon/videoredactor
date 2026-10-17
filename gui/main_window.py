@@ -55,6 +55,9 @@ from core.redact_steps import (
     original_fate_text, pin_patterns, recipe_is_saved, save_recipe,
 )
 from core import conversion_plan, conversion_run, history, library_safety
+from core import crash_log as app_crash_log
+from redactor_common.core.save_report import SaveReport, append_save_log, files_still_dirty, nothing_to_save_reason
+from redactor_common.gui import crash_dialog
 from core.ffmpeg_backend import (
     IMPORTABLE_EXTENSIONS, kill_running_ffmpeg, remux_to_mkv, remux_to_mp4,
     transcode_to_mp4, verify_remux,
@@ -1871,25 +1874,35 @@ class MainWindow(QMainWindow):
     # --- Saving ------------------------------------------------------------
 
     def _on_save_all(self) -> None:
-        # "Hit Save" implies "I meant to Apply first" -- flush any
-        # typed-but-not-yet-Applied panel edits onto the selected file(s)
-        # before saving, so Save never silently writes stale data just
-        # because Apply wasn't clicked separately. Done before computing the
-        # dirty list, since applying pending panel changes can itself be what
-        # makes a file dirty.
-        self.tag_panel.apply_pending_changes()
+        """File > Save All. After EVERY Save All the status bar says what happened (counts, or why nothing was
+        saved), a box lists each failed or skipped file with its reason, and an unexpected error is shown in the
+        "Something went wrong" box and the status bar."""
+        try:
+            # "Hit Save" implies "I meant to Apply first" -- flush any
+            # typed-but-not-yet-Applied panel edits onto the selected file(s)
+            # before saving, so Save never silently writes stale data just
+            # because Apply wasn't clicked separately. Done before computing the
+            # dirty list, since applying pending panel changes can itself be what
+            # makes a file dirty.
+            self.tag_panel.apply_pending_changes()
 
-        dirty = [vf for vf in self.video_files if vf.dirty]
-        if not dirty:
-            self.status_bar.showMessage("Nothing to save -- no unsaved changes")
-            return
-        saveable, skipped = self._split_saveable(dirty)
-        if not saveable:
-            self.status_bar.showMessage(
-                f"Nothing to save -- all {len(skipped)} changed file(s) have load errors"
-            )
-            return
-        self._save_files(saveable, skipped_error_count=len(skipped))
+            dirty = [vf for vf in self.video_files if vf.dirty]
+            saveable, skipped = self._split_saveable(dirty)
+            if not saveable:
+                reason = nothing_to_save_reason(len(dirty), [vf.path.name for vf in skipped])
+                self.status_bar.showMessage(reason)
+                append_save_log(os.path.dirname(app_crash_log.log_path()), history.history_enabled(),
+                                SaveReport(nothing=reason))
+                return
+            self._skipped_names_for_report = [vf.path.name for vf in skipped]
+            self._save_files(saveable, skipped_error_count=len(skipped))
+        except Exception as exc:  # noqa: BLE001 - never a silent Save All
+            crash_dialog.report_exception(exc, "Save All stopped because of an unexpected error")
+            self.status_bar.showMessage(f"Save All stopped because of an unexpected error: {exc}")
+            try:
+                self._refresh_table_rows()
+            except Exception:  # noqa: BLE001 - the report above matters more than a repaint
+                pass
 
     def _split_saveable(self, files: list[VideoFile]) -> tuple[list[VideoFile], list[VideoFile]]:
         """Split into (saveable, skipped). A file with a load_error is
@@ -1902,55 +1915,55 @@ class MainWindow(QMainWindow):
         return saveable, skipped
 
     def _save_files(self, files: list[VideoFile], skipped_error_count: int = 0) -> None:
-        """Save the given files, reporting success/failure counts.
+        """Save the given files, then report the result.
 
         Every file in `files` is attempted (no skip-on-first-error) so one
-        bad file doesn't block the rest of the batch from saving -- same
-        reasoning as the epub tool's per-book save-error tracking rather
-        than an all-or-nothing batch.
+        bad file doesn't block the rest of the batch from saving -- also when a file raises something
+        unexpected (that file counts as failed with the error text, the error box shows the traceback, and
+        the loop goes on). Shows redactor_common's shared run_with_progress helper (each vf.save() does a
+        write PLUS an immediate verify-read-back).
 
-        Shows redactor_common's shared run_with_progress helper -- each
-        vf.save() now does a write PLUS an immediate verify-read-back
-        (see core/video_file.py), roughly doubling the I/O cost per
-        file since that safety net was added, which made a multi-file
-        save look exactly as "frozen" as a heavy folder load used to
-        before a dialog existed here. Threshold is now a plain item
-        count (3+), matching mp3/cbz's own save dialogs, rather than
-        this project's previous bespoke setMinimumDuration(400) -- one
-        less "arrived at independently" divergence between the family's
-        save flows.
+        The report: status line with the counts, a box listing each failed or skipped file with its reason, and
+        a check that no file is left marked unsaved without an error (a bug, named instead of silent).
         """
-        succeeded = 0
-        failed: list[VideoFile] = []
+        names = getattr(self, "_skipped_names_for_report", None)
+        self._skipped_names_for_report = None
+        if names is None or len(names) != skipped_error_count:
+            names = [f"file {i + 1}" for i in range(skipped_error_count)]
+        report = SaveReport(skipped_load_errors=list(names))
 
         def _step(vf: VideoFile, _index: int) -> None:
-            nonlocal succeeded
             vf.save()
             if vf.save_error:
-                failed.append(vf)
+                report.failed.append((vf.path.name, vf.save_error))
             else:
-                succeeded += 1
+                report.saved += 1
+
+        def _on_error(vf: VideoFile, exc: Exception) -> None:
+            vf.save_error = f"unexpected error: {exc}"
+            report.failed.append((vf.path.name, vf.save_error))
+            crash_dialog.report_exception(exc, "Save All hit an unexpected error")
 
         cancelled = not run_with_progress(
             self, files, _step, "Saving files...",
             threshold=3,
             label_for=lambda vf: f"Saving {vf.path.name}...",
+            on_error=_on_error,
         )
 
         self._refresh_table_rows()
 
-        skip_note = f", {skipped_error_count} skipped (load errors)" if skipped_error_count else ""
-        not_attempted = len(files) - succeeded - len(failed)
-        cancel_note = f", cancelled -- {not_attempted} file(s) not yet attempted" if cancelled else ""
-
-        journal_note = _journal_problem_note()
-        if failed:
-            msg = f"Saved {succeeded} file(s), {len(failed)} failed{skip_note}{cancel_note}{journal_note}"
-            self.status_bar.showMessage(msg)
-            details = _error_details([f"{vf.path.name}: {vf.save_error}" for vf in failed])
-            QMessageBox.warning(self, "Some files failed to save", details)
+        if cancelled:
+            report.not_attempted = len(files) - report.saved - len(report.failed)
         else:
-            self.status_bar.showMessage(f"Saved {succeeded} file(s){skip_note}{cancel_note}{journal_note}")
+            failed_names = {name for name, _reason in report.failed}
+            report.still_dirty = files_still_dirty(
+                files, lambda vf: vf.dirty and not vf.stamp_only_dirty, lambda vf: vf.path.name in failed_names,
+                lambda vf: vf.path.name)
+        self.status_bar.showMessage(report.status_line() + _journal_problem_note())
+        if report.has_problems:
+            QMessageBox.warning(self, "Some files failed to save", _error_details(report.problem_lines()))
+        append_save_log(os.path.dirname(app_crash_log.log_path()), history.history_enabled(), report)
 
     def _count_dirty(self) -> int:
         return sum(1 for vf in self.video_files if vf.dirty)

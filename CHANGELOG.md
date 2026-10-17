@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-10-17#18 -- Save All never stops silently: a visible error box and a clear result
+
+Reported by the owner: Save All sometimes seemed to do nothing, error boxes were unclear and no crash log was visible.
+Shared part: redactor_common 2026-10-17#11 (gui/crash_dialog.py, core/save_report.py, run_with_progress(on_error=)); all four Redactor apps get it.
+- Fix (probably the cause): **an exception from one file's save ended the whole Save All silently** (run_with_progress let it escape and stop the loop; the crash log was the only trace). Now that file counts as failed with the error text and the other files are still saved.
+- New: **an unexpected error is shown, not just logged**: one "Something went wrong" box with the message, the full traceback under Details, Copy Details, Open Crash Log Folder and the path of the crash log. Further errors while it is open are counted in it (it never stacks), the same traceback right after is only counted, and errors raised on worker threads are shown too. The crash log is written as before.
+- New: **Save All always says what it did**. The status bar gives the counts (saved N, failed N, skipped N with load errors) or the reason nothing was saved ("Nothing to save: no file has unsaved changes" / "all N changed file(s) have load errors: names"); a box lists each failed or skipped file with its reason; an unexpected exception is shown in the error box and the status bar. A file still marked unsaved after saving without an error is named in the report instead of staying silent.
+- Opt-in only: when History is switched on (Tools > History), one line per Save All (counts, no file names) is added to save_log.txt next to the crash log. Off by default, nothing is logged.
+- Tests with real MP4s: all clean, load errors only, a failing file, an exception in the middle (the other files still saved, the dialog shown), an exception outside the loop, the still-unsaved check, the opt-in log.
+
 ## 2026-10-17#17 -- Repair now saves pending changes first
 
 Found by the owner: applying the Porn content type and then running Repair silently skipped those files (the reason was only in the results).
