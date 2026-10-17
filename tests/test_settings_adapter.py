@@ -80,7 +80,8 @@ def test_values_are_normalised_to_json_types(ini):
     assert adapter.read_section("defaults") == {
         "zero_pad": True, "zero_pad_width": 3, "ascii_only": True, "auto_number_padding": 2}
     assert adapter.read_section("columns") == {
-        "order": ["filename", "title", "genre_tags"], "hidden": ["network", "studio"], "widths": {"title": 222}}
+        "order": ["filename", "title", "genre_tags"], "panel_order": [], "hidden": ["network", "studio"],
+        "widths": {"title": 222}}
     assert adapter.read_section("patterns")["history"] == ["%title%", "%show_title%, %title%"]
     assert adapter.read_section("redact")["recipe"] == RECIPE
     media = adapter.read_section("media")

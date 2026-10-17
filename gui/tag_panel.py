@@ -29,7 +29,9 @@ from core.controlled_vocab import (
     get_genre_options, get_language_options, parse_multi_value, serialize_multi_value,
 )
 from core.table_settings import is_column_visible, sanitize_hidden_fields
-from core.config import get_setting
+from core.config import get_setting, set_setting
+from redactor_common.core.field_order import decode_order, encode_order, merge_field_order
+from redactor_common.gui.field_order import FieldOrderController, FieldRow, reorder_form_rows
 from gui.multi_select_combo import MultiSelectComboBox
 from redactor_common.gui.collapsible_splitter import CollapseToggleButton
 from redactor_common.gui.image_pane import ImagePanelSplitter, ImagePreviewBox
@@ -90,6 +92,15 @@ MULTISELECT_FIELD_GETTERS = {
 }
 
 
+def load_field_order() -> list[str]:
+    """The user's side-panel field order, by field key ([] = the default order)."""
+    return decode_order(get_setting("panel", "field_order", ""))
+
+
+def save_field_order(order: list[str]) -> None:
+    set_setting("panel", "field_order", encode_order(order))
+
+
 class TagPanel(QWidget):
     """Emits fieldsChanged(dict) with only the fields the user actually
     touched -- mirrors the epub tool's <multiple values> handling: fields
@@ -105,6 +116,7 @@ class TagPanel(QWidget):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._inputs: dict[str, QWidget] = {}
+        self._labels: dict[str, QLabel] = {}
         self._touched: set[str] = set()
         self._current_filter: Optional[ContentType] = None
 
@@ -201,7 +213,23 @@ class TagPanel(QWidget):
         self.clear_fields_button.clicked.connect(self.clear_fields_requested.emit)
         outer.addWidget(self.clear_fields_button)
 
+        # Drag a field by its grip (redactor_common's field_order): the rows are only permuted, never rebuilt, so
+        # values, the "mixed" state and the touched markers stay with their field. The order is saved by field key
+        # ([panel] field_order in settings.ini) and applies to every Content Type filter (a filtered panel shows
+        # the relevant fields in the saved relative order).
+        self._field_order = FieldOrderController(
+            self.form_container,
+            get_rows=lambda: [FieldRow(k, [self._labels[k], w]) for k, w in self._inputs.items()],
+            apply_order=lambda order: reorder_form_rows(
+                self.form_layout, {k: (self._labels[k], w) for k, w in self._inputs.items()}, order),
+            default_order=lambda: list(FIELD_LABELS.keys()),
+            load_order=load_field_order, save_order=save_field_order,
+        )
         self.set_content_type_filter(None)  # builds the initial (all-fields) form
+
+    def reset_field_order(self) -> None:
+        """Back to the default field order (also: right-click a grip or the panel > Reset Field Order)."""
+        self._field_order.reset()
 
     def set_old_track_title(self, files: list) -> None:
         """The retired track title of the one selected file, read-only (only when it differs from the Title, so
@@ -297,6 +325,7 @@ class TagPanel(QWidget):
         while self.form_layout.rowCount():
             self.form_layout.removeRow(0)
         self._inputs.clear()
+        self._labels.clear()
         self._touched.clear()
 
         if content_type is None:
@@ -308,12 +337,18 @@ class TagPanel(QWidget):
         # The Lyrics COLUMN starts hidden (a whole song per cell), so its hidden state is not the panel's: the
         # field is part of every Music Video's panel.
         field_names = [f for f in field_names if f == "lyrics" or is_column_visible(f, hidden)]
+        # The user's saved order (by key), whatever the filter shows: relative order kept, a field the saved order
+        # has not seen goes where the default order puts it.
+        saved_order = merge_field_order(load_field_order(), list(FIELD_LABELS.keys()))
+        field_names.sort(key=lambda f: saved_order.index(f) if f in saved_order else len(saved_order))
 
         for field_name in field_names:
             label = FIELD_LABELS.get(field_name, field_name)
             widget = self._make_input_widget(field_name)
             self._inputs[field_name] = widget
-            self.form_layout.addRow(QLabel(label), widget)
+            self._labels[field_name] = QLabel(label)
+            self.form_layout.addRow(self._labels[field_name], widget)
+        self._field_order.refresh()  # grips for the rebuilt rows
 
     def _get_hidden_fields(self) -> set[str]:
         """Reads the exact same [table] hidden_columns setting.ini key

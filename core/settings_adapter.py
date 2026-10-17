@@ -262,8 +262,9 @@ SECTIONS: dict[str, tuple[str, bool, list[Key]]] = {
              _joined_list_codec(_UNIT_SEPARATOR, [], limit=MAX_PATTERN_HISTORY)),
         _key("move_pattern", "rename", "move_pattern", _str_codec()),
     ]),
-    "columns": ("Table columns (order, visibility, widths)", True, [
+    "columns": ("Table columns (order, visibility, widths) and side-panel field order", True, [
         _key("order", "table", "column_order", _joined_list_codec(",", [])),
+        _key("panel_order", "panel", "field_order", _joined_list_codec(",", [])),
         _key("hidden", "table", "hidden_columns", _hidden_columns_codec()),
         _key("widths", "table", "column_widths", _column_widths_codec()),
     ]),

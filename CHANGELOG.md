@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-17#15 -- Drag the side-panel fields into the order you want
+
+Shared part: redactor_common 2026-10-17#10 (core/field_order.py, gui/field_order.py); all four Redactor apps get the same facility.
+- New: **reorder the fields of the side panel** (Content Type, Title, Sort Title, ...): every field has a small grip at its left (drag it; tooltip "Drag to move this field"), and Alt+Up / Alt+Down in a field moves it too (never Ctrl+Alt). A line shows where it will land. Only the grip starts a drag, so typing and selecting in the fields is unaffected. Content Type may be moved too.
+- The order is saved by field key (settings.ini `[panel] field_order`), restored at start and is part of Export/Import Settings (the columns section). It applies to every Content Type: a filtered panel shows the relevant fields in your saved relative order, and a field added in a later version appears where the default order puts it. Right-click a grip or an empty part of the panel > **Reset Field Order** restores the default.
+- Values, the "mixed" state and the touched markers stay with their field, not the position (tested with real MP4s: reorder, edit two files, Save All, read back). Tab follows the new order.
+
 ## 2026-10-17#14 -- Deep scan and Cut Out Damaged Parts (Check Files)
 
 Found on the owner's real downloads: MP4s whose media data holds blocks of exactly 256 KiB of zero bytes (torrent pieces that never arrived). The index is fine, so Check Files said REPAIRABLE and the lossless Repair then refused ("the repaired copy didn't pass the check"); the files can't be fetched again.
