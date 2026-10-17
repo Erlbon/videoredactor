@@ -45,6 +45,7 @@ class FileContext:
     index: Optional[int] = None
     total: Optional[int] = None
     searching_for: str = ""
+    folder_name: str = ""  # the parent folder's name, set when the file name is generic (clip3) and the folder says more
 
     @property
     def is_batch(self) -> bool:
@@ -65,6 +66,11 @@ def searching_for_text(stem: str) -> str:
 
 
 def file_context(vf, index: Optional[int] = None, total: Optional[int] = None) -> FileContext:
+    from core.scene_lookup import search_choice_for
+
+    choice = search_choice_for(vf.path)
+    if choice.use_folder:  # a generic file name (clip3): the folder holds the name, say so in the header
+        return FileContext(vf, index, total, searching_for_text(choice.folder_name), choice.folder_name)
     return FileContext(vf, index, total, searching_for_text(vf.path.stem))
 
 
@@ -144,6 +150,11 @@ class LookupFileHeader(QWidget):
         self.details_label.setStyleSheet("color: gray;")
         self.details_label.setWordWrap(True)  # a long folder path wraps instead of widening the dialog
         layout.addWidget(self.details_label)
+
+        self.folder_label = QLabel(f"Folder: {context.folder_name}" if context.folder_name else "")
+        self.folder_label.setVisible(bool(context.folder_name))
+        self.folder_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(self.folder_label)
 
         self.searching_label = QLabel(f"Searching for: {context.searching_for}" if context.searching_for else "")
         self.searching_label.setVisible(bool(context.searching_for))

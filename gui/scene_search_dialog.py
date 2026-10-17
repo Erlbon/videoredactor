@@ -32,6 +32,9 @@ from core.config import get_setting, set_setting
 from core.source_tags import ref_in
 from core.scene_lookup import (
     KEY_HELP, MATCH_ID, TITLE_WARNING, FileHashes, SceneLookupError, SceneResult, file_hashes, md5_enabled,
+    folder_note,
+    prefer_part_number,
+    search_choice_for,
     search_text_for,
 )
 from core.video_file import VideoFile
@@ -151,7 +154,10 @@ class SceneSearchDialog(QDialog):
         layout.addWidget(self.key_label)
         layout.addWidget(self.key_button)
 
-        text, year = search_text_for(video.path.stem)
+        self.choice = search_choice_for(video.path)
+        # A generic file name (clip3) says nothing: the immediate parent folder's name is the starting point.
+        text, year = ((self.choice.folder_text, self.choice.folder_year) if self.choice.use_folder
+                      else (self.choice.text, self.choice.year))
         search_row = QHBoxLayout()
         self.query_edit = QLineEdit(text)
         self.query_edit.returnPressed.connect(self._on_search)
@@ -171,6 +177,16 @@ class SceneSearchDialog(QDialog):
         self.search_button.clicked.connect(self._on_search)
         search_row.addWidget(self.search_button)
         layout.addLayout(search_row)
+
+        self.folder_box: Optional[QCheckBox] = None
+        if self.choice.has_folder:
+            self.folder_box = QCheckBox("Search with the folder name")
+            self.folder_box.setToolTip(f'The folder is "{self.choice.folder_name}". Checked automatically when the file '
+                                       "name says nothing (clip3, scene 2, 001...). Toggling it fills the box again and "
+                                       "searches again.")
+            self.folder_box.setChecked(self.choice.use_folder)
+            self.folder_box.toggled.connect(self._on_folder_toggled)
+            layout.addWidget(self.folder_box)
 
         self.status_label = QLabel("")
         self.status_label.setWordWrap(True)
@@ -335,6 +351,11 @@ class SceneSearchDialog(QDialog):
         if found is CANCELLED:
             self._set_status("The search was cancelled.")
             return
+        if self._using_folder() and self.choice.part_number is not None and found:
+            # Several files share this folder (clip1..clip5): the scene whose title carries this file's part number
+            # goes first, the others stay below. Never selected for the user.
+            order = prefer_part_number([r.title for r in found], self.choice.part_number)
+            found = [found[i] for i in order]
         self._show(found)
         self._set_status("" if found else "No results found.")
 
@@ -343,7 +364,23 @@ class SceneSearchDialog(QDialog):
         QMessageBox.warning(self, title, message)
 
     def _set_status(self, text: str) -> None:
-        self.status_label.setText(text)
+        note = folder_note(self.choice) if self._using_folder() else ""
+        self.status_label.setText((text + " " + note).strip() if note else text)
+
+    def _using_folder(self) -> bool:
+        return self.folder_box is not None and self.folder_box.isChecked()
+
+    def _on_folder_toggled(self, on: bool) -> None:
+        """Fills the box from the folder name (or back from the file name) and searches again."""
+        if on:
+            self.query_edit.setText(self.choice.folder_text)
+            self.year_edit.setText(self.choice.folder_year)
+        else:
+            self.query_edit.setText(self.choice.text)
+            self.year_edit.setText(self.choice.year)
+        self._on_search()
+        if not self.status_label.text():
+            self._set_status("")
 
     # --- the results table --------------------------------------------------------------------------------------------
 

@@ -310,6 +310,114 @@ def search_text_for(stem: str) -> tuple[str, str]:
     return guess.title.strip(), guess.year or ""
 
 
+# A file name that says nothing about the scene (clip1, scene 3, part2, 001, cd1 ...): the owner's clips are
+# numbered while the FOLDER holds the movie's name. 'ep' / 'episode' are deliberately not here: TV is handled by the
+# season/episode parser, not by this.
+GENERIC_NAME_WORDS = ("clip", "scene", "part", "pt", "cd", "disc", "disk", "video", "vid", "file", "track", "movie",
+                      "film", "sc")
+MIN_NAME_LETTERS = 4  # a cleaned name shorter than this says nothing either
+
+# Folders that are a catch-all place, not the name of a movie: never used for the search.
+CATCH_ALL_FOLDERS = ("downloads", "download", "videos", "video", "movies", "movie", "films", "film", "porn", "adult",
+                     "xxx", "new folder", "new", "desktop", "documents", "temp", "tmp", "torrents", "incoming",
+                     "unsorted", "misc", "stuff", "clips", "scenes", "my videos", "recordings", "inbox")
+
+_GENERIC_WORD_RE = re.compile(r"(?:%s)(?:\d{1,3}|[a-z])?" % "|".join(sorted(GENERIC_NAME_WORDS, key=len, reverse=True)))
+_SHORT_CODE_RE = re.compile(r"[a-z]?\d{1,3}")
+
+
+def _squash(text: str) -> str:
+    """Lowercase with every separator removed ('Clip_3' -> 'clip3')."""
+    return re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
+
+def is_generic_stem(stem: str) -> bool:
+    """True when a file name (without extension) says nothing about the scene: only digits, a generic word (clip,
+    scene, part, cd ...) optionally followed by a number or one letter, a letter plus up to three digits, or fewer
+    than MIN_NAME_LETTERS characters once separators are removed."""
+    cleaned = _squash(stem)
+    if len(cleaned) < MIN_NAME_LETTERS:
+        return True
+    return bool(cleaned.isdigit() or _GENERIC_WORD_RE.fullmatch(cleaned) or _SHORT_CODE_RE.fullmatch(cleaned))
+
+
+def is_catch_all_folder(name: str) -> bool:
+    return " ".join((name or "").lower().replace("_", " ").replace(".", " ").split()) in CATCH_ALL_FOLDERS
+
+
+def part_marker(stem: str) -> tuple[str, Optional[int]]:
+    """(the file name as the part marker, its first number or None): 'clip3' -> ('clip3', 3)."""
+    match = re.search(r"\d+", stem or "")
+    return (stem or "").strip(), int(match.group()) if match else None
+
+
+@dataclass
+class SearchChoice:
+    """What the search box is filled with for one file, and what the folder could offer instead."""
+    text: str  # from the file name
+    year: str
+    generic: bool  # the file name says nothing
+    folder_name: str = ""  # the immediate parent folder's own name ('' = no usable folder)
+    folder_text: str = ""  # that name cleaned for a search
+    folder_year: str = ""
+    part: str = ""  # the file name as the part marker ('clip3')
+    part_number: Optional[int] = None
+
+    @property
+    def has_folder(self) -> bool:
+        return bool(self.folder_text)
+
+    @property
+    def use_folder(self) -> bool:
+        """The folder name is the starting point: the file name is generic and a usable folder exists."""
+        return self.generic and self.has_folder
+
+
+def parent_folder_candidate(path) -> tuple[str, str, str]:
+    """(folder name, cleaned search text, year) of the file's IMMEDIATE parent folder, or ('', '', '') when it is a
+    drive root, a catch-all folder (Downloads, Videos, New folder ...) or itself says nothing."""
+    from pathlib import Path
+
+    parent = Path(path).parent
+    name = parent.name
+    if not name or is_catch_all_folder(name) or is_generic_stem(name):
+        return "", "", ""
+    text, year = search_text_for(name)
+    if not text or is_generic_stem(text):
+        return "", "", ""
+    return name, text, year
+
+
+def search_choice_for(path) -> SearchChoice:
+    from pathlib import Path
+
+    stem = Path(path).stem
+    text, year = search_text_for(stem)
+    generic = is_generic_stem(stem)
+    folder_name, folder_text, folder_year = parent_folder_candidate(path)
+    part, number = part_marker(stem)
+    return SearchChoice(text, year, generic, folder_name, folder_text, folder_year, part, number)
+
+
+def folder_note(choice: SearchChoice) -> str:
+    """The dialog's status sentence for a folder-name search."""
+    if not choice.generic:
+        return f'Searched for the folder name "{choice.folder_name}".'
+    return (f'Searched for the folder name "{choice.folder_name}" because the file name "{choice.part}" says nothing. '
+            f"Part: {choice.part}.")
+
+
+def prefer_part_number(titles: list[str], number: Optional[int]) -> list[int]:
+    """The order (indices) for a results list: a result whose title carries the part number ('Scene #03', 'Part 3',
+    '#3', a trailing 3) goes first, everything else keeps its order below. Nothing changes without a number or a match."""
+    order = list(range(len(titles)))
+    if number is None:
+        return order
+    pattern = re.compile(r"(?:\b(?:scene|sc|part|pt|episode|ep)\s*|#\s*)0*%d\b|(?:^|\s)0*%d$" % (number, number), re.IGNORECASE)
+    first = [i for i in order if pattern.search(titles[i] or "")]
+    return first + [i for i in order if i not in first]
+
+
 # --- polite HTTP --------------------------------------------------------------------------------------------------------
 
 

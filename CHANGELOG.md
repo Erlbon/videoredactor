@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-10-17#16 -- ThePornDB / StashDB lookups use the folder name when the file name says nothing
+
+Found on the owner's real files: clips named clip1, clip2, clip3 sit in a folder that has the movie's name.
+- New: when the file name says nothing about the scene (only digits, clip/scene/part/pt/cd/disc/disk/video/vid/file/track/movie/film/sc with an optional number or letter, a letter plus up to three digits, or under four characters), the search box is filled with the cleaned name of the file's **immediate parent folder** instead, and the status line says so: "Searched for the folder name "X" because the file name "clip3" says nothing. Part: clip3." The box stays editable. A folder that is itself generic, a drive root, or a catch-all (Downloads, Videos, Movies, Porn, New folder and similar) is never used. A file name that does say something works exactly as before.
+- New: a checkbox **Search with the folder name** (only when a usable folder exists; ticked automatically for a generic file name, unticked otherwise): toggling it refills the box and searches again.
+- New: when the folder name is used and the results carry a scene number in the title ("Scene #03" for clip3), that scene is listed first and the others stay below it in their order; nothing is selected for you.
+- New: the file header of the lookup dialogs shows **Folder: X** (and "Searching for" the folder's name) for such a file.
+- The file hash search that runs first is unchanged. Nothing else is applied automatically: no collection field is set from the folder.
+- The word lists are module constants (core/scene_lookup.py: GENERIC_NAME_WORDS, CATCH_ALL_FOLDERS) with unit tests, plus dialog tests (clip3 in "Strap Some Boyz #02", a real name unchanged, the checkbox, catch-all folders skipped, the part-number order).
+
 ## 2026-10-17#15 -- Drag the side-panel fields into the order you want
 
 Shared part: redactor_common 2026-10-17#10 (core/field_order.py, gui/field_order.py); all four Redactor apps get the same facility.
