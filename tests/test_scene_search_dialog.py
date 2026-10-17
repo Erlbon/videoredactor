@@ -264,7 +264,7 @@ def test_a_pick_on_a_blank_file_fills_the_fields_and_stages_them(window, monkeyp
     assert (meta.title, meta.release_date, meta.studio, meta.collection, meta.cast, meta.genre_tags, meta.director) == (
         "Test Scene Title", "2021-11-15", "Example Studio", "Example Network", "Performer One, Performer Two",
         "Tag A, Tag B", "Director One")
-    assert meta.description == "Synthetic description." and meta.content_type is ContentType.MOVIE
+    assert meta.description == "Synthetic description." and meta.content_type is ContentType.PORN
     assert "Fake: https://example.com/scenes/id-1" in meta.comment
     assert window.video_files[0].dirty  # staged: not on disk until Save
     assert window.undo_manager.can_undo() and source.calls["cover"] == []  # no cover unless asked

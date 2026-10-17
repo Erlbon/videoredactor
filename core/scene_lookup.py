@@ -23,7 +23,7 @@ Field mapping (result -> VideoMetadata), see scene_fields():
     the service's page       -> comment                 (one line "<Service>: <url>" appended to what is there)
     content type             -> Movie, only when it is not set yet (the one existing type that shows Cast and Studio)
 
-No new field and no new ContentType: the code (SKU) and the duration have no field and are shown in the dialog only.
+No new field (the content type is Porn): the code (SKU) and the duration have no field and are shown in the dialog only.
 """
 
 from __future__ import annotations
@@ -198,7 +198,7 @@ def scene_fields(result: SceneResult, existing_comment: str = "") -> dict[str, s
     return {key: value for key, value in fields.items() if value}
 
 
-CONTENT_TYPE = ContentType.MOVIE
+CONTENT_TYPE = ContentType.PORN
 # What a lookup could still fill (the Redact step does nothing when all of these are set).
 FILL_FIELDS = ("title", "release_date", "description", "studio", "cast", "genre_tags", "director")
 

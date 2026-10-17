@@ -22,6 +22,7 @@ class ContentType(str, Enum):
     MOVIE = "Movie"
     TV = "TV"
     MUSIC_VIDEO = "Music Video"
+    PORN = "Porn"
     CLIP = "Clip"
     MISC = "Misc"
     UNSET = ""  # default until the user sets it
@@ -178,6 +179,7 @@ TYPE_SPECIFIC_FIELDS = {
     # not repeated here to avoid duplicating it in fields_for_content_type().
     ContentType.TV: ["show_title", "season_number", "episode_number", "network"],
     ContentType.MUSIC_VIDEO: ["artist", "album", "composer", "lyrics"],
+    ContentType.PORN: ["director", "cast", "writer", "studio", "collection"],  # scene-shaped like a movie
     ContentType.CLIP: [],
     ContentType.MISC: [],
 }

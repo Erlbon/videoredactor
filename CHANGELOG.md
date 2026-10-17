@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-17#09 -- Content Type Porn
+
+- New: **Porn is a Content Type** (beside Movie, TV, Music Video, Clip, Misc), with the same fields as Movie (director, cast, writer, studio, collection). ThePornDB and StashDB lookups set it on a file whose Content Type is empty (they set Movie before). The genres are what both services call tags, all of them, comma separated into Genre Tags (unchanged).
+
 ## 2026-10-17#08 -- ThePornDB / StashDB lookup: one exact match is preselected
 
 - Fixed: **Use Selected and Save the poster in the file were dead until a row was clicked**, and with a single exact answer the dialog looked finished but offered nothing (owner report, 2026-10-17). A single result that is the file's own id or its fingerprint is now preselected: the detail shows, Use Selected is live and the poster box is live when the result has a portrait poster. Several rows or title guesses still start unselected.

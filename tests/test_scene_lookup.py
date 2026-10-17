@@ -35,7 +35,7 @@ def test_field_mapping_table():
         "studio": "Example Studio", "collection": "Example Network", "cast": "Performer One, Performer Two",
         "genre_tags": "Tag A, Tag B", "director": "Director One", "comment": "StashDB: https://stashdb.org/scenes/abc",
     }
-    assert sl.CONTENT_TYPE is ContentType.MOVIE  # no new ContentType
+    assert sl.CONTENT_TYPE is ContentType.PORN  # adult scenes are their own content type
 
 
 def test_empty_values_are_left_out_and_a_parentless_studio_has_no_collection():
@@ -239,3 +239,10 @@ def test_importing_the_options_validates_the_address():
 
 def test_the_two_services_have_key_entries_and_env_vars():
     assert api_keys.KEYS["theporndb"][1] == "THEPORNDB_API_KEY" and api_keys.KEYS["stashdb"][1] == "STASHDB_API_KEY"
+
+
+def test_porn_is_a_content_type_with_the_movie_fields():
+    from core.video_metadata import TYPE_SPECIFIC_FIELDS, fields_for_content_type
+    assert ContentType("Porn") is ContentType.PORN
+    assert fields_for_content_type(ContentType.PORN) == fields_for_content_type(ContentType.MOVIE)
+    assert TYPE_SPECIFIC_FIELDS[ContentType.PORN]

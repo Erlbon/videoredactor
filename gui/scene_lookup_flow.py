@@ -28,7 +28,7 @@ from gui.tag_panel import FIELD_LABELS
 
 
 def fields_for(vf, result: SceneResult) -> dict[str, str]:
-    """What applying `result` to `vf` would set: the mapped fields, plus Content Type = Movie when it is not set."""
+    """What applying `result` to `vf` would set: the mapped fields, plus Content Type = Porn when it is not set."""
     fields = scene_fields(result, vf.metadata.comment)
     if vf.metadata.content_type is ContentType.UNSET:
         fields["content_type"] = CONTENT_TYPE.value
