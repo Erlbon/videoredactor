@@ -34,6 +34,10 @@ into files one at a time.
   clearly flagged as sync-not-guaranteed. For music videos the same
   dialog can fetch time-synced lyrics from LRCLIB and write them as an
   .srt (with an offset control).
+- **Music videos: the title is the song** (as MusicBrainz names it, version included). The old separate
+  track title field is gone: old values are kept in the file and can be moved into the title (side panel
+  button, or the Redact step "Use the track title as the title"). An MP4 music video also gets the iTunes
+  media type (`stik` 6); MKV keeps only the custom Content Type tag.
 - **ThePornDB and StashDB lookups** (Metadata > Look Up > ThePornDB… / StashDB…) — optional scene
   metadata sources for files you own: title, date, studio (and its parent), performers as credited,
   tags, description, director and the cover. The dialog first asks the service for the exact file by its
@@ -239,7 +243,7 @@ command line records nothing either. The same holds for `redact`.
 
 The fields are: content_type, title, sort_title, description, genre_tags, release_date, language,
 personal_rating, comment, director, cast, writer, studio, collection, show_title, season_number, episode_number,
-network, artist, album, track_title, composer. Field names are case-insensitive and the usual spellings work:
+network, artist, album, composer. Field names are case-insensitive and the usual spellings work:
 `genre`, `year`, `season`, `episode`, `show`, `type`, `rating`.
 
 Checks: `content_type` is one of Movie, TV, Music Video, Clip, Misc (any capitalisation); `season_number`,
@@ -337,7 +341,8 @@ Guesses below the confidence threshold are listed under "needs review" and not a
 
 Steps: `check_repair`, `filename_tags`, `path_tags`, `lookup`, `scene_lookup` (off by default: asks ThePornDB and
 StashDB about the file's own fingerprint and only ever produces a "needs review" suggestion, whatever the
-threshold), `subtitles`, `translate_subtitles`, `remux_mkv_to_mp4`, `convert_library`,
+threshold), `track_title_to_title` (off by default: a Music Video with an old track title and an empty title gets
+it as the title, only ever as a "needs review" suggestion), `subtitles`, `translate_subtitles`, `remux_mkv_to_mp4`, `convert_library`,
 `rename`, `move_into_folders`. Without `--recipe` the recipe saved in the app is used (the defaults if none was saved). A
 repair is only automatic when a lossless remux fully fixes the file; a damaged file is reported and left alone.
 Exit code 1 if any file failed; files that need review are not failures. Rename and Move run last, after the

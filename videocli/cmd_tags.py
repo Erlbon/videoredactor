@@ -14,7 +14,7 @@ from core.filename_pattern import field_text, set_field_text
 from core.video_file import VideoFile
 from redactor_common.cli import EXIT_OK, EXIT_PARTIAL, CliError, Output, add_common_options
 
-from videocli.fields import DEFAULT_INFO_FIELDS, INFO_FIELD_NAMES, parse_assignment, resolve_field, resolve_info_field
+from videocli.fields import DEFAULT_INFO_FIELDS, DEPRECATION_NOTE, INFO_FIELD_NAMES, parse_assignment, resolve_field, resolve_info_field
 from videocli.files import add_path_arguments, collect, load_videos, skip_reason
 
 
@@ -29,9 +29,9 @@ def _duration_text(seconds) -> str:
 
 
 def add_info_parser(sub) -> None:
-    parser = sub.add_parser("info", help="show what the video files are", description="Show each video's technical details and tags.")
+    parser = sub.add_parser("info", help="show what the video files are", description="Show each video's technical details and tags. " + DEPRECATION_NOTE + " An old track title kept in a file shows as legacy_track_title.")
     add_path_arguments(parser)
-    parser.add_argument("--fields", metavar="LIST", help="comma-separated tag fields to show (default: content_type, title, show_title, season_number, episode_number, release_date); the read-only source fields theporndb_id, stashdb_id, tmdb_id, imdb_id, tvdb_id, source_url, metadata_match and cover_info can be named too")
+    parser.add_argument("--fields", metavar="LIST", help="comma-separated tag fields to show (default: content_type, title, show_title, season_number, episode_number, release_date); the read-only source fields theporndb_id, stashdb_id, tmdb_id, imdb_id, tvdb_id, source_url, metadata_match cover_info and legacy_track_title can be named too")
     parser.add_argument("--all", action="store_true", help="show every tag field that has a value, including the source ids and the poster")
     add_common_options(parser)
     parser.set_defaults(handler=run_info)
@@ -78,7 +78,7 @@ def add_set_parser(sub) -> None:
     parser = sub.add_parser(
         "set", help="change tag fields",
         description="Set or empty tag fields and save each video in place (the tags only; the video is not re-encoded). "
-                    "The save is read back and compared.",
+                    "The save is read back and compared. " + DEPRECATION_NOTE,
     )
     add_path_arguments(parser)
     parser.add_argument("-s", "--set", dest="assignments", action="append", default=[], metavar="FIELD=VALUE",

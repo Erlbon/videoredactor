@@ -31,10 +31,10 @@ from PyQt6.QtGui import QColor, QImage, QKeySequence, QIcon
 from core.video_file import (
     SUPPORTED_EXTENSIONS, VideoFile, discover_convertible_files, discover_video_files, has_subfolders,
 )
-from core.video_metadata import ContentType, EDITABLE_FIELDS, NUMERIC_FIELDS, TEXT_FIELDS
+from core.video_metadata import ContentType, EDITABLE_FIELDS, NUMERIC_FIELDS, TEXT_FIELDS, can_move_track_title
 from core.filename_pattern import (
     DEFAULT_RENAME_PATTERN, PARSE_NUMERIC_FIELDS, PARSE_STRIP_ZEROS_FIELDS, VALID_FIELD_KEYS,
-    field_text, load_pattern_history, placeholder_values, save_pattern_to_history, set_field_text,
+    default_parse_pattern, field_text, load_pattern_history, placeholder_values, save_pattern_to_history, set_field_text,
 )
 from core.tmdb_client import (
     get_movie_details, get_tv_show_details, get_tv_episode_details,
@@ -181,7 +181,7 @@ FILTER_COLUMN_KINDS = {
     "personal_rating": KIND_VALUES, "season_number": KIND_VALUES, "episode_number": KIND_VALUES,
     **{f: KIND_TEXT for f in (
         "title", "sort_title", "description", "genre_tags", "release_date", "comment", "director", "cast",
-        "writer", "studio", "collection", "show_title", "network", "artist", "album", "track_title", "composer",
+        "writer", "studio", "collection", "show_title", "network", "artist", "album", "composer",
     )},
 }
 
@@ -430,6 +430,7 @@ class MainWindow(QMainWindow):
 
         self.tag_panel = TagPanel()
         self.tag_panel.apply_requested.connect(self._on_apply_to_selected)
+        self.tag_panel.move_track_title_requested.connect(self._on_move_track_title)
         self.tag_panel.collapseToggleRequested.connect(self._toggle_tag_panel)
         self.tag_panel.play_button.clicked.connect(lambda _checked=False: self.actions_by_key["play"].trigger())
         # Deliberately low minimum -- lets the panel be dragged down to a
@@ -1719,6 +1720,7 @@ class MainWindow(QMainWindow):
         merged = self._merge_metadata_for_panel(selected)
         self.tag_panel.load_values(merged)
         self.tag_panel.set_sources(selected)
+        self.tag_panel.set_old_track_title(selected)
         self._update_preview(selected)
 
     def _update_preview(self, selected: list[VideoFile]) -> None:
@@ -1906,11 +1908,32 @@ class MainWindow(QMainWindow):
                 if field_name == "content_type" and value:
                     value = ContentType(value)
                 setattr(vf.metadata, field_name, value)
+                if field_name == "content_type":
+                    vf.metadata.content_type_from_media_type = False  # now the user's own choice
             vf.dirty = True
         self._refresh_table_rows()
+        self.tag_panel.set_old_track_title(selected)
         self.status_bar.showMessage(
             f"Applied {len(changed_fields)} field(s) to {len(selected)} file(s) -- not yet saved to disk"
         )
+
+    def _on_move_track_title(self) -> None:
+        """The panel's "Move track title into Title": the selected music video's old track title becomes its
+        (empty) Title, staged like any edit and undoable; nothing is written until Save."""
+        from core.video_metadata import move_track_title
+
+        selected = self._selected_video_files()
+        movable = [vf for vf in selected if can_move_track_title(vf.metadata)]
+        if not movable:
+            self.status_bar.showMessage("Nothing to move: no selected music video has an old track title and no title")
+            return
+        self._push_undo("Move Track Title into Title", movable)
+        for vf in movable:
+            move_track_title(vf.metadata)
+            vf.dirty = True
+        self._refresh_table_rows()
+        self._on_selection_changed()
+        self.status_bar.showMessage(f"Moved the track title into Title for {len(movable)} file(s) -- not yet saved to disk")
 
     # --- TMDB import ---------------------------------------------------
 
@@ -3358,7 +3381,7 @@ class MainWindow(QMainWindow):
         dialog = ParseFilenameDialog(
             targets, FILENAME_PLACEHOLDERS, lambda vf: str(vf.path),
             pattern_history=load_pattern_history(),
-            default_pattern=DEFAULT_RENAME_PATTERN,
+            default_pattern=default_parse_pattern(targets),
             valid_field_keys=set(VALID_FIELD_KEYS),
             numeric_fields=set(PARSE_NUMERIC_FIELDS),
             strip_leading_zeros_fields=set(PARSE_STRIP_ZEROS_FIELDS),

@@ -98,11 +98,20 @@ INTEGER_ATOMS = {"tvsn", "tves"}
 CUSTOM_FIELDS = [
     "sort_title", "language", "personal_rating", "content_type",
     "director", "cast", "writer", "studio", "collection",
-    "track_title",
     "scan_stamp",
     # Source ids (core.source_tags): THEPORNDB_ID ... METADATA_MATCH, written only from an accepted lookup.
     *SOURCE_FIELDS,
 ]
+
+# The retired track title: still READ from an old file (into VideoMetadata.legacy_track_title) so nothing is lost,
+# never written and never deleted by this app.
+LEGACY_TRACK_TITLE_KEY = f"{CUSTOM_ATOM_PREFIX}track_title"
+
+# The iTunes media-type atom: an integer atom (written as a list of int, like tvsn/tves). 6 = Music Video
+# (Movie 9, TV Show 10). Only 6 is ever written, and only with Content Type = Music Video; a stik already set to
+# something else is left alone.
+MEDIA_TYPE_ATOM = "stik"
+MEDIA_TYPE_MUSIC_VIDEO = 6
 
 # Freeform atom names that differ from the field name.
 CUSTOM_ATOM_NAMES = {"scan_stamp": "REDACTOR_CHECK", **{f: t for f, t in SOURCE_TAG_NAMES.items()}}
@@ -162,6 +171,17 @@ def read_mp4_metadata(path: str) -> VideoMetadata:
                 setattr(meta, field_name, int(text) if text.isdigit() else None)
             else:
                 setattr(meta, field_name, text)
+        legacy = mp4.tags.get(LEGACY_TRACK_TITLE_KEY)
+        if legacy:
+            raw = legacy[0] if isinstance(legacy, list) else legacy
+            meta.legacy_track_title = (raw.decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw)).strip()
+        stik = mp4.tags.get(MEDIA_TYPE_ATOM)
+        if isinstance(stik, list) and stik and isinstance(stik[0], int):
+            meta.media_type = int(stik[0])
+            if meta.media_type == MEDIA_TYPE_MUSIC_VIDEO and meta.content_type is ContentType.UNSET:
+                # Only when the file has no content type of its own: a suggestion, flagged in the panel.
+                meta.content_type = ContentType.MUSIC_VIDEO
+                meta.content_type_from_media_type = True
         covers = mp4.tags.get("covr")
         if covers:
             meta.cover_info = describe_cover(bytes(covers[0]))
@@ -257,6 +277,11 @@ def _apply_mp4_tags(path: str, meta: VideoMetadata) -> None:
             mp4.tags[key] = [MP4FreeForm(str(value).encode("utf-8"))]
         elif key in mp4.tags:
             del mp4.tags[key]
+
+    # Music Video is also marked with the iTunes media type (stik 6) so other players file it as one. Another
+    # content type never touches stik, and a stik already set to something else is never overwritten.
+    if meta.content_type is ContentType.MUSIC_VIDEO and not mp4.tags.get(MEDIA_TYPE_ATOM):
+        mp4.tags[MEDIA_TYPE_ATOM] = [MEDIA_TYPE_MUSIC_VIDEO]
 
     # A staged poster (core.poster JPEG): the standard cover atom. Nothing staged leaves the existing cover alone.
     if getattr(meta, "cover_pending", None):

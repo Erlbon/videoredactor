@@ -50,11 +50,11 @@ class LyricsQuery:
 
 
 def query_for_video(video) -> LyricsQuery:
-    """What to search with, from a VideoFile: its tags (artist, track title or title, album), falling back
+    """What to search with, from a VideoFile: its tags (artist, title = the song, album), falling back
     to the file name "Artist - Title"; the length from the probed duration."""
     md = video.metadata
     artist = (md.artist or "").strip()
-    title = (md.track_title or "").strip() or (md.title or "").strip()
+    title = (md.title or "").strip()
     stem_artist, stem_title = lrclib.split_artist_title(video.path.stem)
     if not title:
         title = stem_title

@@ -61,8 +61,17 @@ class VideoMetadata:
     # --- Music video specific ---
     artist: str = ""
     album: str = ""
-    track_title: str = ""         # distinct from `title`, if they differ
     composer: str = ""
+    # RETIRED field (music videos: the title is the song, as MusicBrainz names it, version included). Old files may
+    # still carry a track title; it is READ so nothing is lost, shown read-only in the panel, never written by this
+    # app, and can be moved into an empty Title ("Move track title into Title"). Not editable, not compared.
+    legacy_track_title: str = field(default="", compare=False)
+    # MP4 only: the iTunes media-type atom `stik` as read from the file (6 = Music Video, 9 = Movie, 10 = TV Show),
+    # None when the file has none. Read-only; the writer sets 6 together with Content Type = Music Video.
+    media_type: Optional[int] = field(default=None, compare=False)
+    # True when content_type was filled from stik 6 because the file had no content type of its own (a suggestion
+    # the panel flags as "from the file's media type"; it is only saved when the file is saved for another reason).
+    content_type_from_media_type: bool = field(default=False, compare=False)
 
     # --- Scan stamp (core.scan_stamp wire text) ---
     # "STATUS;UTC-time;fingerprint" from the last Check Files scan, kept
@@ -123,7 +132,7 @@ EDITABLE_FIELDS = [
     "release_date", "language", "personal_rating", "comment",
     "director", "cast", "writer", "studio", "collection",
     "show_title", "season_number", "episode_number", "network",
-    "artist", "album", "track_title", "composer",
+    "artist", "album", "composer",
 ]
 
 # Freeform text fields eligible for the Edit menu's Case
@@ -139,7 +148,7 @@ TEXT_FIELDS = [
     "title", "sort_title", "description", "comment",
     "director", "cast", "writer", "studio", "collection",
     "show_title", "network",
-    "artist", "album", "track_title", "composer",
+    "artist", "album", "composer",
 ]
 
 # Int fields eligible for Auto-Numbering's "write the number directly"
@@ -155,7 +164,7 @@ TYPE_SPECIFIC_FIELDS = {
     # release_date is already universal and doubles as air date for TV --
     # not repeated here to avoid duplicating it in fields_for_content_type().
     ContentType.TV: ["show_title", "season_number", "episode_number", "network"],
-    ContentType.MUSIC_VIDEO: ["artist", "album", "track_title", "composer"],
+    ContentType.MUSIC_VIDEO: ["artist", "album", "composer"],
     ContentType.CLIP: [],
     ContentType.MISC: [],
 }
@@ -178,3 +187,29 @@ def fields_for_content_type(content_type: ContentType) -> list[str]:
     degrades to 'show the safe common fields' rather than erroring.
     """
     return UNIVERSAL_FIELDS + TYPE_SPECIFIC_FIELDS.get(content_type, [])
+
+
+def old_track_title_to_show(metadata: VideoMetadata) -> str:
+    """The retired track title worth showing read-only: only when the file has one that differs from the title
+    (an old value equal to the title is already the title, nothing to show)."""
+    old = (metadata.legacy_track_title or "").strip()
+    return old if old and old != (metadata.title or "").strip() else ""
+
+
+def can_move_track_title(metadata: VideoMetadata) -> bool:
+    """True for a Music Video with an old track title and an EMPTY Title: the one case where the old value is
+    offered as the title. When both exist and differ they are left alone."""
+    return (
+        metadata.content_type is ContentType.MUSIC_VIDEO
+        and bool((metadata.legacy_track_title or "").strip())
+        and not (metadata.title or "").strip()
+    )
+
+
+def move_track_title(metadata: VideoMetadata) -> bool:
+    """Puts the old track title into the empty Title (staged; nothing is written until the file is saved). The
+    old value stays in the file untouched. Returns False when the move does not apply."""
+    if not can_move_track_title(metadata):
+        return False
+    metadata.title = metadata.legacy_track_title.strip()
+    return True

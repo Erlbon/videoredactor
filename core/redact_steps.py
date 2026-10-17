@@ -80,6 +80,7 @@ from core.filename_pattern import (
     VALID_FIELD_KEYS,
     field_text,
     load_pattern_history,
+    modernize_pattern,
     parse_filename,
     placeholder_values,
     set_field_text,
@@ -88,7 +89,7 @@ from core.release_name_parser import parse_release_name
 from core.sidecars import sidecar_moves, sidecar_pairs, sidecar_suffixes
 from core.video_file import VideoFile
 from core.video_fingerprint import video_fingerprint
-from core.video_metadata import SOURCE_FIELDS, ContentType
+from core.video_metadata import SOURCE_FIELDS, ContentType, can_move_track_title, move_track_title
 from core.lookup_sources import imdb_values, scene_values, tmdb_values, tvdb_values
 from core.source_tags import ref_in, stage_sources
 
@@ -1270,6 +1271,43 @@ class SceneLookupStep(VideoStep):
         return [f"from {fill.source} '{fill.label}'"] + lines
 
 
+# --- music videos: the retired track title ---
+
+
+@dataclass
+class TrackTitleMove:
+    title: str
+
+    def __str__(self) -> str:
+        return f"title={self.title!r}"
+
+
+class TrackTitleStep(VideoStep):
+    key = "track_title_to_title"
+    label = "Use the track title as the title"
+    description = (
+        "Music videos: the title is the song and the old separate 'track title' field is gone. A Music Video "
+        "that still has an old track title in the file and an EMPTY title gets that value as its title, as a "
+        "SUGGESTION: it always goes to Needs review. When both exist and differ nothing is changed. The old "
+        "value stays in the file. Off by default."
+    )
+    default_enabled = False
+
+    def execute(self, ctx: VideoCtx) -> StepResult:
+        if not can_move_track_title(ctx.work.metadata):
+            return StepResult.nothing()
+        title = ctx.work.metadata.legacy_track_title.strip()
+        return StepResult.suggestion(
+            TrackTitleMove(title), 0.9, "the file has an old track title and no title", review_only=True,
+        )
+
+    def apply_suggestion(self, ctx: VideoCtx, result: StepResult) -> list[str]:
+        if move_track_title(ctx.work.metadata):
+            ctx.work.dirty = True
+            return [f"title = {ctx.work.metadata.title!r} (from the old track title)"]
+        return []
+
+
 # --- step 4: subtitles ----------------------------------------------------------------
 
 
@@ -1817,6 +1855,7 @@ def build_catalogue(
         PathTagsStep(env=env, sample=sample),
         LookupStep(),
         SceneLookupStep(),
+        TrackTitleStep(),
         SubtitlesStep(),
         SubtitleTranslateStep(),
         RemuxStep(),
@@ -1862,6 +1901,9 @@ def recipe_to_setting(recipe: Recipe) -> str:
 def recipe_from_setting(text: str, catalogue: list[Step]) -> Recipe:
     """The saved recipe; nothing saved (or unreadable) means the defaults."""
     recipe = Recipe.from_json(text)
+    for stored in recipe.options.values():
+        if isinstance(stored, dict) and isinstance(stored.get("pattern"), str):
+            stored["pattern"] = modernize_pattern(stored["pattern"])  # an old %track_title% means the title now
     if not (recipe.order or recipe.enabled or recipe.options):
         return Recipe.default_for(catalogue)  # nothing saved, or unreadable
     return recipe

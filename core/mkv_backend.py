@@ -81,7 +81,6 @@ FIELD_TO_MKV_TAG = {
     # no separate air_date field/key.
     "artist": "ARTIST",
     "album": "ALBUM",
-    "track_title": "TRACK_TITLE",
     "composer": "COMPOSER",
     # Check Files scan stamp (core.scan_stamp text). Listed here so
     # plan_global_tags treats it as this app's own tag (replaced, and
@@ -104,6 +103,11 @@ COVER_MIME = "image/jpeg"
 _COVER_NAME_RE = re.compile(r"^cover\.(jpe?g|png|webp)$", re.IGNORECASE)
 
 REVERSE_FIELD_MAP = {v: k for k, v in FIELD_TO_MKV_TAG.items()}
+
+# The retired track title: READ from old files (VideoMetadata.legacy_track_title), never written. It is not in
+# FIELD_TO_MKV_TAG, so plan_global_tags carries an existing TRACK_TITLE tag over untouched like any other tool's tag.
+# (Matroska has no equivalent of the MP4 media type: Music Video is the custom content-type tag only.)
+LEGACY_TRACK_TITLE_TAG = "TRACK_TITLE"
 
 
 def build_tags_xml(field_values: dict[str, str]) -> str:
@@ -301,6 +305,9 @@ def read_mkv_metadata(path: str, diagnostics: Optional[dict] = None) -> VideoMet
     tag_dict = parse_tags_xml(xml_content)
 
     for mkv_key, value in tag_dict.items():
+        if mkv_key == LEGACY_TRACK_TITLE_TAG:
+            meta.legacy_track_title = str(value).strip()
+            continue
         field_name = REVERSE_FIELD_MAP.get(mkv_key)
         if not field_name:
             continue

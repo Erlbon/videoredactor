@@ -419,6 +419,9 @@ class VideoFile:
         for field_name in EDITABLE_FIELDS:
             expected = getattr(self.metadata, field_name, None)
             actual = getattr(reread, field_name, None)
+            if (field_name == "content_type" and expected in (None, "", ContentType.UNSET)
+                    and getattr(reread, "content_type_from_media_type", False)):
+                continue  # cleared, but the MP4's media type (stik 6) still reads as Music Video: not ours to remove
             if expected in (None, ""):
                 # An emptied field must be gone from the file too (the
                 # writers delete it) -- otherwise the old value comes

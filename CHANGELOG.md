@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-17#02 -- Music videos: the title is the song; the track title field is gone, old values are kept and can be moved into the title
+
+The owner's decision for music videos: **Title is the song name only, exactly as MusicBrainz names it, version included** ("Enjoy the Silence", "Enjoy the Silence (Live in Barcelona)", "Personal Jesus (Stripped)").
+- Changed: **the separate Track Title field is retired.** It is gone from the side panel, the table columns, the field pickers (case conversion, search/replace, auto-number), the filename placeholders and Parse Filename, and the command line's field list. Nothing writes it any more (MP4 freeform atom `track_title`, MKV tag `TRACK_TITLE`).
+- Kept: **old values are never lost.** An old file's track title is still READ (the command line shows it as `legacy_track_title`) and stays in the file untouched; an MKV's `TRACK_TITLE` tag is carried over like any other tool's tag. When it differs from the Title the side panel shows it read-only ("Old track title"); when it equals the Title there is nothing to show.
+- New: **Move track title into Title.** A Music Video with an old track title and an EMPTY Title gets a button in the side panel (staged and undoable like any edit, saved with the file; the old value stays in the file). The same move is a Redact step, "Use the track title as the title": off by default, a suggestion only (always Needs review). When both values exist and differ, nothing is changed.
+- Changed: **old settings still load.** A saved column order, hidden column or width for the retired field is dropped without error; a saved rename, Parse Filename or Redact pattern that says `%track_title%` now means `%title%` (unless the pattern already has `%title%`, where the retired token renders as nothing).
+- Changed: the command line still accepts `track_title` as an alias of `title` for old scripts (`set -s track_title=...` sets the title); `info --help` and `set --help` say it is deprecated.
+- Changed: Parse Filename starts with `%artist% - %title%` when every selected file is a Music Video. The lyrics search (LRCLIB) uses artist + title, and the title is now the song.
+- New: **MP4 music videos carry the iTunes media type.** With Content Type = Music Video the MP4 gets `stik` = 6 next to our own content-type tag, so other players file it as a music video. Other content types never touch `stik`, and a `stik` already set to something else (Movie 9, TV Show 10) is never overwritten. A file with `stik` 6 and no content type of its own is shown as Music Video, flagged in the side panel as "from the file's media type"; that is only a suggestion and is saved only when the file is saved for another reason. MKV has no equivalent atom: it keeps the custom content-type tag only.
+- Tests: tests/test_music_video_title.py (real MP4 round trips read back with mutagen and ffprobe, an in-memory MKVToolNix model for MKV, an old settings file, the panel and the command line).
+
 ## 2026-10-17#01 -- Created and refreshed notes can be undone from History; lookups never leak a key to another host
 
 From the 2026-10-16 independent code review (batch 4); the shared parts are in redactor_common 2026-10-17#01.

@@ -54,11 +54,14 @@ def music_video(folder, name="Depeche Mode - Enjoy the Silence.mp4", **meta):
 # -- query / find ----------------------------------------------------------------------
 
 def test_query_uses_tags_then_file_name(work):
-    vf = music_video(work, artist="Tagged Artist", track_title="Tagged Title", album="Alb")
+    vf = music_video(work, artist="Tagged Artist", title="Tagged Title", album="Alb")
     q = ls.query_for_video(vf)
     assert (q.artist, q.title, q.album, q.duration) == ("Tagged Artist", "Tagged Title", "Alb", 399.5)
     q = ls.query_for_video(music_video(work, "Ленинград - WWW.mp4"))
     assert (q.artist, q.title) == ("Ленинград", "WWW")
+    # the retired track title is never the search title: the title is the song
+    q = ls.query_for_video(music_video(work, "A - B.mp4", artist="X", title="Song (Live)", legacy_track_title="Old"))
+    assert (q.artist, q.title) == ("X", "Song (Live)")
     q = ls.query_for_video(music_video(work, "NoSeparator.mp4", title="From Title Tag"))
     assert (q.artist, q.title) == ("", "From Title Tag")
 

@@ -62,7 +62,6 @@ FIELD_LABELS = {
     "network": "Network",
     "artist": "Artist",
     "album": "Album",
-    "track_title": "Track Title",
     "composer": "Composer",
 }
 
@@ -98,6 +97,7 @@ class TagPanel(QWidget):
     """
 
     apply_requested = pyqtSignal(dict)  # {field_name: value}
+    move_track_title_requested = pyqtSignal()  # "Move track title into Title" for the selected music video
     collapseToggleRequested = pyqtSignal()  # the panel doesn't control its own width -- MainWindow does
 
     def __init__(self, parent: Optional[QWidget] = None):
@@ -129,6 +129,26 @@ class TagPanel(QWidget):
         scroll_layout = QVBoxLayout(scroll_content)
         scroll_layout.setContentsMargins(0, 0, 0, 0)
         scroll_layout.addWidget(self.form_container)
+        # Read-only notes under the form: the retired track title kept in an old file, and a content type that came
+        # from the MP4 media type. Both hidden unless they apply to the one selected file.
+        self.media_type_note = QLabel("Content Type: from the file's media type (Music Video). It is saved only "
+                                      "when you save this file.")
+        self.media_type_note.setWordWrap(True)
+        self.media_type_note.setVisible(False)
+        scroll_layout.addWidget(self.media_type_note)
+        self.old_track_title_label = QLabel()
+        self.old_track_title_label.setWordWrap(True)
+        self.old_track_title_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.old_track_title_label.setVisible(False)
+        scroll_layout.addWidget(self.old_track_title_label)
+        self.move_track_title_button = QPushButton("Move track title into Title")
+        self.move_track_title_button.setToolTip(
+            "This music video has an old track title and no title. The title is the song: this puts the old "
+            "value into Title (not saved until you save the file). The old value stays in the file."
+        )
+        self.move_track_title_button.setVisible(False)
+        self.move_track_title_button.clicked.connect(self.move_track_title_requested.emit)
+        scroll_layout.addWidget(self.move_track_title_button)
         self.sources_toggle = QToolButton()
         self.sources_toggle.setCheckable(True)
         self.sources_toggle.setChecked(False)
@@ -174,6 +194,21 @@ class TagPanel(QWidget):
         outer.addWidget(self._vertical_splitter, 1)
 
         self.set_content_type_filter(None)  # builds the initial (all-fields) form
+
+    def set_old_track_title(self, files: list) -> None:
+        """The retired track title of the one selected file, read-only (only when it differs from the Title, so
+        nothing in an old file is silently lost), the "Move track title into Title" button (a Music Video with an
+        empty Title) and the note for a content type read from the MP4 media type."""
+        from core.video_metadata import can_move_track_title, old_track_title_to_show
+
+        md = files[0].metadata if len(files) == 1 else None
+        old = old_track_title_to_show(md) if md is not None else ""
+        self.old_track_title_label.setText(f"Old track title (retired field, kept in the file, read-only): {old}")
+        self.old_track_title_label.setVisible(bool(old))
+        self.move_track_title_button.setVisible(md is not None and can_move_track_title(md))
+        self.media_type_note.setVisible(
+            md is not None and md.content_type_from_media_type and md.content_type is ContentType.MUSIC_VIDEO
+        )
 
     def _on_sources_toggled(self, expanded: bool) -> None:
         self.sources_toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)

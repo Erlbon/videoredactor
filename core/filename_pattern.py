@@ -27,6 +27,30 @@ PARSE_NUMERIC_FIELDS = frozenset(NUMERIC_FIELDS)
 PARSE_STRIP_ZEROS_FIELDS = frozenset({"season_number", "episode_number"})
 
 
+RETIRED_TRACK_TITLE_TOKEN = "%track_title%"
+
+
+def modernize_pattern(pattern: str) -> str:
+    """An old saved pattern that names the retired %track_title% placeholder, brought up to date: it now means the
+    song title, so it becomes %title% -- unless the pattern already has %title%, which is left as it is (the
+    retired token then renders as nothing and matches nothing, never an error). Any other pattern is unchanged."""
+    if RETIRED_TRACK_TITLE_TOKEN in pattern and "%title%" not in pattern:
+        return pattern.replace(RETIRED_TRACK_TITLE_TOKEN, "%title%")
+    return pattern
+
+
+MUSIC_VIDEO_PARSE_PATTERN = "%artist% - %title%"
+
+
+def default_parse_pattern(files, fallback: str = DEFAULT_RENAME_PATTERN) -> str:
+    """The pattern Parse Filename starts with: "Artist - Title" (artist + the song title) when every file is a
+    Music Video, else `fallback` (the TV pattern)."""
+    files = list(files)
+    if files and all(getattr(f.metadata, "content_type", None) is ContentType.MUSIC_VIDEO for f in files):
+        return MUSIC_VIDEO_PARSE_PATTERN
+    return fallback
+
+
 def field_text(metadata: VideoMetadata, field_name: str) -> str:
     """A metadata field as plain text (None -> "", ContentType -> its
     label, int -> digits)."""
@@ -69,14 +93,14 @@ def placeholder_values(metadata: VideoMetadata) -> dict[str, str]:
 
 def render_filename(metadata: VideoMetadata, pattern: str) -> str:
     """Convenience wrapper over the shared engine, for tests and scripts."""
-    return rename_pattern.render_filename(placeholder_values(metadata), pattern)
+    return rename_pattern.render_filename(placeholder_values(metadata), modernize_pattern(pattern))
 
 
 def parse_filename(stem: str, pattern: str) -> dict[str, str] | None:
     """Convenience wrapper over the shared engine with this project's
     field options."""
     return filename_parser.parse_filename(
-        stem, pattern, set(VALID_FIELD_KEYS), set(PARSE_NUMERIC_FIELDS),
+        stem, modernize_pattern(pattern), set(VALID_FIELD_KEYS), set(PARSE_NUMERIC_FIELDS),
         strip_leading_zeros_fields=set(PARSE_STRIP_ZEROS_FIELDS),
     )
 
@@ -93,7 +117,17 @@ MAX_PATTERN_HISTORY = 10
 
 
 def load_pattern_history() -> list[str]:
-    return decode_history(get_setting(PATTERN_HISTORY_SECTION, PATTERN_HISTORY_KEY, ""))
+    return dedupe_modernized(decode_history(get_setting(PATTERN_HISTORY_SECTION, PATTERN_HISTORY_KEY, "")))
+
+
+def dedupe_modernized(patterns: list[str]) -> list[str]:
+    """History entries brought up to date (modernize_pattern), a pattern that became a repeat dropped."""
+    result: list[str] = []
+    for pattern in patterns:
+        pattern = modernize_pattern(pattern)
+        if pattern not in result:
+            result.append(pattern)
+    return result
 
 
 def save_pattern_to_history(pattern: str) -> None:

@@ -126,7 +126,7 @@ def test_default_recipe_enabled_flags_and_pinned_last_steps():
     catalogue = rs.build_catalogue(lambda: [])
     recipe = Recipe.default_for(catalogue)
     assert recipe.enabled == {
-        "check_repair": True, "filename_tags": True, "path_tags": True, "lookup": True, "scene_lookup": False, "subtitles": False, "translate_subtitles": False,
+        "check_repair": True, "filename_tags": True, "path_tags": True, "lookup": True, "scene_lookup": False, "track_title_to_title": False, "subtitles": False, "translate_subtitles": False,
         "remux_mkv_to_mp4": False, "convert_library": False, "rename": False, "move_into_folders": False,
     }
     assert recipe.order[-2:] == ["rename", "move_into_folders"]

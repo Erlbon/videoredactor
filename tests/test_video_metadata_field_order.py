@@ -48,8 +48,9 @@ class TestFieldListConsistency(unittest.TestCase):
 
     def test_editable_fields_count_unchanged_by_reorder(self):
         # The reorder fix must not have accidentally dropped or
-        # duplicated a field -- same 22 fields as before, just reordered.
-        self.assertEqual(len(EDITABLE_FIELDS), 22)
+        # duplicated a field -- same fields as before, just reordered. 22 until the track title field was
+        # retired (music videos: the title is the song), 21 since.
+        self.assertEqual(len(EDITABLE_FIELDS), 21)
 
     def test_fields_for_content_type_still_leads_with_content_type(self):
         # fields_for_content_type() prepends UNIVERSAL_FIELDS, so this
