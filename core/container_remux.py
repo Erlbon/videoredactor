@@ -231,11 +231,16 @@ def _free_name(path: str) -> str:
     return library_safety._free_name(path)  # noqa: SLF001 -- the quarantine's own never-overwrite naming
 
 
-def undo_remux_log(log_path: str, day: date | None = None) -> tuple[list[str], list[str]]:
+def undo_remux_log(
+    log_path: str, day: date | None = None, *, done_status: str = REMUXED, aside_folder: str = UNDONE_FOLDER,
+) -> tuple[list[str], list[str]]:
     """Reads a TSV log written by remux_files() and puts each REMUXED file back: the remuxed copy is moved (never
     deleted) into "undone remux YYYY-MM-DD" beside it, the quarantined original is moved back to its old path (refused,
     and reported, when that path is taken). Rows are undone in reverse order; a row undone before is skipped, and
-    each undo is itself appended to the log. Returns (status lines, problems)."""
+    each undo is itself appended to the log. Returns (status lines, problems).
+
+    `done_status` / `aside_folder` let core/join_files.py reuse this for its own log (rows "joined": several originals
+    share one new file, which is moved aside with the first row undone; the others just come back)."""
     log = RemuxLog(log_path)
     rows = log.rows()
     already = {(r["original"], r["new"]) for r in rows if r["result"] == UNDONE}
@@ -243,7 +248,7 @@ def undo_remux_log(log_path: str, day: date | None = None) -> tuple[list[str], l
     problems: list[str] = []
     stamp = (day or date.today()).isoformat()
     for row in reversed(rows):
-        if row["result"] != REMUXED or (row["original"], row["new"]) in already:
+        if row["result"] != done_status or (row["original"], row["new"]) in already:
             continue
         original, quarantined, new = row["original"], row["quarantined"], row["new"]
         name = os.path.basename(original)
@@ -252,7 +257,7 @@ def undo_remux_log(log_path: str, day: date | None = None) -> tuple[list[str], l
             continue
         aside = ""
         if os.path.lexists(new):
-            aside = _free_name(os.path.join(os.path.dirname(os.path.abspath(new)), f"{UNDONE_FOLDER} {stamp}", os.path.basename(new)))
+            aside = _free_name(os.path.join(os.path.dirname(os.path.abspath(new)), f"{aside_folder} {stamp}", os.path.basename(new)))
         if os.path.lexists(original) and os.path.normcase(os.path.abspath(original)) != os.path.normcase(os.path.abspath(new)):
             problems.append(f"{original} exists now; {name} left in quarantine")
             continue

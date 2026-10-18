@@ -604,6 +604,8 @@ class MainWindow(QMainWindow):
                     MenuAction("convert_to_mp4", "Con&vert to MP4 (H.264)…", self._on_convert_to_mp4,
                                shortcut="Ctrl+Shift+C"),
                     MenuAction("convert_rules", "Convert to MP4/MKV (R&ules)…", self._on_convert_with_rules),
+                    MenuAction("join_files", "&Join Files…", self._on_join_files,
+                               tooltip="Join the parts of a movie (cd1, cd2, ...) into one file without re-encoding"),
                     Separator(),
                     MenuAction("check_files", "&Check Files…", self._on_check_files),
                     MenuAction("find_duplicates", labels.FIND_DUPLICATES, self._on_find_duplicates),
@@ -1755,6 +1757,7 @@ class MainWindow(QMainWindow):
                 self.actions_by_key["remux"],
                 self.actions_by_key["convert_to_mp4"],
                 self.actions_by_key["convert_rules"],
+                self.actions_by_key["join_files"],
             ]),
             Separator(),
             Submenu("Organize", [
@@ -2698,6 +2701,13 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Check Files", OPEN_FILES_FIRST)
             return
         run_check_and_repair(self, files, _error_details)
+
+    def _on_join_files(self) -> None:
+        """Media > Join Files...: the parts of a movie (the selected files) joined into one file without re-encoding --
+        see gui/join_files_dialog.py and core/join_files.py."""
+        from gui.join_files_dialog import run_join_files
+
+        run_join_files(self, self._selected_video_files() or self._visible_video_files(), _error_details)
 
     def _on_embed_posters(self) -> None:
         """Media > Embed Existing Poster Files...: the `<name>-poster.jpg` files beside the selected videos (all loaded

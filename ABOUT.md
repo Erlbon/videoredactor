@@ -433,6 +433,37 @@ Reads the log of a `fix-container --apply` (or the window's remux) and puts each
 moved to an `undone remux <date>` folder beside it, never deleted. An original whose name is taken again is left in
 quarantine and reported. Undoing twice does nothing. Exit code 1 when something could not be put back.
 
+### join-files
+
+`videoredactor join-files PATH... [--apply] [--chapters] [--log FILE]`
+
+Joins the parts of a movie that is split over several files (`Title cd1.mp4`, `Title cd2.mp4`; also `disc1`, `part 2`,
+`pt1`) into one file, **without re-encoding**: the same as Media > Join Files. The files are grouped by folder and name
+and ordered by part number; a hand-picked set of files with no part markers is one group in name order. A group is
+joined only when its parts match (same container, video codec, size, pixel format and frame rate, the same audio tracks
+and subtitle codecs); a group that differs, has a missing or repeated part number, or whose target name exists is
+reported with the reason and left alone. It is a **dry run unless you add `--apply`**. A real run joins to a temp name,
+verifies it (same tracks, a length equal to the parts' together, a full decode with zero errors, the poster and tags
+read back), then swaps it in; the tags and poster come from the first part and the Scene # is cleared. Every part is
+moved (never deleted) to a `joined originals <date>` folder (the quarantine folder of Preferences > Library safety when
+one is set, else beside the file) and a UTF-8 TSV row is written per part. Parts modified in the last 10 minutes are
+skipped. Exit code 1 when a group failed or could not be joined. Use `-R` / `--no-recurse` to look only at the files
+directly in a folder.
+
+| Option | Meaning |
+| --- | --- |
+| `--apply` | Really join. Without it nothing is changed or written. |
+| `--chapters` | Add one chapter per part (Part 1, Part 2, ...) at the joins. |
+| `--log FILE` | With `--apply`: the TSV undo log to write (default: beside the quarantine folder). |
+
+### undo-join
+
+`videoredactor undo-join LOG.tsv`
+
+Reads the log of a `join-files --apply` (or the window's join) and puts each part back; the joined file is moved to an
+`undone join <date>` folder beside it, never deleted. A part whose name is taken again is left in quarantine and
+reported. Undoing twice does nothing. Exit code 1 when something could not be put back.
+
 ### set-language
 
 `videoredactor set-language PATH... --audio LANG [--subtitle LANG] [--only-unlabelled] [--dry-run]`

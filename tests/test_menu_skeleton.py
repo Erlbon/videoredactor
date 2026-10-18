@@ -57,7 +57,7 @@ def test_other_menus_hold_what_the_spec_says(window):
         "ThePornDB…", "StashDB…", "Subtitles (OpenSubtitles, Lyrics)…", "Get Lyrics (LRCLIB)…",
     ]
     assert _labels(menus["Media"]) == [
-        "Play", "Remux to MP4…", "Convert to MP4 (H.264)…", "Convert to MP4/MKV (Rules)…", "Check Files…", "Find Duplicates…",
+        "Play", "Remux to MP4…", "Convert to MP4 (H.264)…", "Convert to MP4/MKV (Rules)…", "Join Files…", "Check Files…", "Find Duplicates…",
         "Embed Existing Poster Files…",
         "Translate Subtitles to English…", "Compare Subtitles…",
     ]
@@ -323,7 +323,7 @@ def test_context_menu_follows_the_skeleton(window, monkeypatch):
     assert shape(seen["single"]) == ["-", "Play", "-", "Redact", "Look Up", "Rename File…"] + tail
     assert shape(seen["multi"]) == ["-", "Redact", "Look Up"] + tail
     fix = next(i for i in seen["single"] if isinstance(i, mw.Submenu) and i.text == "Fix and Convert")
-    assert fix.items == [reg["remux"], reg["convert_to_mp4"], reg["convert_rules"]]
+    assert fix.items == [reg["remux"], reg["convert_to_mp4"], reg["convert_rules"], reg["join_files"]]
     organize = next(i for i in seen["single"] if isinstance(i, mw.Submenu) and i.text == "Organize")
     assert organize.items[0] is reg["rename_export_move"]
     assert organize.items[1].text == "Number Episodes…"

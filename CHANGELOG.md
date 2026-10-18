@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-18#10 -- Join Files: the parts of a movie into one file, without re-encoding
+
+- **Media > Join Files** (also right-click > Fix and Convert > Join Files, and the command line `join-files` / `undo-join`): joins a movie that is split over several files (`Title cd1.mp4`, `Title cd2.mp4`; also disc / part / pt) into one. The selected files are grouped by folder and name and ordered by part number; two files picked by hand with no part markers are one group in name order. The dialog lists each movie with its parts, lengths and whether they can be joined; a movie whose parts differ (codec, size, pixel format, frame rate, audio or subtitle tracks), has a missing or repeated part number, or whose target name exists is shown with the reason and cannot be ticked.
+- **Lossless and verified**: ffmpeg's concat with stream copy to a temp name, then checked (same tracks, length = the parts together within the Library safety tolerance per part, a full decode with zero errors, the poster and tags read back) before it is swapped in. The tags and poster come from the first part; the Scene # is cleared (the result is the whole movie). Optionally one chapter per part.
+- **Nothing is deleted**: every part is moved to a `joined originals <date>` folder (the Library safety quarantine folder when one is set, else beside the file), a TSV log is written, and Undo (command line `undo-join LOG.tsv`) puts the parts back and sets the joined file aside in `undone join <date>`. Parts modified in the last 10 minutes are skipped; unsaved edits on a part are saved first. A dry run lists what would be joined and writes nothing.
+- The list then holds the joined file instead of its parts. Not yet tried on your real parts: run a dry run first.
+
 ## 2026-10-18#09 -- cd1 / cd2 / disc1 are the part number, not part of the search
 
 - A movie split over several files (`Title cd1.mp4`, `Title CD 2`, `Title (CD 1)`, `Title [cd2]`, `Title.disc1`, `Title cd1 of 2`) is read like `part2`: the marker is removed from the search text and its number is the Scene # (the lookup fills it when the file has none). Each part is tagged on its own, with the same Title; the parts are not joined. A word that only starts with cd/disc ("Discovery", "Scandal") is not a marker. A Join Parts tool is parked for later.
