@@ -62,7 +62,7 @@ def test_other_menus_hold_what_the_spec_says(window):
         "Translate Subtitles to English…", "Compare Subtitles…",
     ]
     assert _labels(menus["Tools"]) == [
-        "Preferences…", "Create Notes…", "API Keys…", "External Tools…", "IMDb Database…", "Columns…", "Genres…",
+        "Preferences…", "Create Notes…", "API Keys…", "External Tools…", "IMDb Database…", "Studios…", "Porn Tags…", "Columns…", "Genres…",
         "Languages…", "History…",
     ]
     assert _labels(menus["Help"]) == ["Changelog…", "Credits…", "About " + mw.APP_NAME]

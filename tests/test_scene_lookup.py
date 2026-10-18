@@ -32,17 +32,17 @@ def result(**over) -> SceneResult:
 def test_field_mapping_table():
     assert sl.scene_fields(result()) == {
         "title": "Test Scene Title", "release_date": "2021-11-15", "description": "Synthetic.",
-        "studio": "Example Studio", "collection": "Example Network", "cast": "Performer One, Performer Two",
+        "studio": "Example Studio", "network": "Example Network", "cast": "Performer One, Performer Two",
         "genre_tags": "Tag A, Tag B", "director": "Director One", "comment": "StashDB: https://stashdb.org/scenes/abc",
     }
     assert sl.CONTENT_TYPE is ContentType.PORN  # adult scenes are their own content type
 
 
-def test_empty_values_are_left_out_and_a_parentless_studio_has_no_collection():
+def test_empty_values_are_left_out_and_a_parentless_studio_has_no_network():
     fields = sl.scene_fields(result(parent_studio="", description="", director="", tags=[], date=""))
     assert set(fields) == {"title", "studio", "cast", "comment"}
     assert sl.scene_fields(SceneResult(source="X", external_id="")) == {}
-    assert "collection" not in sl.scene_fields(result(studio="", parent_studio="Orphan Parent"))
+    assert "network" not in sl.scene_fields(result(studio="", parent_studio="Orphan Parent"))
 
 
 def test_the_comment_keeps_what_is_there_and_is_not_repeated():
@@ -241,8 +241,8 @@ def test_the_two_services_have_key_entries_and_env_vars():
     assert api_keys.KEYS["theporndb"][1] == "THEPORNDB_API_KEY" and api_keys.KEYS["stashdb"][1] == "STASHDB_API_KEY"
 
 
-def test_porn_is_a_content_type_with_the_movie_fields():
+def test_porn_is_a_content_type_with_the_movie_fields_plus_network_and_scene():
     from core.video_metadata import TYPE_SPECIFIC_FIELDS, fields_for_content_type
     assert ContentType("Porn") is ContentType.PORN
-    assert fields_for_content_type(ContentType.PORN) == fields_for_content_type(ContentType.MOVIE)
+    assert set(fields_for_content_type(ContentType.MOVIE)) <= set(fields_for_content_type(ContentType.PORN))
     assert TYPE_SPECIFIC_FIELDS[ContentType.PORN]

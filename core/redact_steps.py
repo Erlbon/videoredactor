@@ -67,7 +67,7 @@ from redactor_common.core.local_db import year_gap
 from redactor_common.core.rename_pattern import render_filename, unique_path, zero_pad_numeric_value
 from redactor_common.core.trash import move_to_trash
 
-from core import imdb_import, imdb_local, lyrics_subtitles, opensubtitles_client, scene_lookup, stashdb_client
+from core import controlled_vocab, imdb_import, imdb_local, lyrics_subtitles, opensubtitles_client, scene_lookup, stashdb_client
 from core import theporndb_client, tmdb_client, tvdb_client
 from core import subtitle_translation, translation_settings
 from core import conversion_plan, conversion_run, file_access, history, library_safety
@@ -1270,6 +1270,7 @@ class SceneLookupStep(VideoStep):
             lines.append(f"content_type = {fill.content_type.value!r}")
         lines += _set_fields(ctx, fill.fields)
         lines += _set_sources(ctx, fill.sources)
+        controlled_vocab.remember_porn_tags(fill.fields.get("genre_tags", ""))  # its tags join the Porn tag list
         return [f"from {fill.source} '{fill.label}'"] + lines
 
 

@@ -138,6 +138,8 @@ from gui.tool_settings_dialog import ToolSettingsDialog
 from gui.video_preferences import VideoPreferencesDialog
 from redactor_common.gui.preferences_dialog import preferences_menu_action
 from gui.vocabulary_editor_dialog import VocabularyEditorDialog
+from gui.studios_dialog import StudiosDialog
+from core import studios
 from gui.notes_dialog import create_notes, scope_candidates, scope_question, title_folders
 from core import notes_settings
 from core.notes_flow import live_fetchers as live_notes_fetchers
@@ -146,6 +148,7 @@ from gui.api_keys_dialog import ApiKeysDialog
 from core import imdb_settings
 from core.controlled_vocab import (
     get_genre_options, add_genre_option, remove_genre_option,
+    get_porn_tag_options, add_porn_tag_option, remove_porn_tag_option,
     get_language_options, add_language_option, remove_language_option,
 )
 from core.version import APP_NAME, APP_REPO_URL, APP_VERSION, RELEASE_LABEL
@@ -174,7 +177,7 @@ ALWAYS_VISIBLE_COLUMNS = ["filename", "status", "content_type"]
 # table-only, informational. Shown regardless of Content Type filter
 # (unlike Director/Cast/etc, technical info isn't content-type-specific)
 # but still user-hideable via the column context menu like anything else.
-TECHNICAL_COLUMNS = ["duration_seconds", "resolution", "size_bytes", "bitrate", "sources"]
+TECHNICAL_COLUMNS = ["duration_seconds", "resolution", "size_bytes", "bitrate", "sources", "website"]
 TECHNICAL_LABELS = {
     PATH_KEY: PATH_LABEL,  # shared Path column (redactor_common.core.path_column): sits right after Filename
     "duration_seconds": "Duration",
@@ -182,6 +185,7 @@ TECHNICAL_LABELS = {
     "size_bytes": "Size",
     "bitrate": "Bitrate",
     "sources": "Sources",  # the source ids kept in the file (read-only; hidden until you show it)
+    "website": "Website",  # derived from the Studio through the Studios table (Tools > Studios); read-only
 }
 
 # Header filters (the funnel in a column header): which columns get one. KIND_VALUES = a checklist of the
@@ -189,6 +193,7 @@ TECHNICAL_LABELS = {
 # Bitrate (almost every value is distinct, so a checklist would be useless).
 FILTER_COLUMN_KINDS = {
     "filename": KIND_TEXT, "path": KIND_TEXT, "sources": KIND_TEXT, "status": KIND_VALUES, "content_type": KIND_VALUES,
+    "website": KIND_VALUES,
     "resolution": KIND_VALUES, "language": KIND_VALUES,
     "personal_rating": KIND_VALUES, "season_number": KIND_VALUES, "episode_number": KIND_VALUES,
     **{f: KIND_TEXT for f in (
@@ -616,7 +621,13 @@ class MainWindow(QMainWindow):
                 *standard_tools_items(
                     api_keys=self._on_add_external_apis,
                     external_tools=self._on_locate_tools,
-                    app_settings=[MenuAction("imdb_settings", "IMDb &Database…", self._on_open_imdb_settings)],
+                    app_settings=[
+                        MenuAction("imdb_settings", "IMDb &Database…", self._on_open_imdb_settings),
+                        MenuAction("studios", "&Studios…", self._on_open_studios,
+                                   tooltip="Each studio's website (the Website column follows a file's Studio)"),
+                        MenuAction("porn_tags", "Po&rn Tags…", self._on_open_porn_tags,
+                                   tooltip="The pick-list for a Porn file's Tags (applied lookups add to it)"),
+                    ],
                     columns=self._on_open_column_visibility,
                     genres=self._on_open_genres,
                     languages=self._on_open_languages,
@@ -997,6 +1008,23 @@ class MainWindow(QMainWindow):
         dialog.exec()
         if dialog.changed:
             self.tag_panel.refresh_fields()
+
+    def _on_open_porn_tags(self) -> None:
+        """Tools > Porn Tags: the pick-list the panel offers for a Porn file's Tags (grown by applied lookups)."""
+        dialog = VocabularyEditorDialog(
+            "Porn Tags", get_porn_tag_options, add_porn_tag_option, remove_porn_tag_option, parent=self,
+        )
+        dialog.exec()
+        if dialog.changed:
+            self.tag_panel.refresh_fields()
+
+    def _on_open_studios(self) -> None:
+        """Tools > Studios: studio -> website; the Website column and the panel line follow it."""
+        dialog = StudiosDialog(self)
+        dialog.exec()
+        if dialog.changed:
+            self._refresh_table_rows()
+            self._on_selection_changed()
 
     def _on_open_genres(self) -> None:
         """Add/Remove Genres (Tools menu) -- same immediate-refresh
@@ -1664,6 +1692,8 @@ class MainWindow(QMainWindow):
             return format_bitrate(vf.metadata.bitrate)
         if field_name == "sources":
             return sources_summary(vf.metadata)
+        if field_name == "website":
+            return studios.website_for(vf.metadata.studio)
         if field_name == "lyrics":
             # A whole song in one cell: its non-empty lines on one line (the cell is cut at the column width).
             return " / ".join(line.strip() for line in (vf.metadata.lyrics or "").splitlines() if line.strip())
@@ -1879,6 +1909,7 @@ class MainWindow(QMainWindow):
             self.tag_panel.set_preview_image(None)
             return
         self.tag_panel.show_fields_for(selected)  # only the fields that belong to the selection's Content Type
+        self.tag_panel.set_website(self._selection_website(selected))
         merged = self._merge_metadata_for_panel(selected)
         self.tag_panel.load_values(merged)
         self.tag_panel.set_sources(selected)
@@ -1917,6 +1948,12 @@ class MainWindow(QMainWindow):
     def _on_preview_ready(self, vf: VideoFile, image: QImage) -> None:
         self.tag_panel.set_preview_caption(getattr(vf, "preview_kind", "Frame preview"))
         self.tag_panel.set_preview_qimage(image)
+
+    @staticmethod
+    def _selection_website(files: list[VideoFile]) -> str:
+        """The one website the selected files share through their Studio ('' when none or mixed)."""
+        sites = {studios.website_for(f.metadata.studio) for f in files}
+        return next(iter(sites)) if len(sites) == 1 else ""
 
     def _merge_metadata_for_panel(self, files: list[VideoFile]) -> dict[str, object]:
         """Merge selected files' fields for the panel: a field with the

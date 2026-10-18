@@ -16,7 +16,7 @@ Field mapping (result -> VideoMetadata), see scene_fields():
     release date             -> release_date            (as the service gives it: a full date or a bare year)
     description              -> description
     studio / site            -> studio
-    parent studio / network  -> collection              (only when the studio has one)
+    parent studio / network  -> network                 (only when the studio has one; Collection is the user's group)
     performers as credited   -> cast                    (comma separated; StashDB's "as" credit, else the name)
     tags                     -> genre_tags              (comma separated)
     director(s)              -> director
@@ -192,7 +192,7 @@ def scene_fields(result: SceneResult, existing_comment: str = "") -> dict[str, s
         "release_date": clean_date(result.date),
         "description": clean_text(result.description),
         "studio": clean_text(result.studio, 200, single_line=True),
-        "collection": clean_text(result.parent_studio, 200, single_line=True) if result.studio else "",
+        "network": clean_text(result.parent_studio, 200, single_line=True) if result.studio else "",
         "cast": ", ".join(clean_names(result.performers)),
         "genre_tags": ", ".join(clean_names(result.tags)),
         "director": clean_text(result.director, 300, single_line=True),

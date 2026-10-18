@@ -95,9 +95,26 @@ def ask_check_options(window, count: int) -> Optional[bool]:
     return box.isChecked()
 
 
+FIX_ORDER = ("remux", "cut", "repair", "language")  # the order "Fix All" runs the steps in, per file
+
+
+def eligible_fixes(files) -> dict[str, list[VideoFile]]:
+    """For each fix step, the checked files it applies to RIGHT NOW (from each file's current check result)."""
+    return {
+        "remux": [vf for vf in files if vf.check and getattr(vf.check, "can_remux_container", False)],
+        "cut": [vf for vf in files if vf.check and getattr(vf.check, "can_cut", False)],
+        "repair": [vf for vf in files if vf.check and vf.check.can_repair],
+        "language": [
+            vf for vf in files
+            if vf.check and any(f.code == "no_language" for f in vf.check.findings)
+            and vf.path.suffix.lower() in (".mp4", ".m4v", ".mkv")
+        ],
+    }
+
+
 class FileCheckResultsDialog(QDialog):
     """The files with findings, worst first; "Repair" accepts the dialog (`action` "repair"), "Cut Out Damaged
-    Parts..." accepts it with `action` "cut"."""
+    Parts..." accepts it with `action` "cut", "Fix All" with `action` "all" (every step that applies, in order)."""
 
     def __init__(self, checked: list[VideoFile], parent=None):
         super().__init__(parent)
@@ -109,14 +126,11 @@ class FileCheckResultsDialog(QDialog):
             (vf for vf in checked if vf.check and vf.check.findings),
             key=lambda vf: (order.get(vf.check.status, 9), vf.path.name.lower()),
         )
-        self.repairable = [vf for vf in checked if vf.check and vf.check.can_repair]
-        self.cuttable = [vf for vf in checked if vf.check and getattr(vf.check, "can_cut", False)]
-        self.remuxable = [vf for vf in checked if vf.check and getattr(vf.check, "can_remux_container", False)]
-        self.language_files = [
-            vf for vf in checked
-            if vf.check and any(f.code == "no_language" for f in vf.check.findings)
-            and vf.path.suffix.lower() in (".mp4", ".m4v", ".mkv")
-        ]
+        self.checked = checked
+        fixes = eligible_fixes(checked)
+        self.repairable, self.cuttable = fixes["repair"], fixes["cut"]
+        self.remuxable, self.language_files = fixes["remux"], fixes["language"]
+        kinds = sum(1 for step in FIX_ORDER if fixes[step])
         counts = {status: sum(1 for vf in checked if vf.check and vf.check.status == status) for status in order}
 
         layout = QVBoxLayout(self)
@@ -169,6 +183,13 @@ class FileCheckResultsDialog(QDialog):
         layout.addWidget(self.table)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        self.fix_all_button: Optional[QPushButton] = None
+        if kinds >= 2:  # one click for a file (or batch) that needs more than one kind of fix
+            fixable = {id(vf) for step in FIX_ORDER for vf in fixes[step]}
+            self.fix_all_button = buttons.addButton(
+                f"Fix All ({len(fixable)} file(s))...", QDialogButtonBox.ButtonRole.AcceptRole)
+            self.fix_all_button.setDefault(True)
+            self.fix_all_button.clicked.connect(self._choose_all)
         self.repair_button: Optional[QPushButton] = None
         self.cut_button: Optional[QPushButton] = None
         if self.repairable:
@@ -191,6 +212,10 @@ class FileCheckResultsDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _choose_all(self) -> None:
+        self.action = "all"
+        self.accept()
 
     def _choose_language(self) -> None:
         self.action = "language"
@@ -610,6 +635,9 @@ def run_check_and_repair(window, files: list[VideoFile], error_details, deep: Op
     window.status_bar.showMessage(f"Checked {len(checked)} file(s), {reported} with findings")
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return
+    if dialog.action == "all":
+        _run_fix_all(window, dialog.checked, error_details)
+        return
     if dialog.action == "language":
         from gui.track_language_dialog import run_set_track_language
 
@@ -651,3 +679,94 @@ def run_check_and_repair(window, files: list[VideoFile], error_details, deep: Op
         QMessageBox.warning(window, "Some files weren't repaired", error_details(errors))
     if notes:
         QMessageBox.information(window, "Repaired, with notes", error_details(notes))
+
+
+FIX_ALL_STEP_TEXT = {
+    "remux": "remux into the container the extension says (lossless, verified; the original is moved to the "
+             "'remuxed originals' folder with an undo log)",
+    "cut": "cut out the zero-filled parts (lossless; the rest is kept; the original goes to the Recycle Bin)",
+    "repair": "repair (seek index, the MP4's index moved to the front, duration; lossless; the original goes to "
+              "the Recycle Bin)",
+    "language": "set the language of the audio/subtitle tracks that have none (a short dialog asks which language)",
+}
+
+
+def _fix_all_plan(files: list[VideoFile]) -> tuple[dict[str, list[VideoFile]], list[str]]:
+    """What Fix All will run: the eligible files per step, minus the cut of any file that would lose more than 25% of
+    its length (that one stays a deliberate decision of the Cut button). Also returns the notes to show."""
+    fixes = eligible_fixes(files)
+    notes: list[str] = []
+    heavy = [vf for vf in fixes["cut"] if plan_cut(vf.check).heavy]
+    if heavy:
+        fixes["cut"] = [vf for vf in fixes["cut"] if vf not in heavy]
+        notes.append("Not cut by Fix All (more than 25% of the length would be lost; use Cut Out Damaged Parts "
+                     "yourself after looking at it): " + ", ".join(vf.path.name for vf in heavy))
+    return fixes, notes
+
+
+def _run_fix_all(window, files: list[VideoFile], error_details) -> None:
+    """Fix All: every step that applies, in a safe order (remux, cut, repair, language), one confirmation. After a
+    step that replaces a file, the files it touched are checked again, so the next step works from what is on disk now
+    and not from the old findings. The language step is last because it asks which language. Nothing is skipped
+    silently: one report lists what each step did."""
+    fixes, plan_notes = _fix_all_plan(files)
+    steps = [step for step in FIX_ORDER if fixes[step]]
+    if not steps:
+        QMessageBox.information(window, "Fix All", "Nothing to fix.\n\n" + "\n".join(plan_notes))
+        return
+    lines = [f"{index + 1}. {len(fixes[step])} file(s): {FIX_ALL_STEP_TEXT[step]}" for index, step in enumerate(steps)]
+    answer = QMessageBox.question(
+        window, "Fix All",
+        "Fix everything that can be fixed, in this order?\n\n" + "\n".join(lines)
+        + ("\n\n" + "\n".join(plan_notes) if plan_notes else "")
+        + "\n\nFiles with unsaved edits are saved first or skipped, as with each single fix.",
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.Yes,
+    )
+    if answer != QMessageBox.StandardButton.Yes:
+        return
+
+    report: list[str] = list(plan_notes)
+    errors: list[str] = []
+    check_errors: list[str] = []
+
+    if "remux" in steps:
+        results, _log, _cancelled = remux_files(window, fixes["remux"], dry_run=False)
+        report += [r.line() for r in results]
+        errors += [r.line() for r in results if r.status in (container_remux.FAILED, container_remux.SKIPPED)]
+        # a remuxed file lost its check result: look at it again so the next steps see what is on disk now
+        again = [vf for vf in fixes["remux"] if vf.check is None and vf.path.exists()]
+        if again:
+            check_files(window, again, check_errors, deep=False)
+    if "cut" in steps:
+        current = [vf for vf in eligible_fixes(files)["cut"] if vf in fixes["cut"]]
+        cut, cut_errors, _cancelled = cut_files(window, current)
+        report += cut_report(cut)
+        errors += cut_errors
+    if "repair" in steps:
+        current = eligible_fixes(files)["repair"]
+        repaired, repair_errors, repair_notes = repair_files(window, current)
+        report += [f"{vf.path.name}: repaired" for vf in repaired] + repair_notes
+        errors += repair_errors
+    window._refresh_table_rows()
+
+    language_files = eligible_fixes(files)["language"] if "language" in steps else []
+    parts = [f"Fix All: {len([s for s in steps if s != 'language'])} step(s) run"]
+    if errors:
+        parts.append(f"{len(errors)} problem(s)")
+    window.status_bar.showMessage(", ".join(parts))
+    if report or errors:
+        box = QMessageBox(window)
+        box.setIcon(QMessageBox.Icon.Warning if errors else QMessageBox.Icon.Information)
+        box.setWindowTitle("Fix All")
+        box.setText(", ".join(parts) + (". The track languages come next." if language_files else "."))
+        detail = list(report)
+        if errors:
+            detail += ["", "PROBLEMS:"] + errors
+        if check_errors:
+            detail += ["", "Could not be re-checked:"] + check_errors
+        box.setDetailedText("\n".join(detail))
+        box.exec()
+    if language_files:
+        from gui.track_language_dialog import run_set_track_language
+
+        run_set_track_language(window, language_files, error_details)

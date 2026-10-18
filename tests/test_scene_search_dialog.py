@@ -261,7 +261,7 @@ def test_a_pick_on_a_blank_file_fills_the_fields_and_stages_them(window, monkeyp
     source = make_source(by_hash=[scene()])
     run(window, source)
     meta = window.video_files[0].metadata
-    assert (meta.title, meta.release_date, meta.studio, meta.collection, meta.cast, meta.genre_tags, meta.director) == (
+    assert (meta.title, meta.release_date, meta.studio, meta.network, meta.cast, meta.genre_tags, meta.director) == (
         "Test Scene Title", "2021-11-15", "Example Studio", "Example Network", "Performer One, Performer Two",
         "Tag A, Tag B", "Director One")
     assert meta.description == "Synthetic description." and meta.content_type is ContentType.PORN

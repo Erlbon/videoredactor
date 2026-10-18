@@ -19,7 +19,9 @@ from redactor_common.gui.overwrite_review_dialog import resolve_overwrite_confli
 
 from core.filename_pattern import set_field_text
 from core.lookup_sources import scene_values
-from core.scene_lookup import CONTENT_TYPE, SceneLookupError, SceneResult, scene_fields
+from core import studios
+from core.controlled_vocab import remember_porn_tags
+from core.scene_lookup import CONTENT_TYPE, SceneLookupError, SceneResult, guess_search, scene_fields
 from core.video_metadata import ContentType
 from gui.scene_search_dialog import SOURCE_FACTORIES, SceneSearchDialog, SceneSource
 from gui.lookup_file_header import file_context
@@ -32,6 +34,12 @@ def fields_for(vf, result: SceneResult) -> dict[str, str]:
     fields = scene_fields(result, vf.metadata.comment)
     if vf.metadata.content_type is ContentType.UNSET:
         fields["content_type"] = CONTENT_TYPE.value
+    # The Scene # (episode number) comes from the file name (s02, Scene 3) when the file has none: the services do not
+    # reliably number their scenes.
+    if vf.metadata.episode_number is None:
+        number = guess_search(vf.path, vf.metadata).scene_number
+        if number:
+            fields["episode_number"] = str(number)
     return fields
 
 
@@ -101,6 +109,13 @@ def run_scene_lookup(window, key: str, source_factory: Optional[Callable[[], Sce
         if wrote:
             vf.dirty = True
             applied += 1
+        # What the lookup taught the app: its tags join the Porn tag list, its studio gets a website (the user's own
+        # entry always wins).
+        result = picks[index][0]
+        if "genre_tags" in values:
+            remember_porn_tags(values["genre_tags"])
+        if "studio" in values:
+            studios.remember_from_lookup(values["studio"], list(result.urls))
 
     window._refresh_table_rows()
     if window._selected_video_files():

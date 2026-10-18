@@ -118,6 +118,43 @@ def remove_genre_option(name: str) -> None:
         set_setting(VOCAB_SECTION, GENRES_KEY, _DELIMITER.join(options))
 
 
+PORN_TAGS_KEY = "porn_tags"
+
+
+def get_porn_tag_options() -> list[str]:
+    """The Porn tag list: empty at first (the movie genres do not apply), grown by every applied scene lookup
+    (remember_porn_tags) and editable under Tools > Porn Tags."""
+    raw = get_setting(VOCAB_SECTION, PORN_TAGS_KEY, "")
+    return [v for v in raw.split(_DELIMITER) if v]
+
+
+def add_porn_tag_option(name: str) -> None:
+    name = name.strip()
+    if not name:
+        return
+    options = get_porn_tag_options()
+    if name not in options:
+        options.append(name)
+        set_setting(VOCAB_SECTION, PORN_TAGS_KEY, _DELIMITER.join(options))
+
+
+def remove_porn_tag_option(name: str) -> None:
+    options = get_porn_tag_options()
+    if name in options:
+        options.remove(name)
+        set_setting(VOCAB_SECTION, PORN_TAGS_KEY, _DELIMITER.join(options))
+
+
+def remember_porn_tags(tags_text: str) -> int:
+    """Adds the tags of an applied lookup ('a, b, c') to the Porn tag list; returns how many were new. One write."""
+    options = get_porn_tag_options()
+    known = set(options)
+    new = [t for t in sorted(parse_multi_value(tags_text)) if t not in known]
+    if new:
+        set_setting(VOCAB_SECTION, PORN_TAGS_KEY, _DELIMITER.join(options + new))
+    return len(new)
+
+
 def add_language_option(name: str) -> None:
     name = name.strip()
     if not name:

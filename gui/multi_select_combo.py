@@ -88,13 +88,18 @@ class MultiSelectComboBox(QComboBox):
 
     def set_checked_items(self, values: set[str]) -> None:
         """Set which items are checked from a set of selected values
-        (e.g. from core.controlled_vocab.parse_multi_value). Values not
-        present in this widget's options list are silently ignored here
-        -- the widget can only check boxes for options it actually has;
-        core.controlled_vocab.serialize_multi_value is what preserves
-        an unrecognized value in the underlying stored string, not this
-        widget's display.
+        (e.g. from core.controlled_vocab.parse_multi_value). A value that is
+        not in the options list yet (a tag a lookup brought, a genre removed
+        from the list) is ADDED as a checked option, so it is shown and kept
+        when the field is applied instead of silently dropped.
         """
+        known = {self._model.item(row).text() for row in range(self._model.rowCount())}
+        for value in sorted(v for v in values if v not in known):
+            item = QStandardItem(value)
+            item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setData(Qt.CheckState.Unchecked, Qt.ItemDataRole.CheckStateRole)
+            self._model.appendRow(item)
+            self._options.append(value)
         for row in range(self._model.rowCount()):
             item = self._model.item(row)
             item.setCheckState(

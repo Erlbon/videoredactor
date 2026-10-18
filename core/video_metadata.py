@@ -179,9 +179,17 @@ TYPE_SPECIFIC_FIELDS = {
     # not repeated here to avoid duplicating it in fields_for_content_type().
     ContentType.TV: ["show_title", "season_number", "episode_number", "network"],
     ContentType.MUSIC_VIDEO: ["artist", "album", "composer", "lyrics"],
-    ContentType.PORN: ["director", "cast", "writer", "studio", "collection"],  # scene-shaped like a movie
+    # Porn: Studio is the site, Network its parent network, Collection the series or group the file belongs to, and
+    # the episode number is the Scene # (its place in that group); the other TV fields do not apply.
+    ContentType.PORN: ["director", "cast", "writer", "studio", "network", "collection", "episode_number"],
     ContentType.CLIP: [],
     ContentType.MISC: [],
+}
+
+# Panel labels that differ from the table's for one Content Type (a table column is shared by every type, the panel
+# shows one type at a time): a Porn file's episode number is its Scene #, and its genres are tags.
+PANEL_LABELS_BY_TYPE = {
+    ContentType.PORN: {"episode_number": "Scene #", "genre_tags": "Tags", "network": "Parent network"},
 }
 
 UNIVERSAL_FIELDS = [

@@ -25,9 +25,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
 
-from core.video_metadata import ContentType, fields_for_content_type, UNIVERSAL_FIELDS
+from core.video_metadata import ContentType, PANEL_LABELS_BY_TYPE, fields_for_content_type, UNIVERSAL_FIELDS
 from core.controlled_vocab import (
-    get_genre_options, get_language_options, parse_multi_value, serialize_multi_value,
+    get_genre_options, get_language_options, get_porn_tag_options, parse_multi_value, serialize_multi_value,
 )
 from core.table_settings import is_column_visible, sanitize_hidden_fields
 from core.config import get_setting, set_setting
@@ -61,7 +61,7 @@ FIELD_LABELS = {
     "collection": "Collection",
     "show_title": "Show Title",
     "season_number": "Season #",
-    "episode_number": "Episode #",
+    "episode_number": "Episode / Scene #",
     "network": "Network",
     "artist": "Artist",
     "album": "Album",
@@ -155,6 +155,11 @@ class TagPanel(QWidget):
         scroll_layout.addWidget(self.form_container)
         # Read-only notes under the form: the retired track title kept in an old file, and a content type that came
         # from the MP4 media type. Both hidden unless they apply to the one selected file.
+        self.website_label = QLabel()  # the selection's website, derived from its Studio (read-only; Tools > Studios)
+        self.website_label.setTextFormat(Qt.TextFormat.RichText)
+        self.website_label.setOpenExternalLinks(True)
+        self.website_label.setVisible(False)
+        scroll_layout.addWidget(self.website_label)
         self.media_type_note = QLabel("Content Type: from the file's media type (Music Video). It is saved only "
                                       "when you save this file.")
         self.media_type_note.setWordWrap(True)
@@ -240,6 +245,13 @@ class TagPanel(QWidget):
     def reset_field_order(self) -> None:
         """Back to the default field order (also: right-click a grip or the panel > Reset Field Order)."""
         self._field_order.reset()
+
+    def set_website(self, host: str) -> None:
+        """The website derived from the selection's Studio ("" hides the line)."""
+        if host:
+            safe = html.escape(host, quote=True)
+            self.website_label.setText(f'<b>Website:</b> <a href="https://{safe}">{safe}</a>')
+        self.website_label.setVisible(bool(host))
 
     def set_old_track_title(self, files: list) -> None:
         """The retired track title of the one selected file, read-only (only when it differs from the Title, so
@@ -384,7 +396,7 @@ class TagPanel(QWidget):
         field_names.sort(key=lambda f: saved_order.index(f) if f in saved_order else len(saved_order))
 
         for field_name in field_names:
-            label = FIELD_LABELS.get(field_name, field_name)
+            label = PANEL_LABELS_BY_TYPE.get(content_type, {}).get(field_name) or FIELD_LABELS.get(field_name, field_name)
             widget = self._make_input_widget(field_name)
             self._inputs[field_name] = widget
             self._labels[field_name] = QLabel(label)
@@ -440,7 +452,8 @@ class TagPanel(QWidget):
             return combo
 
         if field_name in MULTISELECT_FIELD_GETTERS:
-            multi = MultiSelectComboBox(MULTISELECT_FIELD_GETTERS[field_name]())
+            getter = get_porn_tag_options if (field_name == "genre_tags" and self._current_filter is ContentType.PORN)                 else MULTISELECT_FIELD_GETTERS[field_name]
+            multi = MultiSelectComboBox(getter())
             multi.selectionChanged.connect(lambda f=field_name: self._mark_touched(f))
             return multi
 

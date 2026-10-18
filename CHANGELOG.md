@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-18#08 -- Porn fields (Scene #, Network, Collection, Tags, Website) and Check Files > Fix All
+
+- **Fix All** in Check Files: when a file (or a batch) needs more than one kind of fix, one button runs every step that applies, in a safe order: remux to the real container, cut out zero-filled parts, repair (index to the front, duration), then Set Track Language (last, because it asks which language). One confirmation lists the steps; after a step that replaces a file the file is checked again so the next step works from what is on disk. A cut that would lose more than 25% of a file's length is left to the Cut button. One report lists what each step did.
+- **Porn files** now use: Studio = the site, **Network** = its parent network (before, the parent went into Collection), **Collection** = the series or group the file belongs to, **Scene #** = the episode number (the panel says Scene # for Porn; the table column is "Episode / Scene #"), **Tags** = its own pick-list.
+- A lookup fills Scene # from the file name (`s02`, `Scene 3`) when the file has none; the services do not number their scenes reliably.
+- **Porn Tags** (Tools > Porn Tags): separate from the movie genres, empty at first, grown by every applied lookup. A tag a file has is always shown and kept, even if it is not in any list (this also fixes a movie genre that was no longer in the list being dropped on Apply).
+- **Studios** (Tools > Studios): each studio's website; the new **Website** column and a panel line are derived from a file's Studio through it. Applied lookups add a studio's website when it has none; what you type is never overwritten.
+
 ## 2026-10-18#07 -- The side panel shows only the fields that belong to the selection's Content Type
 
 - **Dynamic field visibility**: select one file (or several of the same Content Type) and the panel shows the universal fields plus that type's own (Movie: director, cast, writer, studio, collection; TV: show title, season, episode, network; Music Video: artist, album, composer, lyrics; Porn like Movie; Clip and Misc: universal only). A mixed or unset selection shows every field, so setting the type is what narrows the panel.
