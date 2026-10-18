@@ -1771,8 +1771,7 @@ class MainWindow(QMainWindow):
             MenuAction("ctx_create_notes", "Create Notes for This Folder…", self._on_create_notes_for_selection),
         ])
         items.extend(save_selected_items(files, self._on_save_selected, lambda vf: vf.dirty and not vf.load_error))
-        items.extend([Separator(), self.remove_from_list_action])
-        return items
+        return items  # no Remove from List here: it lives in the File menu (Delete key) with Clear List
 
     def _show_table_context_menu(self, pos) -> None:
         """New: this project never had a row right-click menu before --

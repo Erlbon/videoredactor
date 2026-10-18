@@ -319,7 +319,7 @@ def test_context_menu_follows_the_skeleton(window, monkeypatch):
         return out
 
     tail = ["Clear Fields…", "Set Track Language…", "-", "Check Files…", "Fix and Convert", "-", "Organize", "Subtitles",
-            "Create Notes for This Folder…", "-", "Save Selected (0)", "-", "Remove from List"]
+            "Create Notes for This Folder…", "-", "Save Selected (0)"]
     assert shape(seen["single"]) == ["-", "Play", "-", "Redact", "Look Up", "Rename File…"] + tail
     assert shape(seen["multi"]) == ["-", "Redact", "Look Up"] + tail
     fix = next(i for i in seen["single"] if isinstance(i, mw.Submenu) and i.text == "Fix and Convert")
@@ -327,7 +327,7 @@ def test_context_menu_follows_the_skeleton(window, monkeypatch):
     organize = next(i for i in seen["single"] if isinstance(i, mw.Submenu) and i.text == "Organize")
     assert organize.items[0] is reg["rename_export_move"]
     assert organize.items[1].text == "Number Episodes…"
-    assert reg["redact"] in seen["single"] and reg["remove_from_list"] in seen["single"]
+    assert reg["redact"] in seen["single"] and reg["remove_from_list"] not in seen["single"]  # File menu + Delete key only
 
 
 def test_number_episodes_menu_entry_needs_a_selection(window, monkeypatch):

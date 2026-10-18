@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-18#11 -- No Remove from List in the right-click menu
+
+- Right-click > Remove from List is gone (it sat next to commands that look destructive, and the same job is done from File > Remove from List, the Delete key and Clear List, which stay). Nothing else in the menu changed.
+
 ## 2026-10-18#10 -- Join Files: the parts of a movie into one file, without re-encoding
 
 - **Media > Join Files** (also right-click > Fix and Convert > Join Files, and the command line `join-files` / `undo-join`): joins a movie that is split over several files (`Title cd1.mp4`, `Title cd2.mp4`; also disc / part / pt) into one. The selected files are grouped by folder and name and ordered by part number; two files picked by hand with no part markers are one group in name order. The dialog lists each movie with its parts, lengths and whether they can be joined; a movie whose parts differ (codec, size, pixel format, frame rate, audio or subtitle tracks), has a missing or repeated part number, or whose target name exists is shown with the reason and cannot be ticked.
