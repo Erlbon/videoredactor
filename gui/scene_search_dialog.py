@@ -37,6 +37,7 @@ from core.scene_lookup import (
     folder_note,
     guess_search,
     known_studios_from,
+    ladder_note,
     prefer_part_number,
     rank_marks,
     rank_results,
@@ -73,6 +74,9 @@ class SceneSource:
     uses_md5: bool = False                          # the service can match an MD5 too
     get_by_id: Optional[Callable[[SourceRef], SceneResult]] = None  # the record of an id the file already carries
     id_kinds: tuple = ("scene",)                    # the kinds of id this service's file tag can hold
+    # The structured ladder (ThePornDB): (fields, kind, trace, plain_only) -> (results, step label). None = the service
+    # only takes text (StashDB): the single title search with the studio second pass is used.
+    search_structured: Optional[Callable[..., tuple]] = None
 
     def has_key(self) -> bool:
         return bool(api_keys.get_key(self.key_id))
@@ -87,6 +91,8 @@ def theporndb_source() -> SceneSource:
         kinds=tuple((key, label) for key, (_segment, label) in theporndb_client.KINDS.items()),
         get_by_id=lambda ref: theporndb_client.get(ref.id, ref.kind),
         id_kinds=("scene", "movie", "jav"),
+        search_structured=lambda fields, kind, trace, plain_only=False: theporndb_client.search_structured(
+            fields, kind or "scene", trace=trace, plain_only=plain_only),
     )
 
 
@@ -193,6 +199,12 @@ class SceneSearchDialog(QDialog):
             self._restore_kind()
             self.kind_combo.activated.connect(self._remember_kind)  # a deliberate choice only, not a programmatic one
             search_row.addWidget(self.kind_combo)
+        self.plain_box: Optional[QCheckBox] = None
+        if source.search_structured is not None:
+            self.plain_box = QCheckBox("Plain text search")
+            self.plain_box.setToolTip("Off: the search asks for the title, then adds the date, the studio and the performers "
+                                      "as filters, relaxing them step by step. On: one plain text search, no filters.")
+            search_row.addWidget(self.plain_box)
         self.search_button = QPushButton("Search")
         self.search_button.clicked.connect(self._on_search)
         search_row.addWidget(self.search_button)
@@ -284,6 +296,8 @@ class SceneSearchDialog(QDialog):
         self.studio_button.setEnabled(has_key)
         if self.kind_combo is not None:
             self.kind_combo.setEnabled(has_key)
+        if self.plain_box is not None:
+            self.plain_box.setEnabled(has_key)
 
     def _on_open_keys(self) -> None:
         if self.open_api_keys is not None:
@@ -380,6 +394,22 @@ class SceneSearchDialog(QDialog):
     def _search_title_pass(self, text: str, year: str, kind: str, label: str):
         return run_cancellable_lookup(self, self.source.search_title, text, year, kind, label=label)
 
+    def _structured_pass(self, text: str, year: str, studio: str, kind: str):
+        """The ladder (title + date, title + studio [+ performers], title + year, plain text): (results, status note).
+        The boxes as they stand now are the title, year and studio; the date is the guess's, only while the year box
+        still holds the guess's year; the performers are the guess's."""
+        g = self.guess
+        fields = {"title": text, "text": text, "year": year, "studio": studio, "performers": list(g.performers),
+                  "date": g.date if (g.date and year == g.year) else ""}
+        trace: list = []
+        plain = bool(self.plain_box is not None and self.plain_box.isChecked())
+        out = run_cancellable_lookup(self, self.source.search_structured, fields, kind, trace, plain,
+                                     label=f"Searching {self.source.name}" + (" (plain text)..." if plain else " step by step..."))
+        if out is CANCELLED:
+            return CANCELLED, ""
+        found, label = out
+        return found, " " + ladder_note(trace, label, len(found))
+
     def _on_try_studio(self) -> None:
         self._on_search(force_studio=True)
 
@@ -399,6 +429,8 @@ class SceneSearchDialog(QDialog):
                 found = self._search_title_pass(f"{studio} {text}", year, kind,
                                                 f"Searching {self.source.name} with the studio...")
                 extra = " Searched with the studio in the text."
+            elif self.source.search_structured is not None:
+                found, extra = self._structured_pass(text, year, studio, kind)
             else:
                 found = self._search_title_pass(text, year, kind, f"Searching {self.source.name}...")
                 if found is not CANCELLED and wants_studio_pass(found, studio, text):
@@ -427,7 +459,7 @@ class SceneSearchDialog(QDialog):
         self._show(found)
         line = self._guess_line(text, year, studio)
         self.search_line = line + extra
-        self._set_status((line + extra) if found else (line + extra + " No results found."))
+        self._set_status((line + extra) if found or "Nothing" in extra else (line + extra + " No results found."))
 
     def _guess_line(self, text: str, year: str, studio: str) -> str:
         """What was searched for and where each guess came from, as the boxes stand now (edited values say so)."""

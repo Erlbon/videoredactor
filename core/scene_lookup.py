@@ -40,6 +40,9 @@ from typing import Callable, Optional
 from core import config
 from core.opensubtitles_hash import compute_moviehash
 from core.release_name_parser import parse_release_name
+from core.scene_name_parser import (  # noqa: F401 -- re-exported: the tests and the dialog import them from here
+    MIN_PLAUSIBLE_YEAR, parse_scene_name, split_leading_date, squash_name, studio_prefix,
+)
 from core.version import APP_VERSION
 from core.video_metadata import ContentType
 from redactor_common.core.lookup_client import SameSiteRedirects, make_default_fetch
@@ -430,75 +433,12 @@ COMMON_STUDIOS = (
     "Corbin Fisher", "Randy Blue", "Hot House", "Titan Media", "Treasure Island Media", "NakedSword", "Bel Ami",
 )
 
-MIN_PLAUSIBLE_YEAR = 1990
 FEW_RESULTS = 5  # a title-only pass with fewer results than this (and no file match) is retried with the studio
 
-_SEPARATORS = re.compile(r"[\s._]+")
-_DATE_FULL = re.compile(r"^[\[(]?((?:19|20)\d{2})[-._ ](\d{2})[-._ ](\d{2})[\])]?(?![0-9])")
-_DATE_SHORT = re.compile(r"^(\d{2})[-._ ](\d{2})[-._ ](\d{2})(?![0-9])")
-_DATE_COMPACT = re.compile(r"^(\d{2})(\d{2})(\d{2})(?![0-9])")
-_YEAR_LEAD = re.compile(r"^[\[(]?((?:19|20)\d{2})[\])]?(?=[\s._]|-(?![0-9])|$)")
-_SCENE_TAIL = re.compile(r"[\s._-]*\b(?:scene|sc|part|pt)[\s._#-]*0*(\d{1,3})\s*$", re.IGNORECASE)
-_XXX = re.compile(r"\bxxx\b", re.IGNORECASE)
-_NEW = re.compile(r"\bNEW\b")  # upper case only: 'new' is a title word
-
-
-def _valid_date(year: int, month: int, day: int) -> str:
-    import datetime
-
-    try:
-        found = datetime.date(year, month, day)
-    except ValueError:
-        return ""
-    if found.year < MIN_PLAUSIBLE_YEAR or found > datetime.date.today():
-        return ""
-    return found.isoformat()
-
-
-def split_leading_date(text: str) -> tuple[str, str, str]:
-    """(date 'YYYY-MM-DD' or '', year or '', the rest) of a name that STARTS with a date or a year: 2014-02-17,
-    2014.02.17, 14.02.17, 140217 (YY.MM.DD, only when valid and 1990..today), '2014 ' and '(2014)'."""
-    text = (text or "").strip()
-    match = _DATE_FULL.match(text)
-    if match:
-        date = _valid_date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
-        if date:
-            return date, date[:4], text[match.end():].strip(" ._-")
-    for pattern in (_DATE_SHORT, _DATE_COMPACT):
-        match = pattern.match(text)
-        if match:
-            yy = int(match.group(1))
-            date = _valid_date((1900 if yy >= 90 else 2000) + yy, int(match.group(2)), int(match.group(3)))
-            if date:
-                return date, date[:4], text[match.end():].strip(" ._-")
-    match = _YEAR_LEAD.match(text)
-    if match and MIN_PLAUSIBLE_YEAR <= int(match.group(1)):
-        rest = text[match.end():].strip(" ._-")
-        if rest:
-            return "", match.group(1), rest
-    return "", "", text
 
 
 def _squash_name(text: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", (text or "").lower())
-
-
-def studio_prefix(text: str, studios) -> tuple[str, str]:
-    """(the studio, the rest) when `text` starts with a known studio (words may be run together: 'EvilAngel.14.02.17')
-    and the studio ends at a word boundary; the longest studio wins. ('', text) otherwise."""
-    text = (text or "").strip()
-    spans = [m for m in re.finditer(r"[^\s._-]+", text)]
-    best_studio, best_count, best_len = "", 0, 0
-    for studio in studios:
-        want = _squash_name(studio)
-        if len(want) < 3 or len(want) <= best_len:
-            continue
-        for count in range(1, min(len(spans), 5) + 1):
-            if _squash_name("".join(m.group() for m in spans[:count])) == want:
-                best_studio, best_count, best_len = studio, count, len(want)
-    if not best_studio:
-        return "", text
-    return best_studio, text[spans[best_count - 1].end():].strip(" ._-")
+    return squash_name(text)
 
 
 def studio_in_name(name: str, studios) -> tuple[str, str]:
@@ -506,21 +446,6 @@ def studio_in_name(name: str, studios) -> tuple[str, str]:
     'Evil Angel Title 1080p'); the rest is '' when the folder IS the studio."""
     found, rest = studio_prefix(name, studios)
     return found, rest
-
-
-def _clean_title(text: str) -> tuple[str, Optional[int], str]:
-    """(title, part number, year in the text) from a name without its date and studio: release tags, XXX / NEW, a
-    trailing 'Scene 3' / 'Part 2' marker and a release-group tail are gone."""
-    guess = parse_release_name(text)
-    title = _XXX.sub(" ", guess.title)
-    title = _NEW.sub(" ", title)
-    title = re.sub(r"\s+", " ", title).strip(" -_.")
-    part = None
-    match = _SCENE_TAIL.search(title)
-    if match and match.start() > 0:
-        part = int(match.group(1))
-        title = title[: match.start()].strip(" -_.")
-    return title, part, guess.year or ""
 
 
 def _last_small_number(stem: str) -> Optional[int]:
@@ -552,6 +477,11 @@ class SearchGuess:
     title_source: str = ""    # 'metadata' when the file's own title tag is the search text, else '' (name or folder)
     date_source: str = ""
     source_notes: list = field(default_factory=list)
+
+    @property
+    def scene_number(self) -> Optional[int]:
+        """The scene / part number (sNN, Scene 3, clip3): the same value as `part_number`."""
+        return self.part_number
 
     def describe(self) -> str:
         """The status sentence: Searched for: "T" - studio from folder: S - date from file name: D"""
@@ -586,37 +516,35 @@ def guess_search(path, metadata=None, known_studios=(), prefer_folder: Optional[
     if cast:
         guess.performers = [n.strip() for n in cast.split(",") if n.strip()]
 
-    # the file name: studio prefix, then a date, then the title
+    # the file name: studio (prefix or in brackets), date, title, scene marker, performers
     stem = path.stem
-    rest = stem
-    stem_studio, after = studio_prefix(stem, studios)
-    if stem_studio:
-        rest = after
-        if not guess.studio:
-            guess.studio, guess.studio_source = stem_studio, "file name"
-    date, year, rest = split_leading_date(rest)
-    file_text, file_part, file_year = _clean_title(rest)
-    file_year = year or file_year
+    parsed = parse_scene_name(stem, studios)
+    if parsed.studio and not guess.studio:
+        guess.studio = parsed.studio
+        guess.studio_source = "file name" if parsed.studio_how != "brackets" else "file name (brackets)"
+    date, file_text, file_part, file_year = parsed.date, parsed.title, parsed.scene, parsed.year
     generic = is_generic_stem(stem) or not file_text or is_generic_stem(file_text)
 
     # the folders: the immediate parent, then its parent
     folder_title = ""
     folder_date, folder_year = "", ""
+    folder_performers: list = []
     for level, folder in ((0, path.parent), (1, path.parent.parent)):
         name = folder.name
         if not name or is_catch_all_folder(name) or is_generic_stem(name):
             continue
-        studio, remainder = studio_in_name(name, studios)
-        if studio and not guess.studio:
-            guess.studio = studio
+        in_folder = parse_scene_name(name, studios)
+        if in_folder.studio and not guess.studio:
+            guess.studio = in_folder.studio
             guess.studio_source = "folder" if level == 0 else "parent folder"
-        if level == 0:
-            use = remainder if studio else name
-            if use:
-                f_date, f_year, use = split_leading_date(use)
-                title, _folder_part, y = _clean_title(use)
-                if title and not is_generic_stem(title) and not (studio and not remainder):
-                    folder_title, folder_date, folder_year = title, f_date, f_year or y
+        if level == 0 and in_folder.title and not is_generic_stem(in_folder.title):
+            folder_title, folder_date, folder_year = in_folder.title, in_folder.date, in_folder.year
+            folder_performers = in_folder.performers
+    if folder_title and file_part is None and not generic:
+        # a movie folder with 'Title E03' files: eNN is the scene number only when the file's title is the folder's
+        again = parse_scene_name(stem, studios, episodes=True)
+        if again.scene is not None and squash_name(again.title) == squash_name(folder_title):
+            file_part, file_text = again.scene, again.title
     use_folder = generic and bool(folder_title) if prefer_folder is None else (prefer_folder and bool(folder_title))
     if use_folder:
         guess.text, guess.title_from_folder = folder_title, True
@@ -624,16 +552,26 @@ def guess_search(path, metadata=None, known_studios=(), prefer_folder: Optional[
             guess.date, guess.year, guess.date_source = folder_date, (folder_date[:4] or folder_year), "folder name"
         else:
             guess.date, guess.year, guess.date_source = date, file_year, "file name"
-        guess.part_number = _last_small_number(stem) if generic else file_part
+        guess.part_number = file_part if file_part is not None else (_last_small_number(file_text or stem) if generic else None)
         guess.source_notes.append(f'title from folder "{path.parent.name}"')
     else:
         guess.text = file_text
         guess.date, guess.year = date, file_year
         guess.date_source = "file name"
         guess.part_number = file_part
+        mine, theirs = squash_name(file_text), squash_name(folder_title)
+        if not (date or file_year) and (folder_date or folder_year) and mine and theirs and (
+                mine.startswith(theirs) or theirs.startswith(mine)):
+            # the file says nothing about when, its folder is the same movie and does: 'Title (Studio) 2022' / s01..s04
+            guess.date, guess.year, guess.date_source = folder_date, (folder_date[:4] or folder_year), "folder name"
     # What the file already says about itself beats anything guessed from its name: a title and a release date the
     # user (or an earlier lookup) put in the tags are the search, the file and folder names are only the fallback.
     # prefer_folder=True (the dialog's "Search with the folder name" box ticked by hand) still wins over the title.
+    # performers: the Cast tag first (it wins), then the names found in the file name (or the folder name when its title
+    # is the one searched), never twice.
+    found = parsed.performers or (folder_performers if guess.title_from_folder else [])
+    have = {n.casefold() for n in guess.performers}
+    guess.performers = guess.performers + [n for n in found if n.casefold() not in have]
     meta_title = (getattr(metadata, "title", "") or "").strip()
     if meta_title and prefer_folder is not True:
         guess.text, guess.title_from_folder, guess.title_source = meta_title, False, "metadata"
@@ -685,6 +623,21 @@ def wants_studio_pass(found: list, studio: str, text: str) -> bool:
     if not studio or _squash_name(studio) in _squash_name(text):
         return False
     return len(found) < FEW_RESULTS and not any(r.is_file_match or r.is_id_match for r in found)
+
+
+def ladder_note(trace: list, label: str, count: int) -> str:
+    """The status sentence of a structured search from its trace (entries (step, total, label, results)):
+    'Found 3 with title + studio: Evil Angel (step 2 of 4). Before that: step 1 of 4 title + date: 2014-02-17 found 0.'
+    or, when nothing answered, 'Nothing found. Tried: step 1 of 4 ...'. A search that sent nothing says so."""
+    tried = [f"step {step} of {total} {name} found {n}" for step, total, name, n in trace]
+    if count and trace:
+        step, total = trace[-1][0], trace[-1][1]
+        before = tried[:-1]
+        text = f"Found {count} with {label} (step {step} of {total})."
+        return text + (" Before that: " + "; ".join(before) + "." if before else "")
+    if tried:
+        return "Nothing found. Tried: " + "; ".join(tried) + "."
+    return "Nothing to search for: the title, date, studio and performer boxes are all empty."
 
 
 # --- polite HTTP --------------------------------------------------------------------------------------------------------

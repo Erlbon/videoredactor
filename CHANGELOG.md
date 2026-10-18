@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-18#04 -- A much better name parser and a step-by-step ThePornDB search
+
+Owner request 2026-10-18: ThePornDB lookups of tagged files were poor for bulk input; the API takes structured fields but the app sent one text blob.
+- **New name parser** (core/scene_name_parser.py, feeds ThePornDB AND StashDB through guess_search): splits CamelCase titles (`AnalOilLatex` -> Anal Oil Latex, acronyms and Mc/Mac names kept), reads scene/part markers (`s01`, `scene 3`, `pt2`, `part 2`, `e03` when the folder is clearly the movie) as a scene number apart from the title, finds performers (CamelCase `CharlotteSartre_RamonNomar` after the marker or as a trailing run, `Title - A B, C D`, `with` / `feat.` lists; the Cast tag wins and the name adds what it lacks), reads the studio in (parentheses) or [brackets] anywhere in the folder or file name as well as a known studio first, takes a year from the tail only when plausible (1990..today, `2 Girls 1 Cup` stays), takes the folder's year when the file has none and the folder is the same movie, and drops XXX / WEB-DL / NEW / REPACK / 480p-4K / x264 / HEVC / (Split Scenes) / release groups (`-GRP`, `[GRP]`). tests/data/scene_names.tsv holds 60+ real-style names (folder, file, expected title, studio, date/year, performers, scene); every row is a test.
+- **Structured ThePornDB search** (core/theporndb_client.py search_structured): a short ladder that stops at the first step with results: 1 title + exact date, 2 title + studio (+ performers; or performers + studio with no title), 3 title + year, 4 the old plain `q` text search. The filters are title, date + date_operation, site + site_operation (Site/Parent/Network), performers as a deepObject (`performers[0]=Name`), year. Runs for Scene, Movie and JAV. The status line says which step answered ("Found 3 with title + studio: Evil Angel (step 2 of 4)") and, when nothing did, every step tried. New **Plain text search** box forces step 4 only; an edited title box still uses the guessed date, studio and performers. StashDB keeps its single search (its API is different) but gets the better guess.
+- Not proven against the live service (no key was available when this was written): check the step line on real files.
+
 ## 2026-10-18#03 -- One Skip button per lookup dialog
 
 - Fixed: **two 'Skip This File' buttons** showed in a batch lookup (ThePornDB, StashDB, TMDB: one in the header, one in the bottom row). The header's is hidden now whenever the bottom row has its own.
