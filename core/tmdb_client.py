@@ -134,36 +134,45 @@ def search_movies(query: str, year: Optional[str] = None) -> list[MovieCandidate
     function auto-selecting a 'best' match (per explicit instruction:
     always show the picker, even for one strong match).
     """
-    params = {"query": query, "include_adult": "false"}
-    if year:
-        params["year"] = year
-    data = _get_json("/search/movie", params)
-    return [
-        MovieCandidate(
-            tmdb_id=as_int(r.get("id")),
-            title=as_text(r.get("title")),
-            release_date=as_text(r.get("release_date")),
-            overview=as_text(r.get("overview")),
-            poster_path=_path_or_none(r.get("poster_path")),
-        )
-        for r in dict_items(data.get("results")) if as_int(r.get("id"))
-    ]
+    # A short ladder, stopping at the first step with results: the year as the FIRST release year (strict), then as
+    # any release year (TMDB's looser `year`, which also counts regional releases), then no year at all.
+    steps = [{"primary_release_year": year}, {"year": year}, {}] if year else [{}]
+    for extra in steps:
+        data = _get_json("/search/movie", {"query": query, "include_adult": "false", **extra})
+        found = [
+            MovieCandidate(
+                tmdb_id=as_int(r.get("id")),
+                title=as_text(r.get("title")),
+                release_date=as_text(r.get("release_date")),
+                overview=as_text(r.get("overview")),
+                poster_path=_path_or_none(r.get("poster_path")),
+            )
+            for r in dict_items(data.get("results")) if as_int(r.get("id"))
+        ]
+        if found:
+            return found
+    return []
 
 
-def search_tv(query: str) -> list[TVCandidate]:
+def search_tv(query: str, year: Optional[str] = None) -> list[TVCandidate]:
     """Search TMDB for TV shows matching `query` (show-level search --
-    season/episode lookup is a separate step once a show is picked)."""
-    data = _get_json("/search/tv", {"query": query})
-    return [
-        TVCandidate(
-            tmdb_id=as_int(r.get("id")),
-            name=as_text(r.get("name")),
-            first_air_date=as_text(r.get("first_air_date")),
-            overview=as_text(r.get("overview")),
-            poster_path=_path_or_none(r.get("poster_path")),
-        )
-        for r in dict_items(data.get("results")) if as_int(r.get("id"))
-    ]
+    season/episode lookup is a separate step once a show is picked).
+    With a `year` the first-air year is tried first, then no year."""
+    for extra in ([{"first_air_date_year": year}, {}] if year else [{}]):
+        data = _get_json("/search/tv", {"query": query, **extra})
+        found = [
+            TVCandidate(
+                tmdb_id=as_int(r.get("id")),
+                name=as_text(r.get("name")),
+                first_air_date=as_text(r.get("first_air_date")),
+                overview=as_text(r.get("overview")),
+                poster_path=_path_or_none(r.get("poster_path")),
+            )
+            for r in dict_items(data.get("results")) if as_int(r.get("id"))
+        ]
+        if found:
+            return found
+    return []
 
 
 def get_movie_details(tmdb_id: int) -> dict:

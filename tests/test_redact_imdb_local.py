@@ -241,7 +241,7 @@ def test_thetvdb_still_backs_up_a_local_tv_match(work, bin_, tmp_path, monkeypat
         raise tmdb_client.TMDBError("No TMDB API key configured.")
 
     monkeypatch.setattr(tmdb_client, "search_tv", no_key)
-    monkeypatch.setattr(tvdb_client, "search_series", lambda title: [
+    monkeypatch.setattr(tvdb_client, "search_series", lambda title, year=None: [
         tvdb_client.SeriesCandidate(9, "Quillfeather", "2008-01-20", "", None)])
     monkeypatch.setattr(tvdb_client, "get_series_details", lambda i: {
         "show_title": "Quillfeather", "description": "Chem.", "genre_tags": "Drama", "release_date": "",

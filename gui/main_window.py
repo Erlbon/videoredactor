@@ -103,7 +103,7 @@ from redactor_common.gui.redact_dialog import run_redact as run_redact_dialog
 from redactor_common.gui.colors import (
     DIRTY_COLOR, ERROR_COLOR, HIGHLIGHT_TEXT_COLOR, SAVE_FAILED_COLOR, TABLE_SELECTION_STYLESHEET,
 )
-from redactor_common.gui.context_menu import show_table_context_menu
+from redactor_common.gui.context_menu import save_selected_items, show_table_context_menu
 from redactor_common.gui.quick_series_number import prompt_and_generate_series_numbers
 from redactor_common.gui.column_menu import show_column_header_context_menu
 from redactor_common.gui.column_settings_dialog import ColumnSettingsDialog
@@ -1691,38 +1691,53 @@ class MainWindow(QMainWindow):
         return files
 
     def _table_context_extra_items(self, files: list[VideoFile]) -> list:
+        """The row right-click menu below the shared Open / Reveal / Copy Path block, grouped by purpose: play, then
+        the metadata work (Redact, Look Up, Rename, Clear Fields, Track Language), then the file work (Check Files and
+        a Fix and Convert submenu), then the folder-level helpers, then Save Selected and Remove from List. Reuses the
+        real QActions of the menu bar wherever there is one, so the shortcut hints can never drift."""
+        one_ok = len(files) == 1 and not files[0].load_error
         items: list = [Separator()]
-        # Only offered for a single file -- renaming several files
-        # to the same name doesn't make sense. Also reachable by
-        # double-clicking the Filename cell (see _on_cell_double_clicked()).
-        # Reuses the actual File-menu QAction (F2) rather than
-        # building a fresh one -- same object, so this shows the
-        # real shortcut hint and can never drift out of sync with it.
-        if len(files) == 1 and not files[0].load_error:
-            items.extend([self.rename_file_action, Separator()])
-        # Every lookup from the Metadata menu, so none needs a trip to
-        # the menu bar (no shortcuts here: they already live on the
-        # menu's own actions).
-        if len(files) == 1 and not files[0].load_error:
+        if one_ok:
             items.extend([self.actions_by_key["play"], Separator()])
+        items.append(self.redact_action)
+        # Every lookup from the Metadata menu, so none needs a trip to the menu bar (no shortcuts here: they already
+        # live on the menu's own actions).
         look_up = self._look_up_entries("ctx_", with_shortcuts=False)
-        if not (len(files) == 1 and files[0].metadata.content_type is ContentType.MUSIC_VIDEO and not files[0].load_error):
+        if not (one_ok and files[0].metadata.content_type is ContentType.MUSIC_VIDEO):
             look_up = [e for e in look_up if e.key != "ctx_get_lyrics"]  # Get Lyrics: one Music Video only
         items.append(Submenu("Look Up", look_up))
+        # Renaming several files to the same name doesn't make sense; also reachable by double-clicking the Filename
+        # cell (see _on_cell_double_clicked()).
+        if one_ok:
+            items.append(self.rename_file_action)
         items.append(MenuAction("ctx_clear_fields", "Clear Fields…", self._on_clear_fields))
         track_ok, track_tip = self._track_language_state(files)
         items.append(MenuAction("ctx_set_track_language", "Set Track Language…", self._on_set_track_language,
                                 enabled=track_ok, tooltip=track_tip))
-        items.append(Submenu("Organize", [
-            self.actions_by_key["rename_export_move"],
-            MenuAction("ctx_number_episodes", "Number Episodes…", lambda: self._quick_number_episodes(files)),
-        ]))
-        items.append(Submenu("Subtitles", [
-            self.actions_by_key["translate_subtitles"],
-            self.actions_by_key["compare_subtitles"],
-        ]))
-        items.append(MenuAction("ctx_create_notes", "Create Notes for This Folder…", self._on_create_notes_for_selection))
-        items.extend([Separator(), self.redact_action, Separator(), self.remove_from_list_action])
+        # Check Files is the one entry to the scan: its results offer Repair, Cut Out Damaged Parts and the
+        # wrong-container fix, which need the scan's findings and so cannot be started without it.
+        items.extend([
+            Separator(),
+            MenuAction("ctx_check_files", "Check Files…", self._on_check_files,
+                       tooltip="Scan for damage, then repair, cut out damaged parts or fix a wrong container"),
+            Submenu("Fix and Convert", [
+                self.actions_by_key["remux"],
+                self.actions_by_key["convert_to_mp4"],
+                self.actions_by_key["convert_rules"],
+            ]),
+            Separator(),
+            Submenu("Organize", [
+                self.actions_by_key["rename_export_move"],
+                MenuAction("ctx_number_episodes", "Number Episodes…", lambda: self._quick_number_episodes(files)),
+            ]),
+            Submenu("Subtitles", [
+                self.actions_by_key["translate_subtitles"],
+                self.actions_by_key["compare_subtitles"],
+            ]),
+            MenuAction("ctx_create_notes", "Create Notes for This Folder…", self._on_create_notes_for_selection),
+        ])
+        items.extend(save_selected_items(files, self._on_save_selected, lambda vf: vf.dirty and not vf.load_error))
+        items.extend([Separator(), self.remove_from_list_action])
         return items
 
     def _show_table_context_menu(self, pos) -> None:
@@ -1740,8 +1755,6 @@ class MainWindow(QMainWindow):
             get_selected_items=self._selected_video_files,
             get_path=lambda vf: vf.path,
             extra_items=self._table_context_extra_items,
-            save_selected=self._on_save_selected,
-            is_dirty=lambda vf: vf.dirty and not vf.load_error,
         )
 
     def _on_save_selected(self, files: list[VideoFile]) -> None:

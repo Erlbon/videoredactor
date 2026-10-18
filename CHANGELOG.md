@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-18#05 -- Review Changes redesign, year-aware TMDB/TheTVDB search, tidier right-click menu
+
+- **Review Changes** (shared, redactor_common 2026-10-18-04): the Apply tickbox is the first column, long values wrap, the current value is red where a real value would be lost and the new value green, and with several files a file list sits beside the fields of the selected file (overwrites tinted amber; Tick All in File / Tick All Files / Next File with Overwrite). Every column sorts.
+- **TMDB and TheTVDB search use the year properly**: movies try the first-release year, then any release year, then no year; TV shows try the first-air year, then none (the automatic lookup now passes the file's year to TMDB TV and TheTVDB; before it passed none). Each step stops at the first hit.
+- **Right-click menu regrouped**: Play, Redact, Look Up, Rename, Clear Fields, Set Track Language; then Check Files (the entry to Repair, Cut Out Damaged Parts and the wrong-container fix, which need the scan) and a Fix and Convert submenu (Remux, Convert H.264, Convert by rules); then Organize, Subtitles, Create Notes; Save Selected and Remove from List last.
+- Not proven against the live services (no keys here).
+
 ## 2026-10-18#04 -- A much better name parser and a step-by-step ThePornDB search
 
 Owner request 2026-10-18: ThePornDB lookups of tagged files were poor for bulk input; the API takes structured fields but the app sent one text blob.

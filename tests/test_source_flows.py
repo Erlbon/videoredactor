@@ -118,9 +118,7 @@ def review_dialog(monkeypatch, accept=True, shown=None, tick=()):
     def fake_exec(self):
         if shown is not None:
             shown.append(self)
-        for (index, attr), box in self._controller._checkboxes.items():
-            if attr in tick:
-                box.setChecked(True)
+        self.tick_fields(set(tick))
         return QDialog.DialogCode.Accepted if accept else QDialog.DialogCode.Rejected
 
     monkeypatch.setattr(OverwriteReviewDialog, "exec", fake_exec)
@@ -189,11 +187,10 @@ def test_an_existing_cover_is_replaced_only_when_the_review_ticks_it(window, fak
     review_dialog(monkeypatch, accept=True, shown=shown)
     window._import_tmdb_movies([vf], 0)
     assert len(shown) == 1 and vf.metadata.cover_pending is None  # unticked by default: the old cover stays
-    table = shown[0]._controller.table
-    labels = [table.item(r, 1).text() for r in range(table.rowCount())]
-    assert "Poster (embedded)" in labels
-    row = labels.index("Poster (embedded)")
-    assert table.item(row, 2).text() == "JPEG 600x900, 90 KB" and table.item(row, 3).text().startswith("new poster: JPEG 600x900")
+    rows = {label: (old, new) for label, old, new in shown[0].field_rows()}
+    assert "Poster (embedded)" in rows
+    old, new = rows["Poster (embedded)"]
+    assert old == "JPEG 600x900, 90 KB" and new.startswith("new poster: JPEG 600x900")
 
     review_dialog(monkeypatch, accept=True, tick=("cover_info",))  # the user ticks the replacement
     window._import_tmdb_movies([vf], 0)

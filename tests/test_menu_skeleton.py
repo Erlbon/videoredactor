@@ -318,12 +318,12 @@ def test_context_menu_follows_the_skeleton(window, monkeypatch):
                 out.append(item.text().replace("&", ""))
         return out
 
-    assert shape(seen["single"]) == [
-        "-", "Rename File…", "-", "Play", "-", "Look Up", "Clear Fields…", "Set Track Language…", "Organize", "Subtitles", "Create Notes for This Folder…", "-",
-        "Redact", "-", "Remove from List",
-    ]
-    assert shape(seen["multi"]) == ["-", "Look Up", "Clear Fields…", "Set Track Language…", "Organize", "Subtitles", "Create Notes for This Folder…", "-", "Redact", "-",
-                                    "Remove from List"]
+    tail = ["Clear Fields…", "Set Track Language…", "-", "Check Files…", "Fix and Convert", "-", "Organize", "Subtitles",
+            "Create Notes for This Folder…", "-", "Save Selected (0)", "-", "Remove from List"]
+    assert shape(seen["single"]) == ["-", "Play", "-", "Redact", "Look Up", "Rename File…"] + tail
+    assert shape(seen["multi"]) == ["-", "Redact", "Look Up"] + tail
+    fix = next(i for i in seen["single"] if isinstance(i, mw.Submenu) and i.text == "Fix and Convert")
+    assert fix.items == [reg["remux"], reg["convert_to_mp4"], reg["convert_rules"]]
     organize = next(i for i in seen["single"] if isinstance(i, mw.Submenu) and i.text == "Organize")
     assert organize.items[0] is reg["rename_export_move"]
     assert organize.items[1].text == "Number Episodes…"

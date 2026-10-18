@@ -181,28 +181,31 @@ def _get_json(path: str, params: Optional[dict] = None, _retrying: bool = False)
         raise
 
 
-def search_series(query: str) -> list[SeriesCandidate]:
+def search_series(query: str, year: Optional[str] = None) -> list[SeriesCandidate]:
     """Search TheTVDB for TV series matching `query`. Always returns
     the full candidate list -- the picker dialog is responsible for
     letting the user choose, never this function auto-selecting a
     "best" match, same principle as tmdb_client.py's search_movies/
     search_tv (always show the picker, even for one strong match).
     """
-    data = _get_json("/search", {"query": query, "type": "series"})
-    results = []
-    for r in dict_items(data.get("data")):
-        tvdb_id = as_int(r.get("tvdb_id")) or as_int(r.get("id"))
-        if not tvdb_id:
-            continue  # no usable id: it cannot be picked
-        image_url = r.get("image_url")
-        results.append(SeriesCandidate(
-            tvdb_id=tvdb_id,
-            name=as_text(r.get("name")),
-            first_air_time=as_text(r.get("first_air_time")),
-            overview=as_text(r.get("overview")),
-            image_url=image_url if isinstance(image_url, str) else None,
-        ))
-    return results
+    for extra in ([{"year": year}, {}] if year else [{}]):  # the year first, then without it
+        data = _get_json("/search", {"query": query, "type": "series", **extra})
+        results = []
+        for r in dict_items(data.get("data")):
+            tvdb_id = as_int(r.get("tvdb_id")) or as_int(r.get("id"))
+            if not tvdb_id:
+                continue  # no usable id: it cannot be picked
+            image_url = r.get("image_url")
+            results.append(SeriesCandidate(
+                tvdb_id=tvdb_id,
+                name=as_text(r.get("name")),
+                first_air_time=as_text(r.get("first_air_time")),
+                overview=as_text(r.get("overview")),
+                image_url=image_url if isinstance(image_url, str) else None,
+            ))
+        if results:
+            return results
+    return []
 
 
 def get_series_details(series_id: int) -> dict:

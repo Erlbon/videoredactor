@@ -1085,7 +1085,7 @@ class LookupStep(VideoStep):
         if held is not None:  # the file already names the show: no search, no guessing
             return self._tv_by_id(ctx, source, int(held.id.split("/")[0]), season, episode, notes, skip)
         try:
-            candidates = ctx.bg(client.search_tv if tmdb else client.search_series, title)
+            candidates = ctx.bg(client.search_tv if tmdb else client.search_series, title, year or None)
         except error as exc:
             notes.append(f"{source} lookup unavailable: {exc}")
             return None

@@ -471,7 +471,7 @@ def test_path_tags_pattern_comes_from_the_option_then_the_history(work, bin_, tm
 
 def fake_tmdb(monkeypatch, movies=(), shows=(), episodes=None):
     monkeypatch.setattr(tmdb_client, "search_movies", lambda title, year=None: list(movies))
-    monkeypatch.setattr(tmdb_client, "search_tv", lambda title: list(shows))
+    monkeypatch.setattr(tmdb_client, "search_tv", lambda title, year=None: list(shows))
     monkeypatch.setattr(tmdb_client, "get_movie_details", lambda i: {
         "title": "Inception", "description": "Dreams.", "genre_tags": "Sci-Fi", "release_date": "2010-07-16",
         "language": "en", "director": "Nolan", "cast": "DiCaprio", "studio": "WB", "_poster_path": "/x.jpg",
@@ -598,7 +598,7 @@ def test_thetvdb_is_the_fallback_when_tmdb_fails(work, bin_, tmp_path, monkeypat
         raise tmdb_client.TMDBError("No TMDB API key configured.")
 
     monkeypatch.setattr(tmdb_client, "search_tv", no_key)
-    monkeypatch.setattr(tvdb_client, "search_series", lambda title: [
+    monkeypatch.setattr(tvdb_client, "search_series", lambda title, year=None: [
         tvdb_client.SeriesCandidate(9, "The Office", "2005-03-24", "", None)])
     monkeypatch.setattr(tvdb_client, "get_series_details", lambda i: {
         "show_title": "The Office", "description": "", "genre_tags": "Comedy", "release_date": "",
