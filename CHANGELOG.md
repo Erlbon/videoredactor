@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-18#09 -- cd1 / cd2 / disc1 are the part number, not part of the search
+
+- A movie split over several files (`Title cd1.mp4`, `Title CD 2`, `Title (CD 1)`, `Title [cd2]`, `Title.disc1`, `Title cd1 of 2`) is read like `part2`: the marker is removed from the search text and its number is the Scene # (the lookup fills it when the file has none). Each part is tagged on its own, with the same Title; the parts are not joined. A word that only starts with cd/disc ("Discovery", "Scandal") is not a marker. A Join Parts tool is parked for later.
+
 ## 2026-10-18#08 -- Porn fields (Scene #, Network, Collection, Tags, Website) and Check Files > Fix All
 
 - **Fix All** in Check Files: when a file (or a batch) needs more than one kind of fix, one button runs every step that applies, in a safe order: remux to the real container, cut out zero-filled parts, repair (index to the front, duration), then Set Track Language (last, because it asks which language). One confirmation lists the steps; after a step that replaces a file the file is checked again so the next step works from what is on disk. A cut that would lose more than 25% of a file's length is left to the Cut button. One report lists what each step did.

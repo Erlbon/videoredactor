@@ -102,3 +102,25 @@ def test_a_lookup_fills_the_scene_number_from_the_file_name_when_the_file_has_no
     assert fields["episode_number"] == "2" and fields["network"] == "Evil Angel Network" and "collection" not in fields
     vf.metadata.episode_number = 5  # a number the file already has is never replaced
     assert "episode_number" not in fields_for(vf, result)
+
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("name, title, part", [
+    ("Strap Some Boyz 2 cd1.mp4", "Strap Some Boyz 2", 1),
+    ("Strap Some Boyz 2 CD2.mp4", "Strap Some Boyz 2", 2),
+    ("Strap.Some.Boyz.2.disc1.mp4", "Strap Some Boyz 2", 1),
+    ("Title (CD 1).mp4", "Title", 1),
+    ("Title [cd2].mp4", "Title", 2),
+    ("Title cd1 of 2.mp4", "Title", 1),
+    ("Discovery Channel.mp4", "Discovery Channel", None),  # a word that merely starts with cd/disc is not a marker
+    ("Scandal.mp4", "Scandal", None),
+])
+def test_cd_and_disc_markers_are_the_part_number_and_not_part_of_the_search(name, title, part):
+    from pathlib import Path
+
+    from core.scene_lookup import guess_search
+
+    guess = guess_search(Path("C:/x/Movies") / name, VideoMetadata())
+    assert (guess.text, guess.scene_number) == (title, part)

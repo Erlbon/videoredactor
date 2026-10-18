@@ -10,7 +10,7 @@ structured filters (title, date, site, performers) and a text blob wastes them:
                                     in parentheses / brackets anywhere ('(Evil Angel)', '[Evil Angel]')
     date / year  2014-02-17 / 2014  a leading date (2014-02-17, 14.02.17, 140217), an ISO date anywhere, '(2022)', a
                                     trailing 4-digit year 1990..today ('2 Girls 1 Cup' keeps its numbers: not a year)
-    scene        3                  sNN, sceneNN, scene NN, scNN, ptNN, partNN, part NN ('eNN' only with episodes=True,
+    scene        3                  sNN, sceneNN, scene NN, scNN, ptNN, partNN, part NN, cdNN, discNN (a movie split over several files: the part number) ('eNN' only with episodes=True,
                                     for a folder that is clearly one movie)
     performers   ['Charlotte Sartre', 'Ramon Nomar']   CamelCase 'FirstLast' tokens after the scene marker or as a
                                     trailing run, 'Title - A B, C D', 'Title with / feat. A B and C D'
@@ -130,10 +130,10 @@ def is_noise(token: str) -> bool:
 
 # --- scene markers -------------------------------------------------------------------------------------------------------
 
-_SCENE_ONE = re.compile(r"(?:scene|sc|part|pt)0*(\d{1,3})", re.IGNORECASE)
+_SCENE_ONE = re.compile(r"(?:scene|sc|part|pt|cd|disc|disk)0*(\d{1,3})", re.IGNORECASE)
 _SCENE_S = re.compile(r"s0*(\d{1,2})", re.IGNORECASE)
 _EPISODE = re.compile(r"e(?:p|pisode)?0*(\d{1,3})", re.IGNORECASE)
-_SCENE_WORD = re.compile(r"(?:scene|sc|part|pt)", re.IGNORECASE)
+_SCENE_WORD = re.compile(r"(?:scene|sc|part|pt|cd|disc|disk)", re.IGNORECASE)
 _NUMBER_TOKEN = re.compile(r"#?0*(\d{1,3})")
 
 
