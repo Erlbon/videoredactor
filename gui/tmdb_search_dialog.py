@@ -23,6 +23,7 @@ from PyQt6.QtCore import Qt
 
 from core.config import get_setting, set_setting
 from gui.lookup import run_lookup
+from redactor_common.gui.remembered_layout import remember_layout, results_detail_splitter
 from gui.lookup_file_header import add_bottom_skip_button, add_file_header
 from gui.tmdb_attribution import TmdbAttributionFooter
 from core.tmdb_client import (
@@ -130,12 +131,11 @@ class TMDBSearchDialog(QDialog):
         self.results_list = QListWidget()
         self.results_list.itemSelectionChanged.connect(self._on_selection_changed)
         self.results_list.itemDoubleClicked.connect(self._on_accept)
-        layout.addWidget(self.results_list)
 
         self.overview_label = QTextEdit()
         self.overview_label.setReadOnly(True)
-        self.overview_label.setMaximumHeight(100)
-        layout.addWidget(self.overview_label)
+        self.splitter = results_detail_splitter(self.results_list, self.overview_label)
+        layout.addWidget(self.splitter, 1)
 
         self.poster_box: Optional[QCheckBox] = None
         self.landscape_box: Optional[QCheckBox] = None
@@ -169,6 +169,7 @@ class TMDBSearchDialog(QDialog):
         self.cancel_button.clicked.connect(self.reject)
         button_row.addWidget(self.cancel_button)
         layout.addLayout(button_row)
+        remember_layout(self, type(self).__name__.lower(), get_setting, set_setting, self.splitter)
 
         if existing is not None:
             self._show_existing()

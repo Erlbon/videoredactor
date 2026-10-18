@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
 )
 from redactor_common.gui.background_call import BackgroundCancelled, call_in_background
 from redactor_common.gui.progress import run_with_progress
+from redactor_common.gui.sortable_table import NaturalTableWidgetItem, enable_sorting
 from redactor_common.gui.table_columns import make_columns_resizable
 
 from core.embed_posters import EmbedOutcome, PosterOffer, embed_offer, find_offers
@@ -32,6 +33,13 @@ SCALING_SENTENCE = (f"The poster is scaled to at most {MAX_WIDTH} px and {MAX_BY
                     "the original file goes to the Recycle Bin.")
 HEADERS = ["Embed", "Video", "Poster file", "Size", "True poster?", "Cover now"]
 COL_TICK, COL_VIDEO, COL_FILE, COL_SIZE, COL_VERDICT, COL_COVER = range(6)
+
+
+class TickItem(QTableWidgetItem):
+    """The checkbox cell: sorts by its state (ticked first when descending)."""
+
+    def __lt__(self, other) -> bool:
+        return self.checkState().value < other.checkState().value
 
 
 class EmbedPostersDialog(QDialog):
@@ -60,9 +68,10 @@ class EmbedPostersDialog(QDialog):
         import os
 
         for row, offer in enumerate(offers):
-            tick = QTableWidgetItem()
+            tick = TickItem()
             tick.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
             tick.setCheckState(Qt.CheckState.Checked if offer.default_ticked else Qt.CheckState.Unchecked)
+            tick.setData(Qt.ItemDataRole.UserRole, row)  # the offer's index: survives sorting
             self.table.setItem(row, COL_TICK, tick)
             verdict = "Yes" if offer.verdict.ok else f"No: {offer.verdict.reason}"
             cells = {
@@ -73,9 +82,11 @@ class EmbedPostersDialog(QDialog):
                 COL_COVER: offer.existing_cover or "none",
             }
             for col, text in cells.items():
-                item = QTableWidgetItem(text)
+                item = NaturalTableWidgetItem(text)
                 item.setToolTip(text)
+                item.setData(Qt.ItemDataRole.UserRole, row)
                 self.table.setItem(row, col, item)
+        enable_sorting(self.table)  # after the fill; the rows stay in order until a header is clicked
         layout.addWidget(self.table, 1)
         make_columns_resizable(self.table, wide_column=COL_VIDEO)
 
@@ -90,7 +101,12 @@ class EmbedPostersDialog(QDialog):
         layout.addLayout(buttons)
 
     def ticked_offers(self) -> list[PosterOffer]:
-        return [o for row, o in enumerate(self.offers) if self.table.item(row, COL_TICK).checkState() == Qt.CheckState.Checked]
+        out = []
+        for row in range(self.table.rowCount()):  # visual rows: the offer comes from the item, not the row number
+            tick = self.table.item(row, COL_TICK)
+            if tick.checkState() == Qt.CheckState.Checked:
+                out.append(self.offers[tick.data(Qt.ItemDataRole.UserRole)])
+        return sorted(out, key=self.offers.index)
 
     def _on_embed(self) -> None:
         if not self.ticked_offers():

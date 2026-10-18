@@ -42,6 +42,8 @@ from PyQt6.QtWidgets import (
 )
 
 from gui.lookup_file_header import add_file_header
+from core.config import get_setting, set_setting
+from redactor_common.gui.remembered_layout import remember_layout, results_detail_splitter
 
 
 CHOICE_EPISODE = "episode"
@@ -124,12 +126,11 @@ class EpisodePickerDialog(QDialog):
         self.episode_list = QListWidget()
         self.episode_list.itemSelectionChanged.connect(self._on_episode_selection_changed)
         self.episode_list.itemDoubleClicked.connect(self._on_accept)
-        layout.addWidget(self.episode_list)
 
         self.overview_box = QTextEdit()
         self.overview_box.setReadOnly(True)
-        self.overview_box.setMaximumHeight(100)
-        layout.addWidget(self.overview_box)
+        self.splitter = results_detail_splitter(self.episode_list, self.overview_box)
+        layout.addWidget(self.splitter, 1)
 
         footer = source.footer(self)
         if footer is not None:
@@ -166,6 +167,7 @@ class EpisodePickerDialog(QDialog):
         self.cancel_button.clicked.connect(self.reject)
         button_row.addWidget(self.cancel_button)
         layout.addLayout(button_row)
+        remember_layout(self, type(self).__name__.lower(), get_setting, set_setting, self.splitter)
 
         self._load_seasons()
 

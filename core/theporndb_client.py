@@ -145,6 +145,15 @@ def _landscape_urls(scene: dict) -> list[str]:
     return [u for u in dict.fromkeys(clean_url(c) for c in candidates) if u]
 
 
+def _scene_performers(scenes: Any) -> list[str]:
+    """A movie record often lists its performers only on the scenes inside it: their distinct names, in order."""
+    names: list[str] = []
+    for item in scenes if isinstance(scenes, list) else []:
+        if isinstance(item, dict):
+            names.extend(n for n in _names(item.get("performers")) if n not in names)
+    return names
+
+
 def parse_scene(scene: Any, match_kind: str = MATCH_TITLE, kind: str = "scene") -> Optional[SceneResult]:
     """A SceneResource (dict) as a SceneResult; None for anything that is not a record with an id or a title."""
     if not isinstance(scene, dict):
@@ -167,7 +176,7 @@ def parse_scene(scene: Any, match_kind: str = MATCH_TITLE, kind: str = "scene") 
         date=clean_date(scene.get("date")),
         studio=studio,
         parent_studio=_name_of(parent) if _name_of(parent) != studio else "",
-        performers=_names(scene.get("performers")),
+        performers=_names(scene.get("performers")) or _scene_performers(scene.get("scenes")),
         tags=_names(scene.get("tags")),
         description=clean_text(scene.get("description")),
         director=", ".join(_names(scene.get("directors"))),

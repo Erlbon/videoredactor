@@ -23,6 +23,8 @@ from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QTableWidget,
     QTableWidgetItem, QTextEdit, QVBoxLayout,
 )
+from redactor_common.gui.remembered_layout import remember_layout, results_detail_splitter
+from redactor_common.gui.sortable_table import NaturalTableWidgetItem, enable_sorting, suspend_sorting
 from redactor_common.gui.table_columns import make_columns_resizable
 
 from redactor_common.core.source_ids import SourceRef
@@ -33,9 +35,14 @@ from core.source_tags import ref_in
 from core.scene_lookup import (
     KEY_HELP, MATCH_ID, TITLE_WARNING, FileHashes, SceneLookupError, SceneResult, file_hashes, md5_enabled,
     folder_note,
+    guess_search,
+    known_studios_from,
     prefer_part_number,
+    rank_marks,
+    rank_results,
     search_choice_for,
     search_text_for,
+    wants_studio_pass,
 )
 from core.video_file import VideoFile
 from gui.lookup import CANCELLED, run_cancellable_lookup
@@ -136,6 +143,7 @@ class SceneSearchDialog(QDialog):
             ref_in(video.metadata, source.key_id, source.id_kinds) if source.get_by_id else None)
         self.results: list[SceneResult] = []
         self.status_note = ""
+        self.search_line = ""
         self.setWindowTitle(f"Search {source.name}")
         self.resize(820, 600)
 
@@ -155,9 +163,11 @@ class SceneSearchDialog(QDialog):
         layout.addWidget(self.key_button)
 
         self.choice = search_choice_for(video.path)
-        # A generic file name (clip3) says nothing: the immediate parent folder's name is the starting point.
-        text, year = ((self.choice.folder_text, self.choice.folder_year) if self.choice.use_folder
-                      else (self.choice.text, self.choice.year))
+        # The guess: date/year and studio from the file name, the folders and the file's metadata; a generic file
+        # name (clip3) says nothing, so the immediate parent folder's title is the starting point.
+        self.known_studios = known_studios_from(getattr(parent, "video_files", None))
+        self.guess = guess_search(video.path, video.metadata, self.known_studios)
+        text, year = self.guess.text, self.guess.year
         search_row = QHBoxLayout()
         self.query_edit = QLineEdit(text)
         self.query_edit.returnPressed.connect(self._on_search)
@@ -167,15 +177,29 @@ class SceneSearchDialog(QDialog):
         self.year_edit.setMaximumWidth(70)
         self.year_edit.returnPressed.connect(self._on_search)
         search_row.addWidget(self.year_edit)
+        self.studio_edit = QLineEdit(self.guess.studio)
+        self.studio_edit.setPlaceholderText("Studio")
+        self.studio_edit.setToolTip("The studio the file seems to belong to (empty = none). It ranks results from that "
+                                    "studio first, and a second search adds it to the text when the title alone finds "
+                                    "little. Edit or clear it freely: the next search uses what is here.")
+        self.studio_edit.setMaximumWidth(150)
+        self.studio_edit.returnPressed.connect(self._on_search)
+        search_row.addWidget(self.studio_edit)
         self.kind_combo: Optional[QComboBox] = None
         if source.kinds:
             self.kind_combo = QComboBox()
             for key, label in source.kinds:
                 self.kind_combo.addItem(label, key)
+            self._restore_kind()
+            self.kind_combo.activated.connect(self._remember_kind)  # a deliberate choice only, not a programmatic one
             search_row.addWidget(self.kind_combo)
         self.search_button = QPushButton("Search")
         self.search_button.clicked.connect(self._on_search)
         search_row.addWidget(self.search_button)
+        self.studio_button = QPushButton("Try with Studio")
+        self.studio_button.setToolTip("Search again with the studio's name put in front of the title text.")
+        self.studio_button.clicked.connect(self._on_try_studio)
+        search_row.addWidget(self.studio_button)
         layout.addLayout(search_row)
 
         self.folder_box: Optional[QCheckBox] = None
@@ -184,7 +208,7 @@ class SceneSearchDialog(QDialog):
             self.folder_box.setToolTip(f'The folder is "{self.choice.folder_name}". Checked automatically when the file '
                                        "name says nothing (clip3, scene 2, 001...). Toggling it fills the box again and "
                                        "searches again.")
-            self.folder_box.setChecked(self.choice.use_folder)
+            self.folder_box.setChecked(self.guess.title_from_folder)
             self.folder_box.toggled.connect(self._on_folder_toggled)
             layout.addWidget(self.folder_box)
 
@@ -198,14 +222,14 @@ class SceneSearchDialog(QDialog):
         self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
+        enable_sorting(self.table)  # every header sorts; a row maps to its result through the item's UserRole
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
         self.table.itemDoubleClicked.connect(lambda _item: self._on_accept())
-        layout.addWidget(self.table, 1)
 
         self.detail = QTextEdit()
         self.detail.setReadOnly(True)
-        self.detail.setMaximumHeight(170)
-        layout.addWidget(self.detail)
+        self.splitter = results_detail_splitter(self.table, self.detail)  # results over details, 60/40, draggable
+        layout.addWidget(self.splitter, 1)
 
         self.cover_box = QCheckBox("Save the poster in the file")
         self.cover_box.setToolTip("Downloads a true poster (portrait, from the service's poster pictures) only when you "
@@ -235,6 +259,7 @@ class SceneSearchDialog(QDialog):
         layout.addLayout(buttons)
 
         make_columns_resizable(self.table, wide_column=COL_TITLE)
+        remember_layout(self, "scene_search", get_setting, set_setting, self.splitter)
         self._refresh_key_state()
         if auto_search and source.has_key():
             self.run_initial_search()
@@ -255,6 +280,8 @@ class SceneSearchDialog(QDialog):
         self.search_button.setEnabled(has_key)
         self.query_edit.setEnabled(has_key)
         self.year_edit.setEnabled(has_key)
+        self.studio_edit.setEnabled(has_key)
+        self.studio_button.setEnabled(has_key)
         if self.kind_combo is not None:
             self.kind_combo.setEnabled(has_key)
 
@@ -282,9 +309,10 @@ class SceneSearchDialog(QDialog):
         self._set_status(self.status_note + " Searching by title instead...")
         self._on_search()
         if self.results:
-            self._set_status(self.status_note + f" Showing {len(self.results)} title result(s): {TITLE_WARNING}.")
+            self._set_status(f"{self.status_note} {self.search_line} Showing {len(self.results)} title result(s): "
+                             f"{TITLE_WARNING}.")
         else:
-            self._set_status(self.status_note + " No title result either.")
+            self._set_status(f"{self.status_note} {self.search_line} No title result either.")
 
     def _id_lookup(self) -> bool:
         """Shows the record of the file's own id at the top. False when it could not be fetched (the hash and title
@@ -335,16 +363,53 @@ class SceneSearchDialog(QDialog):
         self.status_note = f"{self.source.name} has no record with this file's fingerprint."
         return found
 
-    def _on_search(self) -> None:
+    def _kind_setting_key(self) -> str:
+        return f"kind_{self.source.key_id}"
+
+    def _restore_kind(self) -> None:
+        """Movie when the service offers it (the owner's usual target), else what was chosen last time for this
+        service: a deliberate switch to Scene sticks."""
+        remembered = get_setting("scene_lookup", self._kind_setting_key(), "")
+        keys = [key for key, _label in self.source.kinds]
+        wanted = remembered if remembered in keys else ("movie" if "movie" in keys else keys[0])
+        self.kind_combo.setCurrentIndex(max(self.kind_combo.findData(wanted), 0))
+
+    def _remember_kind(self, _index: int = 0) -> None:
+        set_setting("scene_lookup", self._kind_setting_key(), str(self.kind_combo.currentData() or ""))
+
+    def _search_title_pass(self, text: str, year: str, kind: str, label: str):
+        return run_cancellable_lookup(self, self.source.search_title, text, year, kind, label=label)
+
+    def _on_try_studio(self) -> None:
+        self._on_search(force_studio=True)
+
+    def _on_search(self, force_studio: bool = False) -> None:
+        """Title-only first; the studio goes into the text only as a second pass (forced by Try with Studio, or when
+        the first pass found no file match and few results). Results are ranked by date and studio."""
         text = self.query_edit.text().strip()
         if not text or not self.source.has_key():
             return
         year = self.year_edit.text().strip()
+        studio = self.studio_edit.text().strip()
         kind = self.kind_combo.currentData() if self.kind_combo is not None else ""
         self._clear()
+        extra = ""
         try:
-            found = run_cancellable_lookup(self, self.source.search_title, text, year, kind,
-                                           label=f"Searching {self.source.name}...")
+            if force_studio is True and studio:
+                found = self._search_title_pass(f"{studio} {text}", year, kind,
+                                                f"Searching {self.source.name} with the studio...")
+                extra = " Searched with the studio in the text."
+            else:
+                found = self._search_title_pass(text, year, kind, f"Searching {self.source.name}...")
+                if found is not CANCELLED and wants_studio_pass(found, studio, text):
+                    second = self._search_title_pass(f"{studio} {text}", year, kind,
+                                                     f"Searching {self.source.name} again with the studio...")
+                    if second is CANCELLED:
+                        found = CANCELLED
+                    else:
+                        seen = {r.external_id for r in found if r.external_id}
+                        found = list(found) + [r for r in second if not (r.external_id and r.external_id in seen)]
+                        extra = f" Few results by title alone: searched again with the studio ({studio})."
         except self.source.errors as exc:
             self._warn(f"{self.source.name} Search Failed", str(exc))
             return
@@ -356,8 +421,25 @@ class SceneSearchDialog(QDialog):
             # goes first, the others stay below. Never selected for the user.
             order = prefer_part_number([r.title for r in found], self.choice.part_number)
             found = [found[i] for i in order]
+        self.rank_date = self.guess.date
+        self.rank_studio = studio
+        found = rank_results(found, self.rank_date, studio)
         self._show(found)
-        self._set_status("" if found else "No results found.")
+        line = self._guess_line(text, year, studio)
+        self.search_line = line + extra
+        self._set_status((line + extra) if found else (line + extra + " No results found."))
+
+    def _guess_line(self, text: str, year: str, studio: str) -> str:
+        """What was searched for and where each guess came from, as the boxes stand now (edited values say so)."""
+        g = self.guess
+        parts = [f'Searched for: "{text}"']
+        if studio:
+            parts.append(f"studio from {g.studio_source}: {studio}" if studio == g.studio else f"studio: {studio} (edited)")
+        if g.date and year == g.year:
+            parts.append(f"date from {g.date_source}: {g.date}")
+        elif year:
+            parts.append(f"year from {g.date_source}: {year}" if year == g.year else f"year: {year}")
+        return " - ".join(parts)
 
     def _warn(self, title: str, message: str) -> None:
         self._set_status(message)
@@ -372,12 +454,12 @@ class SceneSearchDialog(QDialog):
 
     def _on_folder_toggled(self, on: bool) -> None:
         """Fills the box from the folder name (or back from the file name) and searches again."""
-        if on:
-            self.query_edit.setText(self.choice.folder_text)
-            self.year_edit.setText(self.choice.folder_year)
-        else:
-            self.query_edit.setText(self.choice.text)
-            self.year_edit.setText(self.choice.year)
+        studio_was_guess = self.studio_edit.text().strip() == self.guess.studio
+        self.guess = guess_search(self.video.path, self.video.metadata, self.known_studios, prefer_folder=on)
+        self.query_edit.setText(self.guess.text)
+        self.year_edit.setText(self.guess.year)
+        if studio_was_guess:
+            self.studio_edit.setText(self.guess.studio)
         self._on_search()
         if not self.status_label.text():
             self._set_status("")
@@ -398,23 +480,27 @@ class SceneSearchDialog(QDialog):
         bold.setBold(True)
         italic = QFont(self.table.font())
         italic.setItalic(True)
-        self.table.setRowCount(len(self.results))
-        for row, result in enumerate(self.results):
-            match_text = ("File has an ID" if result.is_id_match
-                          else FILE_MATCH_LABEL if result.is_file_match else "Title: check it")
-            cells = [match_text, result.title or "(untitled)", result.studio, result.date, ", ".join(result.performers)]
-            for col, text in enumerate(cells):
-                item = QTableWidgetItem(text)
-                item.setToolTip("The file carries this record's id." if result.is_id_match
-                                else TITLE_WARNING if not result.is_file_match else "The service has this exact file.")
-                if col == COL_TITLE:
-                    item.setData(Qt.ItemDataRole.UserRole, row)
-                if result.is_file_match or result.is_id_match:
-                    item.setBackground(QBrush(FILE_MATCH_TINT))
-                    item.setFont(bold)
-                elif col == COL_MATCH:
-                    item.setFont(italic)
-                self.table.setItem(row, col, item)
+        date, studio = getattr(self, "rank_date", ""), getattr(self, "rank_studio", "")
+        with suspend_sorting(self.table):
+            self.table.setRowCount(len(self.results))
+            for row, result in enumerate(self.results):
+                match_text = ("File has an ID" if result.is_id_match
+                              else FILE_MATCH_LABEL if result.is_file_match else "Title: check it")
+                marks = rank_marks(result, date, studio)
+                if marks:
+                    match_text += " - " + ", ".join(marks)
+                cells = [match_text, result.title or "(untitled)", result.studio, result.date, ", ".join(result.performers)]
+                for col, text in enumerate(cells):
+                    item = NaturalTableWidgetItem(text)
+                    item.setToolTip("The file carries this record's id." if result.is_id_match
+                                    else TITLE_WARNING if not result.is_file_match else "The service has this exact file.")
+                    item.setData(Qt.ItemDataRole.UserRole, row)  # the result's index: survives any sorting
+                    if result.is_file_match or result.is_id_match:
+                        item.setBackground(QBrush(FILE_MATCH_TINT))
+                        item.setFont(bold)
+                    elif col == COL_MATCH:
+                        item.setFont(italic)
+                    self.table.setItem(row, col, item)
         make_columns_resizable(self.table, wide_column=COL_TITLE)
         # One exact answer (the file's own id or its fingerprint) is preselected so the detail, the poster box and
         # Use Selected are live at once; several rows, or title guesses, stay for the user to pick.
@@ -425,8 +511,9 @@ class SceneSearchDialog(QDialog):
         rows = self.table.selectionModel().selectedRows() if self.table.selectionModel() else []
         if not rows:
             return None
-        index = rows[0].row()
-        return self.results[index] if 0 <= index < len(self.results) else None
+        item = self.table.item(rows[0].row(), COL_TITLE)
+        index = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+        return self.results[index] if isinstance(index, int) and 0 <= index < len(self.results) else None
 
     def _on_selection_changed(self) -> None:
         result = self._selected()

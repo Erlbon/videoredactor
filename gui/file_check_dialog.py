@@ -39,6 +39,7 @@ from PyQt6.QtWidgets import (
 )
 from redactor_common.gui.background_call import call_in_background
 from redactor_common.gui.progress import run_with_progress
+from redactor_common.gui.sortable_table import NaturalTableWidgetItem, enable_sorting
 from redactor_common.gui.table_columns import make_columns_resizable
 from redactor_common.gui.work_progress import run_work_with_progress
 
@@ -158,12 +159,13 @@ class FileCheckResultsDialog(QDialog):
         self.table.verticalHeader().setVisible(False)
         for row, vf in enumerate(reported):
             for col, cell in enumerate((vf.path.name, vf.check.status, vf.check.summary())):
-                item = QTableWidgetItem(cell)
+                item = NaturalTableWidgetItem(cell)
                 tip = cell if col != 2 or vf.check.deep is None or not vf.check.deep.spans else (
                     cell + chr(10) + deep_tooltip(vf.check.deep))
                 item.setToolTip(tip)
                 self.table.setItem(row, col, item)
         make_columns_resizable(self.table, wide_column=2)
+        enable_sorting(self.table)  # display only: no row is looked up by number
         layout.addWidget(self.table)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)

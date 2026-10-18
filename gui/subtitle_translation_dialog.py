@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
 from redactor_common.core.srt import Cue, align_cues, clock_text, parse_srt
 from redactor_common.core.translate import TranslateError, Translator
 from redactor_common.gui.progress import run_work_with_progress
+from redactor_common.gui.sortable_table import NaturalTableWidgetItem, enable_sorting, suspend_sorting
 from redactor_common.gui.table_columns import make_columns_resizable
 
 from core import lyrics_subtitles, subtitle_translation as st, translation_settings
@@ -35,6 +36,7 @@ MODE_TRANSLATE = "translate"
 MODE_COMPARE = "compare"
 MT_STATUS = "Machine translation (engine {engine}) - check before relying on it."
 COL_TIME, COL_ORIGINAL, COL_ENGLISH = 0, 1, 2
+CUE_ROLE = Qt.ItemDataRole.UserRole  # on every cell: the cue index, so a sorted table still maps to its cues
 
 
 class SubtitleTranslationDialog(QDialog):
@@ -103,6 +105,7 @@ class SubtitleTranslationDialog(QDialog):
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setWordWrap(True)
         self.table.verticalHeader().setVisible(False)
+        enable_sorting(self.table)  # a row maps to its cue through the item's UserRole (CUE_ROLE), never the row number
         layout.addWidget(self.table, 1)
 
         self.status_label = QLabel("")
@@ -209,17 +212,19 @@ class SubtitleTranslationDialog(QDialog):
 
     def _fill_translate_rows(self, translated: Optional[list[Cue]] = None) -> None:
         self.table.blockSignals(True)
-        self.table.setRowCount(len(self._source_cues))
-        for row, cue in enumerate(self._source_cues):
-            self._set_cell(row, COL_TIME, clock_text(cue.start), editable=False)
-            self._set_cell(row, COL_ORIGINAL, cue.text, editable=False)
-            self._set_cell(row, COL_ENGLISH, translated[row].text if translated else "", editable=True)
+        with suspend_sorting(self.table):
+            self.table.setRowCount(len(self._source_cues))
+            for row, cue in enumerate(self._source_cues):
+                self._set_cell(row, COL_TIME, clock_text(cue.start), editable=False)
+                self._set_cell(row, COL_ORIGINAL, cue.text, editable=False)
+                self._set_cell(row, COL_ENGLISH, translated[row].text if translated else "", editable=True)
         self.table.blockSignals(False)
         self.table.resizeRowsToContents()
         self._fit_columns()
 
     def _set_cell(self, row: int, col: int, text: str, editable: bool) -> None:
-        item = QTableWidgetItem(text)
+        item = NaturalTableWidgetItem(text)
+        item.setData(CUE_ROLE, row)  # the cue's index (compare mode: the aligned row's index)
         flags = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
         if editable:
             flags |= Qt.ItemFlag.ItemIsEditable
@@ -268,18 +273,29 @@ class SubtitleTranslationDialog(QDialog):
             notes.insert(0, f"The engine stopped: {result.error}")
         notes.extend(result.warnings)
         self.status_label.setText(" ".join(notes))
+        english = self._english_items()
         for row in result.failed:
-            item = self.table.item(row, COL_ENGLISH)
+            item = english.get(row)
             if item is not None:
                 item.setText("")  # untranslated: leave it for the user to type, never the foreign text
         self.write_button.setEnabled(result.translated > 0)
+
+    def _english_items(self) -> dict:
+        """{cue index: the English cell}: the table may be sorted, so the cue comes from the item, not the row."""
+        items = {}
+        for visual_row in range(self.table.rowCount()):
+            item = self.table.item(visual_row, COL_ENGLISH)
+            if item is not None:
+                items[item.data(CUE_ROLE)] = item
+        return items
 
     def english_cues(self) -> list[Cue]:
         """The cues as they are in the table now (edits included): original timing, the English cell's text.
         Rows whose English cell is empty are left out."""
         out = []
+        english = self._english_items()
         for row, cue in enumerate(self._source_cues):
-            item = self.table.item(row, COL_ENGLISH)
+            item = english.get(row)
             text = (item.text() if item is not None else "").strip()
             if text:
                 out.append(Cue(cue.start, cue.end, text))
@@ -340,11 +356,12 @@ class SubtitleTranslationDialog(QDialog):
             self.status_label.setText(f"Could not read a subtitle: {exc}")
             return
         rows = align_cues(a, b)
-        self.table.setRowCount(len(rows))
-        for i, row in enumerate(rows):
-            self._set_cell(i, COL_TIME, clock_text(row.start), editable=False)
-            self._set_cell(i, 1, row.a_text, editable=False)
-            self._set_cell(i, 2, row.b_text, editable=False)
+        with suspend_sorting(self.table):
+            self.table.setRowCount(len(rows))
+            for i, row in enumerate(rows):
+                self._set_cell(i, COL_TIME, clock_text(row.start), editable=False)
+                self._set_cell(i, 1, row.a_text, editable=False)
+                self._set_cell(i, 2, row.b_text, editable=False)
         self.table.resizeRowsToContents()
         self._fit_columns()
         self.status_label.setText(

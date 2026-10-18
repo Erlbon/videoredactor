@@ -28,6 +28,8 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 
 from gui.lookup import run_lookup
+from core.config import get_setting, set_setting
+from redactor_common.gui.remembered_layout import remember_layout
 from gui.lookup_file_header import add_file_header, file_context
 from gui.lyrics_panel import LyricsPanel
 from core.video_metadata import ContentType
@@ -75,6 +77,7 @@ class SubtitleSearchDialog(QDialog):
 
         self.setWindowTitle("Import Subtitles")
         self.resize(560, 560)
+        remember_layout(self, "subtitle_search", get_setting, set_setting)
 
         outer = QVBoxLayout(self)
         if video is not None or context is not None:

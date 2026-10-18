@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
 )
 from redactor_common.gui.background_call import call_in_background
 from redactor_common.gui.progress import run_with_progress
+from redactor_common.gui.sortable_table import enable_header_sort, natural_key
 from redactor_common.gui.table_columns import make_columns_resizable
 
 from core import track_language as tl
@@ -106,21 +107,8 @@ class TrackLanguageDialog(QDialog):
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.table.verticalHeader().setVisible(False)
-        for index, row in enumerate(self.rows):
-            self.table.setItem(index, 0, QTableWidgetItem(row_label(row)))
-            self.table.setItem(index, 1, QTableWidgetItem(current_summary([t.language for _, t in row.members])))
-            row.combo = _language_combo()
-            row.combo.activated.connect(lambda _i, r=row: self._chosen_by_hand(r))
-            row.combo.currentIndexChanged.connect(self._update_preview)
-            self.table.setCellWidget(index, 2, row.combo)
-            if self.table.columnCount() == 4:
-                if row.kind == "audio":
-                    button = QPushButton("Play this track")
-                    button.setToolTip("Open the player on this file with this audio track active, to hear what language it is")
-                    button.clicked.connect(
-                        lambda _checked=False, p=row.members[0][0], n=row.position - 1: self.play_requested.emit(p, n))
-                    self.play_buttons.append(button)
-                    self.table.setCellWidget(index, 3, button)
+        self._fill_table()
+        enable_header_sort(self.table, self._sort_rows)  # cell widgets: Qt cannot sort these natively
         make_columns_resizable(self.table, wide_column=0)
         layout.addWidget(self.table)
 
@@ -147,6 +135,50 @@ class TrackLanguageDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        self._update_preview()
+
+    def _fill_table(self) -> None:
+        """(Re)build the rows in self.rows order. A row's chosen language survives: the combos are made again, since
+        refilling the table deletes the old cell widgets."""
+        chosen = {id(r): (r.combo.currentData() if r.combo else None) for r in self.rows}
+        self.table.setRowCount(0)
+        self.table.setRowCount(len(self.rows))
+        self.play_buttons.clear()
+        for index, row in enumerate(self.rows):
+            self.table.setItem(index, 0, QTableWidgetItem(row_label(row)))
+            self.table.setItem(index, 1, QTableWidgetItem(current_summary([t.language for _, t in row.members])))
+            row.combo = _language_combo()
+            row.combo.activated.connect(lambda _i, r=row: self._chosen_by_hand(r))
+            row.combo.currentIndexChanged.connect(self._update_preview)
+            self.table.setCellWidget(index, 2, row.combo)
+            if self.table.columnCount() == 4:
+                if row.kind == "audio":
+                    button = QPushButton("Play this track")
+                    button.setToolTip("Open the player on this file with this audio track active, to hear what language it is")
+                    button.clicked.connect(
+                        lambda _checked=False, p=row.members[0][0], n=row.position - 1: self.play_requested.emit(p, n))
+                    self.play_buttons.append(button)
+                    self.table.setCellWidget(index, 3, button)
+        for row in self.rows:
+            if chosen.get(id(row)) is not None and row.combo is not None:
+                row.combo.blockSignals(True)
+                row.combo.setCurrentIndex(max(row.combo.findData(chosen[id(row)]), 0))
+                row.combo.blockSignals(False)
+
+    def _sort_rows(self, column: int, order: Qt.SortOrder) -> None:
+        """Header click: sort the rows (the records) and rebuild the table; every row keeps its own combo choice."""
+        def key(row: _Row):
+            if column == 0:
+                return natural_key(row_label(row))
+            if column == 1:
+                return natural_key(current_summary([t.language for _, t in row.members]))
+            if column == 2:
+                return natural_key(row.combo.currentText() if row.combo else "")
+            return (row.kind, row.position)
+
+        self.rows.sort(key=key, reverse=order == Qt.SortOrder.DescendingOrder)
+        self._fill_table()
+        make_columns_resizable(self.table, wide_column=0)
         self._update_preview()
 
     # --- the choices -----------------------------------------------------------------------------------------------

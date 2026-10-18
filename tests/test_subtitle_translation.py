@@ -478,3 +478,26 @@ def test_redact_engine_failure_is_a_note(work, bin_, tmp_path, scratch):
         ts.set_translator_factory(None)
     assert entry.status is FileStatus.UNCHANGED and entry.failures == []
     assert any("server down" in n for n in entry.notes)
+
+
+def test_translate_dialog_sorted_table_still_maps_edits_to_their_cues(window, work, fake_engine, monkeypatch):
+    """Header clicks sort the table (2026-10-17); the English cell of the FIRST VISUAL row belongs to its own cue."""
+    write_srt(work, "Leningrad - WWW.ru.srt", RU)
+    seen = {}
+
+    def use(d):
+        d.run_translate()
+        assert d.table.isSortingEnabled() and d.table.horizontalHeader().isSortIndicatorShown()
+        d.table.sortByColumn(0, Qt.SortOrder.DescendingOrder)  # Time: the last cue first
+        assert [cell(d, r, 0) for r in range(3)] == ["0:08", "0:04", "0:01"]
+        d.table.item(0, 2).setText("EDITED LAST CUE")
+        seen["cues"] = [(c.start, c.text) for c in d.english_cues()]
+        d.table.sortByColumn(1, Qt.SortOrder.AscendingOrder)  # another column: still the same mapping
+        seen["cues2"] = [(c.start, c.text) for c in d.english_cues()]
+        seen["texts"] = {cell(d, r, 0): cell(d, r, 2) for r in range(3)}
+
+    drive_dialog(monkeypatch, window, "_on_translate_subtitles", use=use)
+    assert [t for _s, t in seen["cues"]] == ["I do not remember when I moved", "I must have been drunk", "EDITED LAST CUE"]
+    assert seen["cues"][2][0] == parse_srt(RU)[2].start  # the edit sits on the third cue, in cue order
+    assert seen["cues2"] == seen["cues"]
+    assert seen["texts"]["0:08"] == "EDITED LAST CUE" and seen["texts"]["0:01"] == "I do not remember when I moved"
