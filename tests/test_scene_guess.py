@@ -355,3 +355,46 @@ def test_the_results_and_the_detail_share_a_visible_splitter_and_the_layout_is_r
     assert first > second  # the 300:200 shape is kept (Qt scales it to the room there is)
     again = SceneSearchDialog(make_source(), vf, parent=window)
     assert (again.width(), again.height()) == (900, 700)
+
+
+# --- the file's own metadata is the search (owner, 2026-10-18: 'it defaults to the raw file name') --------------------
+
+
+def test_the_title_and_release_date_in_the_metadata_beat_the_file_name():
+    from core.scene_lookup import guess_search
+    from core.video_metadata import VideoMetadata
+
+    meta = VideoMetadata(title="Strap Some Boyz #02, Scene #03", release_date="2014-02-17", studio="Evil Angel")
+    guess = guess_search("F:/Movies/Evil Angel/23496_03_1080p.mp4", meta)
+    assert guess.text == "Strap Some Boyz #02, Scene #03" and guess.title_source == "metadata"
+    assert guess.date == "2014-02-17" and guess.year == "2014" and guess.date_source == "metadata"
+    assert guess.studio == "Evil Angel" and guess.studio_source == "metadata"
+    assert "(title from metadata)" in guess.describe() and "date from metadata" in guess.describe()
+
+
+def test_a_bare_year_in_the_metadata_is_the_year_filter_and_an_empty_title_falls_back_to_the_name():
+    from core.scene_lookup import guess_search
+    from core.video_metadata import VideoMetadata
+
+    guess = guess_search("D:/x/2014 Strap Some Boyz 2.mp4", VideoMetadata(release_date="2015"))
+    assert guess.year == "2015" and guess.date == "" and guess.date_source == "metadata"
+    assert guess.text == "Strap Some Boyz 2" and guess.title_source == ""  # no title tag: the file name is the search
+
+
+def test_ticking_search_with_the_folder_name_still_beats_a_metadata_title():
+    from core.scene_lookup import guess_search
+    from core.video_metadata import VideoMetadata
+
+    path = "F:/Movies/Evil Angel - Strap Some Boyz 2 1080p/clip3.mp4"
+    meta = VideoMetadata(title="Scene Three")
+    assert guess_search(path, meta).text == "Scene Three"
+    forced = guess_search(path, meta, prefer_folder=True)
+    assert forced.text == "Strap Some Boyz 2" and forced.title_from_folder and forced.title_source == ""
+
+
+def test_the_dialog_is_prefilled_from_the_metadata_title(window):
+    vf = window.video_files[0]
+    vf.metadata.title = "Metadata Title Here"
+    vf.metadata.release_date = "2021-11-15"
+    dialog = SceneSearchDialog(make_source(), vf, parent=window)
+    assert dialog.query_edit.text() == "Metadata Title Here" and dialog.year_edit.text() == "2021"

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-18#02 -- ThePornDB/StashDB lookups search with the file's own metadata
+
+- Changed: **the lookup's search box is filled from the title and release date already in the file's tags, not from the raw file name.** A file you have tagged (Title, Release Date, Studio, Cast) now searches for that title, with the date as the Year/ranking filter and the studio as before. The file name and folder name are only the fallback when the tags have no title. Ticking *Search with the folder name* by hand still overrides the title. The status line says where each piece came from (`title from metadata`, `date from metadata`). Bulk lookups on tagged files no longer start from clip3 or 23496_03_1080p.
+
 ## 2026-10-18#01 -- Resizable result boxes, every table header sorts, a smarter ThePornDB/StashDB search guess
 
 Three owner requests (2026-10-17) plus the Movie default.

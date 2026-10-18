@@ -549,12 +549,13 @@ class SearchGuess:
     performers: list = field(default_factory=list)
     part_number: Optional[int] = None
     title_from_folder: bool = False
+    title_source: str = ""    # 'metadata' when the file's own title tag is the search text, else '' (name or folder)
     date_source: str = ""
     source_notes: list = field(default_factory=list)
 
     def describe(self) -> str:
         """The status sentence: Searched for: "T" - studio from folder: S - date from file name: D"""
-        parts = [f'Searched for: "{self.text}"']
+        parts = [f'Searched for: "{self.text}"' + (" (title from metadata)" if self.title_source == "metadata" else "")]
         if self.studio:
             parts.append(f"studio from {self.studio_source}: {self.studio}")
         if self.date or self.year:
@@ -630,6 +631,20 @@ def guess_search(path, metadata=None, known_studios=(), prefer_folder: Optional[
         guess.date, guess.year = date, file_year
         guess.date_source = "file name"
         guess.part_number = file_part
+    # What the file already says about itself beats anything guessed from its name: a title and a release date the
+    # user (or an earlier lookup) put in the tags are the search, the file and folder names are only the fallback.
+    # prefer_folder=True (the dialog's "Search with the folder name" box ticked by hand) still wins over the title.
+    meta_title = (getattr(metadata, "title", "") or "").strip()
+    if meta_title and prefer_folder is not True:
+        guess.text, guess.title_from_folder, guess.title_source = meta_title, False, "metadata"
+        guess.source_notes = [n for n in guess.source_notes if not n.startswith("title from folder")]
+    meta_date = (getattr(metadata, "release_date", "") or "").strip()
+    if len(meta_date) >= 4 and meta_date[:4].isdigit():
+        if len(meta_date) >= 10 and meta_date[4] in "-./" and meta_date[5:7].isdigit() and meta_date[8:10].isdigit():
+            guess.date, guess.year = f"{meta_date[:4]}-{meta_date[5:7]}-{meta_date[8:10]}", meta_date[:4]
+            guess.date_source = "metadata"
+        elif len(meta_date) == 4:
+            guess.date, guess.year, guess.date_source = "", meta_date, "metadata"
     return guess
 
 
