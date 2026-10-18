@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-18#06 -- Fixed: the side panel's Content Type box was blank
+
+- The Content Type box in the side panel stayed blank for every selected file (the table showed it correctly). The panel looked the value up by the enum object instead of its text, which the combo box does not match. It now shows the selected file's content type; a mixed selection stays blank. Regression test: tests/test_panel_shows_content_type.py (fails without the fix).
+
 ## 2026-10-18#05 -- Review Changes redesign, year-aware TMDB/TheTVDB search, tidier right-click menu
 
 - **Review Changes** (shared, redactor_common 2026-10-18-04): the Apply tickbox is the first column, long values wrap, the current value is red where a real value would be lost and the new value green, and with several files a file list sits beside the fields of the selected file (overwrites tinted amber; Tick All in File / Tick All Files / Next File with Overwrite). Every column sorts.

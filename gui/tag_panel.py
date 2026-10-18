@@ -15,6 +15,7 @@ specifically fix once (v23) after it initially leaked through.
 
 from __future__ import annotations
 import html
+from enum import Enum
 from typing import Optional
 
 from PyQt6.QtWidgets import (
@@ -498,7 +499,10 @@ class TagPanel(QWidget):
                 selected = parse_multi_value(value if isinstance(value, str) else "")
                 widget.set_checked_items(selected)
             elif isinstance(widget, QComboBox):
-                idx = widget.findData(value if value is not None else "")
+                # A str-Enum (the content type) must be looked up by its plain text: findData() does not match the
+                # enum object itself, so the box would silently stay blank.
+                plain = value.value if isinstance(value, Enum) else value
+                idx = widget.findData(plain if plain is not None else "")
                 widget.setCurrentIndex(idx if idx >= 0 else 0)
             elif isinstance(widget, QSpinBox):
                 widget.setValue(value if isinstance(value, int) else 0)
