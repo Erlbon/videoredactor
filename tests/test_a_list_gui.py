@@ -177,7 +177,7 @@ def test_a6_media_action_defaults_to_a_dry_run_and_reports_it(window, monkeypatc
         return QMessageBox.StandardButton.Yes
 
     monkeypatch.setattr(QMessageBox, "exec", fake_exec)
-    window._convert_with_rules([src])
+    window._convert_paths([src])
     assert boxes[0][3] is not None and boxes[0][3].isChecked()  # "Dry run first" shown and on by default
     assert written == [] and os.listdir(lib) == ["Show.S01E01.avi"]
     assert "DRY RUN" in boxes[1][1] and "DRY RUN" in boxes[1][2] and "would convert Show.S01E01.avi -> Show.S01E01.mp4" in boxes[1][2]
@@ -201,7 +201,7 @@ def test_a6_media_action_real_run_converts_and_adds_the_row(window, monkeypatch,
         return QMessageBox.StandardButton.Yes
 
     monkeypatch.setattr(QMessageBox, "exec", fake_exec)
-    window._convert_with_rules([src])
+    window._convert_paths([src])
     assert len(written) == 1 and os.listdir(lib) == ["Show.S01E01.mp4"]
     assert [os.path.basename(p) for p in trashed] == ["Show.S01E01.redact-orig.avi"]
     assert [vf.path.name for vf in window.video_files] == ["Show.S01E01.mp4"]  # not loaded before: added
@@ -210,7 +210,7 @@ def test_a6_media_action_real_run_converts_and_adds_the_row(window, monkeypatch,
 
 def test_a7_open_folder_offer_and_import_go_through_the_rules_engine(window, monkeypatch):
     seen = {}
-    monkeypatch.setattr(window, "_convert_with_rules", lambda paths: seen.setdefault("paths", paths))
+    monkeypatch.setattr(window, "_convert_paths", lambda paths: seen.setdefault("paths", paths))
     window._import_paths(["D:/x/a.avi"])
     assert seen["paths"] == ["D:/x/a.avi"]
     monkeypatch.setattr(window, "_pick_videos_to_convert", lambda title, exts: ["D:/x/b.wmv"])
@@ -239,7 +239,7 @@ def test_a8_cancel_in_the_progress_dialog_sets_the_event_and_stops(window, monke
 
     monkeypatch.setattr(mw.conversion_run, "process_file", fake_process)
     monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.Yes)
-    window._convert_with_rules([a, b])
+    window._convert_paths([a, b])
     assert calls == [a]  # the second file never started
 
 

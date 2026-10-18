@@ -5,7 +5,7 @@ Tools > Preferences (Ctrl+,): redactor_common's shared PreferencesDialog with
 this app's settings.
 
   Filenames    shared section (ASCII-safe names, zero-pad + width, Auto-Number padding)
-  Transcode    CRF, audio bitrate, threads (Media > Convert to MP4 (H.264) only)
+  Transcode    CRF, audio bitrate, threads (Media > Convert, re-encode to H.264, only)
   Duplicates   Find Duplicates sensitivity
   Conversion   the conversion rules: bitrate/size limits, NVENC quality, disc images, subtitle languages
   Library safety quarantine folder, delete-after-conversion, recent-file guard,
@@ -31,6 +31,7 @@ from PyQt6.QtWidgets import (
     QMessageBox, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 from redactor_common.core.preferences import PrefAction
+from redactor_common.gui.conversion_policy_widget import ConversionPolicyWidget
 from redactor_common.gui.preferences_dialog import PreferencesDialog
 
 from core import bitrate_bands, conversion_plan, history, imdb_settings, library_safety, notes_settings
@@ -108,28 +109,21 @@ class SafetyPage(QWidget):
         s = library_safety.get_safety_settings()
         layout = QVBoxLayout(self)
         intro = QLabel(
-            "Replaced files go to the Recycle Bin. If you set a quarantine folder they are moved there instead "
-            "(mirroring their library path, in a dated subfolder), and each move is written to a TSV undo log. "
-            "On a network share or removable drive the Recycle Bin is not available: without a quarantine folder "
-            "the original is then kept beside the result as <name>.redact-orig.<ext>. "
-            "These rules apply to the conversion rules (the Conversion page) and the Redact convert step."
+            "Where a replaced original goes (quarantine folder, Recycle Bin), the undo log folder and the recent-file "
+            "guard are set on the Conversion page, the same in every Redactor app. On a network share or removable "
+            "drive the Recycle Bin is not available: without a quarantine folder the original is then kept beside the "
+            "result as <name>.redact-orig.<ext>. This page keeps the two extra safety choices: deleting instead, and "
+            "how exactly a converted file's length must match."
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)
         form = QFormLayout()
-        self.quarantine_edit = self._folder_row(form, "Quarantine folder (optional):", s.quarantine_root)
-        self.undo_edit = self._folder_row(form, "Undo log folder:", s.undo_log_folder)
-        # No dry-run option here: Redact's confirm and Media > Convert to MP4/MKV (Rules) ask it per run, so a
+        # No dry-run option here: Redact's confirm and Media > Convert ask it per run, so a
         # stale saved setting can never decide. The stored value is kept as it is (nothing reads it).
         self._stored_dry_run = s.dry_run
         self.delete_after = QCheckBox("Delete the original after a verified conversion (instead of quarantining it; can't be undone)")
         self.delete_after.setChecked(s.delete_after_conversion)
         form.addRow("", self.delete_after)
-        self.recent = QSpinBox()
-        self.recent.setRange(0, 1440)
-        self.recent.setValue(s.recent_minutes)
-        self.recent.setSuffix(" minutes")
-        form.addRow("Leave files modified in the last:", self.recent)
         self.tol_seconds = QDoubleSpinBox()
         self.tol_seconds.setRange(0, 600)
         self.tol_seconds.setValue(s.duration_tolerance_seconds)
@@ -145,33 +139,17 @@ class SafetyPage(QWidget):
         layout.addLayout(form)
         layout.addStretch(1)
 
-    def _folder_row(self, form: QFormLayout, label: str, value: str) -> QLineEdit:
-        holder = QWidget()
-        row = QHBoxLayout(holder)
-        row.setContentsMargins(0, 0, 0, 0)
-        edit = QLineEdit(value)
-        row.addWidget(edit)
-        browse = QPushButton("Browse...")
-        browse.clicked.connect(lambda _checked=False, e=edit: self._browse(e))
-        row.addWidget(browse)
-        form.addRow(label, holder)
-        return edit
-
-    def _browse(self, edit: QLineEdit) -> None:
-        path = QFileDialog.getExistingDirectory(self, "Choose folder", edit.text().strip())
-        if path:
-            edit.setText(path)
-
     def save(self) -> None:
         """Writes the page (the dialog's OK / Apply)."""
+        current = library_safety.get_safety_settings()  # quarantine, undo log, recent guard: the Conversion page's
         library_safety.set_safety_settings(library_safety.SafetySettings(
-            quarantine_root=self.quarantine_edit.text().strip(),
+            quarantine_root=current.quarantine_root,
             dry_run=self._stored_dry_run,
             delete_after_conversion=self.delete_after.isChecked(),
-            recent_minutes=self.recent.value(),
+            recent_minutes=current.recent_minutes,
             duration_tolerance_seconds=self.tol_seconds.value(),
             duration_tolerance_fraction=self.tol_percent.value() / 100,
-            undo_log_folder=self.undo_edit.text().strip(),
+            undo_log_folder=current.undo_log_folder,
         ))
 
 
@@ -293,14 +271,18 @@ class ConversionPage(QWidget):
         s = conversion_plan.get_conversion_settings()
         layout = QVBoxLayout(self)
         intro = QLabel(
-            "The conversion rules, used by Media > Convert to MP4/MKV (Rules), File > Import and Convert, the Open "
+            "The conversion rules, used by Media > Convert (Automatic mode), File > Import and Convert, the Open "
             "Folder offer and the Redact step 'Convert to MP4/MKV and ingest subtitles'. Only MP4 and MKV are "
             "produced; sane codecs are copied, never re-encoded. A series episode is a file tagged TV, or an "
             "untagged file whose name reads as an episode (S01E02). The Transcode page is something else: the "
-            "H.264 settings of Media > Convert to MP4 (H.264) only."
+            "H.264 settings of Media > Convert in its 'Re-encode to H.264' mode only."
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)
+        # The choices every Redactor app shares: what happens on Open, to the original, and the dry-run default.
+        self.policy_widget = ConversionPolicyWidget(
+            library_safety.get_policy(), never_text="Open Folder does not offer other video formats")
+        layout.addWidget(self.policy_widget)
         form = QFormLayout()
         self.movies = QCheckBox("Apply the bitrate rules to movies too (series episodes only by default)")
         self.movies.setChecked(s.apply_to_movies)
@@ -352,7 +334,7 @@ class ConversionPage(QWidget):
         self._help(colour_form, (
             "The Bitrate column is coloured by the video's bits per pixel per frame, compared as H.264 (HEVC counts "
             "for about 40 percent less). Yellow means 'check it', not 'bad': animation and low-motion content "
-            "compresses better. Orange means above the conversion limit above (Convert to MP4/MKV (Rules) would "
+            "compresses better. Orange means above the conversion limit above (Media > Convert, Automatic, would "
             "re-encode it). Allowed: 0.01 to 0.5, and poor must be below good. For 1080p at 24 fps, 0.05 is about "
             "2.5 Mb/s and 0.10 about 5 Mb/s in H.264."))
         layout.addWidget(colours)
@@ -397,6 +379,7 @@ class ConversionPage(QWidget):
 
     def save(self) -> None:
         """Writes the page (the dialog's OK / Apply)."""
+        library_safety.save_policy(self.policy_widget.policy())
         current = conversion_plan.get_conversion_settings()
         current.apply_to_movies = self.movies.isChecked()
         current.min_size_mb = self.min_size.value()

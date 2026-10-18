@@ -34,6 +34,7 @@ from datetime import date, datetime
 from typing import Callable
 
 from core.config import get_setting, set_setting
+from redactor_common.core import conversion_policy as policy_mod
 
 SECTION = "safety"
 
@@ -43,9 +44,10 @@ KIND_DUPLICATES = "duplicates"
 KIND_DEFECTIVE = "defective"
 KIND_CLEANUP = "cleanup"
 KIND_RESIZED = "resized originals"
+KIND_CONVERTED = "converted originals"
 KIND_UNDONE = "undone"
 KIND_JOINED = "joined originals"
-KINDS = (KIND_REMUXED, KIND_DUPLICATES, KIND_DEFECTIVE, KIND_CLEANUP, KIND_RESIZED, KIND_UNDONE, KIND_JOINED)
+KINDS = (KIND_REMUXED, KIND_DUPLICATES, KIND_DEFECTIVE, KIND_CLEANUP, KIND_RESIZED, KIND_UNDONE, KIND_JOINED, KIND_CONVERTED)
 
 # The only containers the app produces.
 OUTPUT_EXTENSIONS = (".mp4", ".mkv")
@@ -82,6 +84,21 @@ class SafetySettings:
     duration_tolerance_fraction: float = DEFAULT_DURATION_TOLERANCE_FRACTION
     undo_log_folder: str = ""  # "" = beside the quarantine folder
     delete_after_conversion: bool = False  # explicit opt-in: a verified conversion deletes its original
+    # The shared conversion policy (Tools > Preferences > Conversion): where a replaced original goes. "quarantine" with
+    # no quarantine_root = a dated folder beside each file; "recycle" = the Recycle Bin. Defaults to what this app did
+    # before the policy existed: a quarantine folder when one was set, else the Recycle Bin.
+    originals: str = ""
+    on_open: str = policy_mod.ON_OPEN_ASK  # what Open / Open Folder does with files that need converting
+
+    @property
+    def quarantine_beside(self) -> bool:
+        """True when originals go to a dated folder beside each file (quarantine chosen, no folder set)."""
+        return self.originals in (policy_mod.ORIGINALS_QUARANTINE, policy_mod.ORIGINALS_KEEP) and not self.quarantine_root
+
+    @property
+    def keep_originals(self) -> bool:
+        """The policy "keep the original where it is" (only for a result with a different name)."""
+        return self.originals == policy_mod.ORIGINALS_KEEP
 
 
 def _as_float(text: str, default: float) -> float:
@@ -100,7 +117,40 @@ def _as_int(text: str, default: int) -> int:
     return value if value >= 0 else default
 
 
+def legacy_policy(settings: "SafetySettings") -> policy_mod.ConversionPolicy:
+    """What the shared policy is, for a user who never opened the new page: the old [safety] values."""
+    return policy_mod.ConversionPolicy(
+        on_open=policy_mod.ON_OPEN_ASK,
+        originals=policy_mod.ORIGINALS_QUARANTINE if settings.quarantine_root else policy_mod.ORIGINALS_RECYCLE,
+        quarantine_folder=settings.quarantine_root, undo_log_folder=settings.undo_log_folder,
+        recent_minutes=settings.recent_minutes, dry_run_first=settings.dry_run,
+    )
+
+
+def get_policy(get: Callable[[str, str, str], str] = get_setting, base: "SafetySettings | None" = None) -> policy_mod.ConversionPolicy:
+    """The shared conversion policy (Tools > Preferences > Conversion)."""
+    return policy_mod.load_policy(get, legacy_policy(base or _read_safety(get)))
+
+
+def save_policy(policy: policy_mod.ConversionPolicy, put: Callable[[str, str, str], None] = set_setting) -> None:
+    policy_mod.save_policy(policy, put)
+
+
 def get_safety_settings(get: Callable[[str, str, str], str] = get_setting) -> SafetySettings:
+    """The [safety] values, with the shared conversion policy laid over them once the user has saved it (until then
+    the policy IS the old values, so nothing changes silently)."""
+    base = _read_safety(get)
+    policy = get_policy(get, base)
+    base.originals = policy.originals
+    base.on_open = policy.on_open
+    base.quarantine_root = policy.quarantine_folder if policy.originals != policy_mod.ORIGINALS_RECYCLE else ""
+    base.undo_log_folder = policy.undo_log_folder
+    base.recent_minutes = policy.recent_minutes
+    base.dry_run = policy.dry_run_first
+    return base
+
+
+def _read_safety(get: Callable[[str, str, str], str]) -> SafetySettings:
     d = SafetySettings()
     return SafetySettings(
         quarantine_root=get(SECTION, "quarantine_root", "").strip(),
@@ -283,6 +333,7 @@ class SafeRun:
     log: UndoLog | None = None
     dry_run: bool = True
     delete_after_conversion: bool = False
+    keep_originals: bool = False  # the policy "keep": a result with its own name leaves the original where it is
     recent_minutes: int = DEFAULT_RECENT_MINUTES
     tolerance_seconds: float = DEFAULT_DURATION_TOLERANCE_SECONDS
     tolerance_fraction: float = DEFAULT_DURATION_TOLERANCE_FRACTION
@@ -428,6 +479,18 @@ class SafeRun:
         except BaseException:
             _remove_temp(temp)
             raise
+        if self.keep_originals and not same and not self.delete_after_conversion:
+            # The policy "keep the original": the verified result just takes its own name; nothing is moved.
+            try:
+                os.rename(temp, final)
+            except OSError as exc:
+                _remove_temp(temp)
+                raise SafetyError(f"couldn't give the result its name ({exc})") from exc
+            action.detail = f"{final} (the original is kept where it is)"
+            if self.log:
+                self.log.created(final)
+            action.done = True
+            return True
         # Verified. The swap itself is redactor_common's commit_in_place: the result takes its name first
         # (a different name) or the original is set aside as "<stem>.redact-orig<ext>" first (same name), so
         # the original exists under SOME name at every instant, every rename is retried on a lock, and the

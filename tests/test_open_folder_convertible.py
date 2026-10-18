@@ -67,14 +67,14 @@ def test_open_folder_offers_conversion_and_hands_the_files_over(window, monkeypa
         return _answer(self, "Yes")
 
     monkeypatch.setattr(QMessageBox, "exec", fake_exec)
-    monkeypatch.setattr(window, "_convert_with_rules", lambda paths, dry_run=None: seen.update(paths=paths, dry_run=dry_run))
+    monkeypatch.setattr(window, "_convert_paths", lambda paths, dry_run=None: seen.update(paths=paths, dry_run=dry_run))
     monkeypatch.setattr("gui.main_window.discover_video_files", lambda f, recursive, ignored=None: [])
     window._load_folder(folder, recursive=True)
     assert [os.path.basename(p) for p in seen["paths"]] == ["b.avi", "c.WMV", "d.mov"]
     assert ("No MP4 or MKV files found, but 3 video file(s) in other formats (AVI, MOV, WMV) that can be converted "
             "to MP4/MKV.\n\nConvert them now with the conversion rules?") in asked[0][0]
     assert len(asked) == 1 and asked[0][1] is not None  # the offer carries the dry-run checkbox itself
-    assert seen["dry_run"] is False  # handed over, so _convert_with_rules asks nothing more
+    assert seen["dry_run"] is False  # handed over, so _convert_paths asks nothing more
 
 
 def test_open_folder_offer_defaults_to_a_dry_run_with_no_second_dialog(window, monkeypatch, tmp_path):
@@ -103,7 +103,7 @@ def test_declining_converts_nothing_and_no_prompt_on_the_launch_restore(window, 
     _tree(folder)
     calls = []
     monkeypatch.setattr(QMessageBox, "exec", lambda self: _answer(self, "No"))
-    monkeypatch.setattr(window, "_convert_with_rules", lambda paths, dry_run=None: calls.append(paths))
+    monkeypatch.setattr(window, "_convert_paths", lambda paths, dry_run=None: calls.append(paths))
     window._load_folder(folder, recursive=True)
     assert calls == []
     monkeypatch.setattr(QMessageBox, "exec", lambda self: pytest.fail("no prompt when restoring the last folder at launch"))

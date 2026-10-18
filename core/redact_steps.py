@@ -1734,20 +1734,25 @@ def make_safe_run(
     *,
     dry_run: bool | None = None,
     trash: Callable[[str], None] | None = None,
+    path: str = "",
 ) -> "library_safety.SafeRun":
     """The SafeRun for a conversion, from the Library safety settings (with the undo log beside the quarantine
     folder when one is set). `dry_run` overrides the persistent setting: Media > Convert to MP4/MKV (rules)
     and the Redact confirm both ask per run (RedactEnv.convert_dry_run); None falls back to the setting."""
     safety = safety or library_safety.get_safety_settings(setting)
     quarantine = safety.quarantine_root
+    library_root = setting("rename", "library_root", "").strip()
+    if safety.quarantine_beside and path:
+        # The shared policy's "quarantine, no folder set": a dated folder beside the file being converted.
+        quarantine = library_root = os.path.dirname(os.path.abspath(path))
     log = None
     if quarantine:
         log_folder = safety.undo_log_folder or os.path.join(quarantine, "_undo logs")
         log = library_safety.UndoLog(os.path.join(log_folder, f"undo {library_safety.stamp_now()[:10]}.tsv"))
     return library_safety.SafeRun(
-        library_root=setting("rename", "library_root", "").strip(), quarantine_root=quarantine, log=log,
+        library_root=library_root, quarantine_root=quarantine, log=log,
         dry_run=safety.dry_run if dry_run is None else dry_run, recent_minutes=safety.recent_minutes, trash=trash,
-        delete_after_conversion=safety.delete_after_conversion,
+        delete_after_conversion=safety.delete_after_conversion, keep_originals=safety.keep_originals,
         tolerance_seconds=safety.duration_tolerance_seconds, tolerance_fraction=safety.duration_tolerance_fraction,
     )
 
@@ -1766,6 +1771,8 @@ def original_fate_text(
         return text + " Conversions run as a DRY RUN this time: listed, not done."
     if safety.delete_after_conversion:
         return text + " A converted original is DELETED, not recycled (delete-after-conversion is on)."
+    if safety.quarantine_beside:
+        return text + " A converted original is moved to a dated 'originals' folder beside the file (with an undo log)."
     if safety.quarantine_root:
         return text + f" A converted original is moved to the quarantine folder {safety.quarantine_root}."
     return text + " A converted original goes to the Recycle Bin too (on a network or removable drive it is kept beside the result instead)."
@@ -1801,7 +1808,7 @@ class ConvertStep(VideoStep):
         safety = library_safety.get_safety_settings(setting)
         conv = conversion_plan.get_conversion_settings(setting)
         path = str(ctx.video.path)
-        run = make_safe_run(setting, safety, dry_run=ctx.env.convert_dry_run, trash=ctx.env.trash)
+        run = make_safe_run(setting, safety, dry_run=ctx.env.convert_dry_run, trash=ctx.env.trash, path=path)
         if ctx.start_mtime is not None and os.path.normcase(path) == os.path.normcase(ctx.original):
             run.known_mtime[path] = ctx.start_mtime  # Redact's own save must not make the file look "in use"
         is_series = conversion_is_series(ctx.video.metadata.content_type, ctx.video.path.stem)

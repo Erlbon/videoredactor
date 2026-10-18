@@ -72,7 +72,7 @@ def test_v2_empty_list_messages_say_open_files(window, monkeypatch):
 def test_v2_import_and_convert_picker_title(window, monkeypatch):
     titles = []
     monkeypatch.setattr(window, "_pick_videos_to_convert", lambda title, exts: titles.append(title) or [])
-    monkeypatch.setattr(window, "_convert_with_rules", lambda paths, dry_run=None: None)
+    monkeypatch.setattr(window, "_convert_paths", lambda paths, dry_run=None: None)
     window._on_import_and_convert()
     assert titles == ["Import and Convert"]
 
@@ -191,29 +191,6 @@ def test_v3_cli_convert_dry_run_flag(monkeypatch, tmp_path, capsys):
 
 
 # --- V4: one summary at the end of Convert to MP4 (H.264) --------------------------------------------------------
-
-
-def test_v4_h264_convert_shows_one_confirm_and_one_summary(window, monkeypatch, tmp_path):
-    import gui.main_window as mw
-
-    _files(window, tmp_path, "a.avi", "b.avi", "c.avi")
-    (tmp_path / "c.mp4").write_bytes(b"")  # c's output exists: skipped
-    window.table.selectAll()
-    questions, summaries, others = [], [], []
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: questions.append(a[1]) or QMessageBox.StandardButton.Yes)
-    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: others.append(a[1]))
-    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: others.append(a[1]))
-    monkeypatch.setattr(QMessageBox, "exec", lambda self: summaries.append((self.text(), self.detailedText())))
-    monkeypatch.setattr(
-        window, "_run_transcode_jobs", lambda jobs, settings, title: {0: (True, ""), 1: (False, "boom")},
-    )
-    monkeypatch.setattr(mw.VideoFile, "load", lambda self: None)
-    window._on_convert_to_mp4()
-    assert questions == ["Convert to MP4 (H.264)"] and others == []
-    assert len(summaries) == 1
-    text, details = summaries[0]
-    assert "Converted 1 file(s)" in text and "1 failed" in text and "1 skipped" in text
-    assert "FAILED b.mp4: boom" in details and "SKIPPED c.avi" in details and "CONVERTED a.mp4" in details
 
 
 # --- V6: the two conversion defaults ------------------------------------------------------------------------------

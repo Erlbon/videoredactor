@@ -192,6 +192,7 @@ V_COPY = "copy"
 V_X265 = "libx265"  # video no container can hold
 V_NVENC_SCALE = "nvenc_scale"  # hevc_nvenc to scale_height
 V_NVENC = "nvenc"  # hevc_nvenc, no scaling
+V_X264 = "libx264"  # Convert > Re-encode to H.264: libx264 at the Transcode page's CRF, AAC audio
 
 
 @dataclass
@@ -206,6 +207,9 @@ class Plan:
     video_mbps: float | None = None
     needs_review: str = ""  # a disc image listed for the user, not acted on
     wrong_container: str = ""  # the real container's label (FLV...) of a file whose extension lies: see container_check
+    crf: int = 0  # V_X264 only: the quality (Preferences > Transcode)
+    audio_bitrate: str = ""  # V_X264 only: the AAC bit rate, e.g. "128k"
+    threads: int = 0  # V_X264 only: 0 = let ffmpeg decide
 
     @property
     def does_something(self) -> bool:
@@ -463,6 +467,10 @@ def build_ffmpeg_args(
 
     if plan.video == V_COPY:
         args += ["-c:v", "copy"]
+    elif plan.video == V_X264:
+        args += ["-c:v", "libx264", "-crf", str(plan.crf)]
+        if plan.threads:
+            args += ["-threads", str(plan.threads)]
     elif plan.video == V_X265:
         args += ["-c:v", "libx265", "-crf", str(s.fallback_crf), "-tag:v", "hvc1"]
     elif encoder == ENCODER_NVENC:
@@ -474,7 +482,9 @@ def build_ffmpeg_args(
         args += ["-c:v", "libx265", "-preset", "medium", "-crf", str(s.x265_crf), "-tag:v", "hvc1"]
         if scaling:
             args += ["-vf", f"scale=-2:{s.scale_height}"]
-    if plan.audio_reencode or plan.video == V_X265:
+    if plan.video == V_X264:
+        args += ["-c:a", "aac", "-b:a", plan.audio_bitrate or s.fallback_audio_bitrate]
+    elif plan.audio_reencode or plan.video == V_X265:
         args += ["-c:a", "aac", "-b:a", s.fallback_audio_bitrate]
     else:
         args += ["-c:a", "copy"]
@@ -494,7 +504,7 @@ def build_ffmpeg_args(
             args += [f"-metadata:s:s:{position}", f"title={extra.title}"]
         flags = [f for f, on in (("default", extra.default), ("hearing_impaired", extra.hearing_impaired)) if on]
         args += [f"-disposition:s:{position}", "+".join(flags) if flags else "0"]
-    if mp4 and plan.wrong_container:
+    if mp4 and (plan.wrong_container or plan.video == V_X264):
         args += ["-movflags", "+faststart"]  # a fixed file should play at once, and not read as 'index at the end'
     args += [out]
     return args

@@ -65,14 +65,13 @@ into files one at a time.
   https://www.imdb.com/conditions
 
   Information courtesy of IMDb (https://www.imdb.com). Used with permission.
-- **Remux to MP4** for MKV files (fast, lossless container swap, not a
-  re-encode), with control over what happens to the original: one
-  question before the run (tick "Move each original MKV to the Recycle
-  Bin when its MP4 kept every track", off by default) and one summary
-  after it, every failure and kept original listed under Show Details.
-- **Convert to MP4 (H.264)** for a real H.264/AAC re-encode when a
-  container swap alone won't do (it never deletes the original).
-- **Conversion rules** (Media > Convert to MP4/MKV (Rules), File > Import
+- **Convert** (Media > Convert, Ctrl+Shift+C; also right-click > Fix and Convert) is the one conversion entry. Its dialog
+  picks the mode: **Automatic** (the conversion rules), **Lossless remux to MP4** (fast, no re-encode; a file with
+  something MP4 cannot hold is skipped with the reason) or **Re-encode to H.264** (a real H.264/AAC re-encode at the
+  Preferences > Transcode quality). All three go through the same verified engine, the same dry run, and the same
+  policy for the original (Preferences > Conversion: a quarantine folder with an undo log, the Recycle Bin, or keep it
+  where it is); a re-encode keeps the original by default.
+- **Conversion rules** (Media > Convert in Automatic mode, File > Import
   and Convert, the Open Folder offer and the Redact convert step) bring
   AVI, MOV, WMV, FLV, WebM, MPG and other formats into MP4 or MKV,
   copying streams wherever a container can hold them — see "Library
@@ -102,10 +101,9 @@ into files one at a time.
   recorded to the Recycle Bin (after asking). A file that is renamed,
   moved (File > Rename File, Rename / Export / Move, Undo Last Rename,
   Redact's rename and move steps, the command line's `rename` and `move`)
-  or converted to a new name or extension (Remux to MP4 with its original
-  recycled, the conversion rules, the Redact convert step) takes its
-  history with it. Convert to MP4 (H.264) keeps the original, so its
-  history stays with the original. Export / Import Settings carries the
+  or converted to a new name or extension (Media > Convert, the conversion
+  rules, the Redact convert step) takes its
+  history with it, unless the original is kept: then the history stays with the original. Export / Import Settings carries the
   on/off switch: importing a bundle with history on turns recording on. While it is on, every tag change the app makes to a file
   (Save, Save All, Redact, a Restore, the command line's `set`, which
   follows the same setting: off = nothing recorded) is recorded with the old and new value of each changed field in
@@ -141,7 +139,7 @@ with 4 or more subtitle tracks (the default of "MKV when a file has at least") b
 images (ISO, BIN, IMG, VOB) are never converted under the default "Leave alone", and not listed either; "list them"
 names each one in the report for a manual decision, and only the third choice stream-copies a single `.vob` to
 MKV. These rules are separate from Preferences > Transcode, which
-only holds the settings of Media > Convert to MP4 (H.264).
+only holds the settings of Media > Convert in its re-encode to H.264 mode.
 
 Every conversion is written to a temporary `.redact-part` / `.redact-resize` file beside the source and checked before it
 replaces anything: the same number of video and audio tracks, the expected number of subtitle tracks, the target
@@ -159,7 +157,7 @@ What happens to an original that a verified result replaced (Tools > Preferences
 - **Deleted for good** when "Delete the original after a verified conversion" is on (off by default). The ingested
   `.srt` files are then deleted too. This cannot be undone.
 
-Dry run: Media > Convert to MP4/MKV (Rules), Import and Convert and the Open Folder offer each ask "Dry run first"
+Dry run: Media > Convert, Import and Convert and the Open Folder offer each ask "Dry run first"
 (ticked by default) in their one dialog. Edit > Redact asks too, per run: when the recipe's "Convert to MP4/MKV
 and ingest subtitles" step is on, its confirm question has "Dry run the conversion step (list what would happen,
 change nothing)", ticked by default (there is no saved dry-run setting any more, so an old choice can never

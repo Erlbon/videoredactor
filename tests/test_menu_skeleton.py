@@ -57,7 +57,7 @@ def test_other_menus_hold_what_the_spec_says(window):
         "ThePornDB…", "StashDB…", "Subtitles (OpenSubtitles, Lyrics)…", "Get Lyrics (LRCLIB)…",
     ]
     assert _labels(menus["Media"]) == [
-        "Play", "Remux to MP4…", "Convert to MP4 (H.264)…", "Convert to MP4/MKV (Rules)…", "Join Files…", "Check Files…", "Find Duplicates…",
+        "Play", "Convert…", "Join Files…", "Check Files…", "Find Duplicates…",
         "Embed Existing Poster Files…",
         "Translate Subtitles to English…", "Compare Subtitles…",
     ]
@@ -74,8 +74,8 @@ OLD_ACTIONS_NOW = {
     "rename_file": "rename_file", "undo_rename": "undo_last_rename", "refresh_list": "refresh_list",
     "exit": "exit", "import_tmdb_movie": "lookup_tmdb_movie", "import_tmdb_tv": "lookup_tmdb_tv",
     "import_tvdb": "lookup_tvdb", "import_from_filename": "parse_filename",
-    "import_subtitles": "lookup_subtitles", "import_convert": "import_convert", "remux": "remux",
-    "convert_to_mp4": "convert_to_mp4", "rename_by_pattern": "rename_export_move",
+    "import_subtitles": "lookup_subtitles", "import_convert": "import_convert", "remux": "convert",
+    "convert_to_mp4": "convert", "rename_by_pattern": "rename_export_move",
     "check_files": "check_files", "find_duplicates": "find_duplicates", "redact": "redact",
     "redact_recipe": "redact_recipe", "case_conversion": "change_case",
     "search_replace": "search_replace", "auto_numbering": "auto_number", "undo": "undo", "redo": "redo",
@@ -96,8 +96,8 @@ HANDLERS = {
     "rename_export_move": "_on_rename_by_pattern",
     "remove_from_list": "_on_remove_from_list", "clear_list": "_on_clear_list", "redact": "_on_redact",
     "redact_recipe": "_on_edit_redact_recipe", "search_replace": "_on_search_replace",
-    "change_case": "_on_case_conversion", "auto_number": "_on_auto_numbering", "remux": "_on_remux_selected",
-    "convert_to_mp4": "_on_convert_to_mp4", "check_files": "_on_check_files", "embed_posters": "_on_embed_posters",
+    "change_case": "_on_case_conversion", "auto_number": "_on_auto_numbering", "convert": "_on_convert",
+    "check_files": "_on_check_files", "embed_posters": "_on_embed_posters",
     "find_duplicates": "_on_find_duplicates", "api_keys": "_on_add_external_apis",
     "external_tools": "_on_locate_tools", "imdb_settings": "_on_open_imdb_settings", "columns": "_on_open_column_visibility",
     "genres": "_on_open_genres", "languages": "_on_open_languages", "history": "_on_open_history",
@@ -323,7 +323,7 @@ def test_context_menu_follows_the_skeleton(window, monkeypatch):
     assert shape(seen["single"]) == ["-", "Play", "-", "Redact", "Look Up", "Rename File…"] + tail
     assert shape(seen["multi"]) == ["-", "Redact", "Look Up"] + tail
     fix = next(i for i in seen["single"] if isinstance(i, mw.Submenu) and i.text == "Fix and Convert")
-    assert fix.items == [reg["remux"], reg["convert_to_mp4"], reg["convert_rules"], reg["join_files"]]
+    assert fix.items == [reg["convert"], reg["join_files"]]
     organize = next(i for i in seen["single"] if isinstance(i, mw.Submenu) and i.text == "Organize")
     assert organize.items[0] is reg["rename_export_move"]
     assert organize.items[1].text == "Number Episodes…"
@@ -361,12 +361,12 @@ def test_command_palette_is_on_ctrl_k_and_finds_every_action(window):
     assert action.shortcut() == QKeySequence("Ctrl+K")
     assert isinstance(window.command_palette, CommandPalette)
     titles = {c.title for c in collect_commands(window, window.actions_by_key, exclude=action)}
-    for wanted in ("Open Files", "Remove from List", "Redact", "Remux to MP4", "TMDB (Movie)",
+    for wanted in ("Open Files", "Remove from List", "Redact", "Convert", "TMDB (Movie)",
                    "Number Episodes", "External Tools", "Reset Zoom"):
         assert wanted in titles
     window.command_palette.show_palette()
-    window.command_palette.set_filter("remux")
-    assert [c.title for c in window.command_palette.visible_commands()][0] == "Remux to MP4"
+    window.command_palette.set_filter("convert")
+    assert "Convert" in [c.title for c in window.command_palette.visible_commands()]
     window.command_palette.close()
 
 
@@ -385,9 +385,8 @@ def test_skeleton_shortcuts_and_one_release_aliases(window):
     assert _keys(reg["save_all"]) == ["Ctrl+Shift+A"]
     assert _keys(reg["lookup_subtitles"]) == ["Ctrl+Shift+L"]  # was Ctrl+Shift+O
     assert _keys(reg["lookup_tmdb_movie"]) == ["Ctrl+M"] and _keys(reg["lookup_tmdb_tv"]) == ["Ctrl+T"]
-    assert _keys(reg["lookup_tvdb"]) == ["Ctrl+Shift+T"] and _keys(reg["convert_to_mp4"]) == ["Ctrl+Shift+C"]
+    assert _keys(reg["lookup_tvdb"]) == ["Ctrl+Shift+T"] and _keys(reg["convert"]) == ["Ctrl+Shift+C"]
     assert _keys(reg["refresh_list"]) == ["F5", "Ctrl+R"]  # the family's pair (Ctrl+R was Remux here)
-    assert _keys(reg["remux"]) == ["Ctrl+Shift+M"]
     assert _keys(reg["apply"]) == ["Ctrl+Return"]
     assert _keys(reg["redact"]) == ["Ctrl+Shift+E"]
     assert _keys(reg["command_palette"]) == ["Ctrl+K"]

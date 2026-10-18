@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-10-18#12 -- One Convert for everything, and one conversion policy (shared with the other Redactor apps)
+
+Shared part: redactor_common 2026-10-18-05/-06 (core/conversion_policy.py, gui/conversion_policy_widget.py).
+- **Media > Convert… (Ctrl+Shift+C)** replaces three menu items (Remux to MP4, Convert to MP4 (H.264), Convert to MP4/MKV (Rules)) that ran on two different systems. One dialog picks the mode: **Automatic** (the conversion rules), **Lossless remux to MP4** (a file with something MP4 cannot hold is skipped with the reason) or **Re-encode to H.264** (the Preferences > Transcode quality). All three run through the same verified engine, the same dry run, the same progress, report and undo log. Ctrl+Shift+M is gone with Remux. Also under right-click > Fix and Convert.
+- **Preferences > Conversion** now starts with the choices every Redactor app shares: *when a file needs converting* (Ask / Convert automatically / Never; Open Folder follows it), *what happens to the original after a verified conversion* (a quarantine folder with an undo log, the Recycle Bin, or keep it where it is), the dry-run default and the recent-file guard. The quarantine folder, undo log folder and recent-file guard moved here from the Library safety page, which keeps the delete-instead choice and the length tolerance. Until you save the page your old settings apply unchanged (a quarantine folder if you had one, else the Recycle Bin).
+- **Keep it where it is**: a conversion whose result has a different name leaves the original untouched (a re-encode keeps it by default, as before). A result with the same name still goes through the quarantine.
+- A re-encode of an MP4 now takes the original's name when the original is not kept (before: always `_h264`); the original goes to a `converted originals <date>` folder.
+- Container fixes (wrong container) and Join Files keep using the quarantine whatever the policy says: they have an undo log, which the Recycle Bin cannot honour.
+- The Redact recipe's own Remux step is unchanged.
+
 ## 2026-10-18#11 -- No Remove from List in the right-click menu
 
 - Right-click > Remove from List is gone (it sat next to commands that look destructive, and the same job is done from File > Remove from List, the Delete key and Clear List, which stay). Nothing else in the menu changed.

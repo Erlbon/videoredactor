@@ -248,35 +248,6 @@ def test_a_dry_run_conversion_and_history_off_record_no_move(tmp_path, journal):
     assert out.converted and not os.path.exists(journal.path)
 
 
-def test_remux_with_recycled_original_follows_in_the_history(tmp_path, journal, monkeypatch, on):
-    from PyQt6.QtWidgets import QApplication
-
-    import gui.main_window as mw
-
-    global _app
-    _app = QApplication.instance() or QApplication([])  # kept referenced: a collected QApplication crashes
-    monkeypatch.setattr(mw.MainWindow, "_restore_last_folder_on_startup", lambda self: None)
-    monkeypatch.setattr(mw.MainWindow, "_check_external_tools_on_startup", lambda self: None)
-    window = mw.MainWindow()
-    try:
-        src = tmp_path / "m.mkv"
-        src.write_bytes(b"")
-        journal.record(str(src), "save", {"title": ("a", "b")})
-        window.video_files = [VideoFile(path=src)]
-        window._refresh_table_rows()
-        window.table.selectAll()
-        monkeypatch.setattr(mw.VideoFile, "load", lambda self: None)
-        monkeypatch.setattr(window, "_run_transcode_jobs", lambda jobs, s, t, remux=False: {0: (True, "")})
-        monkeypatch.setattr(window, "_confirm_remux", lambda jobs: True)
-        monkeypatch.setattr(window, "_remux_summary", lambda summary, lines, warn: None)
-        monkeypatch.setattr(mw, "move_to_trash", lambda p: None)
-        window._on_remux_selected()
-    finally:
-        window.close()
-    [entry] = journal.entries()
-    assert entry.path == str(tmp_path / "m.mp4") and entry.original_path == str(src)
-
-
 # --- command line ----------------------------------------------------------------------------
 
 

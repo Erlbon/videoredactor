@@ -46,15 +46,14 @@ Every file's Bitrate cell is tinted by its **video bits per pixel per frame** (t
 | Edit | Undo (Ctrl+Z), Redo (Ctrl+Y); Apply to N Selected (Ctrl+Return); Redact (Ctrl+Shift+E), Edit Redact Recipe; Search and Replace (Ctrl+H), Change Case, Auto-Number, Clear Fields (empties descriptive fields, source ids and the embedded poster of the selected files; staged and undoable until Save; the content type only if ticked) |
 | View | Show Metadata Panel; Zoom In / Out / Reset (Ctrl++, Ctrl+-, Ctrl+0); Clear All Filters; Refresh List (F5, Ctrl+R); Command Palette (Ctrl+K) |
 | Metadata | Parse Filename (Ctrl+I); Look Up: TMDB (Movie) (Ctrl+M), TMDB (TV Show) (Ctrl+T), TheTVDB (TV Show) (Ctrl+Shift+T), IMDb (Local Database), ThePornDB, StashDB, Subtitles (OpenSubtitles, Lyrics) (Ctrl+Shift+L), Get Lyrics (LRCLIB) (Ctrl+Shift+G, one Music Video only); Number Episodes; **Set Track Language** (audio/subtitle language tags of MP4 and MKV, written in place without re-encoding; `videoredactor set-language` on the command line; a "Play this track" button listens to a track first, and the Player has an audio-track selector, A key) |
-| Media | Play (Ctrl+Shift+P, also a toolbar button and a large button under the side-panel thumbnail), Remux to MP4 (Ctrl+Shift+M), Convert to MP4 (H.264) (Ctrl+Shift+C), Convert to MP4/MKV (Rules); Check Files (with the optional Deep scan; Cut Out Damaged Parts for files it finds damaged; Remux to Real Container for files with a wrong container), Find Duplicates |
+| Media | Play (Ctrl+Shift+P, also a toolbar button and a large button under the side-panel thumbnail), Convert (Ctrl+Shift+C: automatic rules, lossless remux to MP4 or re-encode to H.264), Join Files; Check Files (with the optional Deep scan; Cut Out Damaged Parts for files it finds damaged; Remux to Real Container for files with a wrong container), Find Duplicates |
 | Tools | Preferences (Ctrl+,); API Keys, External Tools, IMDb Database; Columns, Genres, Languages; History |
 | Help | Changelog, Credits, About |
 
 Open Folder loads MP4 and MKV files (`.mp4`, `.m4v`, `.mkv`). When the folder also holds other video formats it
-offers, in one dialog with a "Dry run first" checkbox, to convert them with the conversion rules. Media > Remux to
-MP4 is a lossless MKV-to-MP4 container swap; Media > Convert to MP4 (H.264) is a real H.264/AAC re-encode that
-never deletes the original; Media > Convert to MP4/MKV (Rules) and File > Import and Convert use the conversion
-rules. Anything that takes more than a moment (loading, probing, saving, conversions, lookups, renames) runs under
+offers, in one dialog with a "Dry run first" checkbox, to convert them with the conversion rules. Media > Convert
+has three modes in one dialog: Automatic (the conversion rules, also used by File > Import and Convert), a lossless
+remux to MP4, and a real H.264/AAC re-encode that keeps the original by default. Anything that takes more than a moment (loading, probing, saving, conversions, lookups, renames) runs under
 a progress dialog.
 
 ## Redact steps
@@ -91,7 +90,7 @@ values back with the app's own save (write, re-read, compare), so an unwanted sa
 closed. Covers and other images are not kept; a file replaced by a conversion is in the Recycle Bin or quarantine
 folder instead. The newest 50,000 changes from the last 90 days are kept. A renamed, moved or converted file takes
 its history with it (Rename File, Rename / Export / Move, Undo Last Rename, Redact's rename and move steps, the
-command line's `rename` and `move`, Remux to MP4 when the original is recycled, the conversion rules). Export /
+command line's `rename` and `move`, Media > Convert, the conversion rules). Export /
 Import Settings carries the on/off switch; importing a bundle with history on turns recording on.
 
 ## Preferences (Tools > Preferences)
@@ -99,7 +98,7 @@ Import Settings carries the on/off switch; importing a bundle with history on tu
 | Page | What it holds |
 | --- | --- |
 | Filenames | ASCII-safe names, zero-padding of numbers, Auto-Number padding |
-| Transcode | CRF, audio bitrate and threads of Media > Convert to MP4 (H.264) only |
+| Transcode | CRF, audio bitrate and threads of Media > Convert, re-encode to H.264, only |
 | Duplicates | The starting sensitivity of Find Duplicates |
 | History | The opt-in switch of Tools > History (off by default) and Delete History... (to the Recycle Bin, after asking; acts at once) |
 | Tools / Paths | ffmpeg and MKVToolNix locations, the IMDb database and dataset files (saved as you type) |

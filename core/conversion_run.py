@@ -32,7 +32,7 @@ from core.ffmpeg_backend import _run_ffmpeg, probe_media
 from core import mt_registry
 from core.external_tools import MKVTOOLNIX, is_tool_available
 from core import subtitle_ingest as si
-from core.library_safety import KIND_CLEANUP, KIND_REMUXED, KIND_RESIZED, PART_MARKER, RESIZE_MARKER, SafeRun
+from core.library_safety import KIND_CLEANUP, KIND_CONVERTED, KIND_REMUXED, KIND_RESIZED, PART_MARKER, RESIZE_MARKER, SafeRun
 from core.video_file import SUPPORTED_EXTENSIONS, VideoFile
 
 DURATION_TOLERANCE = 1.5
@@ -138,6 +138,7 @@ def convert_file(
     probe: Callable[[str], cp.MediaInfo | None] = probe_media,
     resolve_encoder: Callable[[cp.ConversionSettings], str] = encoder_detect.resolve_encoder,
     decode_check: Callable[[str], str] = decode_problem,
+    final: str | None = None,
 ) -> ConversionOutcome:
     """Convert `source` per `plan` through `run` (dry-run, recent-file guard, verified swap, Recycle Bin /
     quarantine). `runner`/`probe`/`resolve_encoder` are injectable for tests. A bitrate re-encode uses the
@@ -151,9 +152,14 @@ def convert_file(
     added_subtitles = len(added)
     if plan.skip_reason or not plan.container:
         return ConversionOutcome(False, message=plan.skip_reason or "nothing to do")
-    final = os.path.splitext(source)[0] + plan.container
-    kind = KIND_RESIZED if plan.video in (cp.V_NVENC, cp.V_NVENC_SCALE) else KIND_REMUXED
-    marker = RESIZE_MARKER if kind == KIND_RESIZED else PART_MARKER
+    final = final or os.path.splitext(source)[0] + plan.container
+    if plan.video in (cp.V_NVENC, cp.V_NVENC_SCALE):
+        kind = KIND_RESIZED
+    elif plan.video == cp.V_X264:
+        kind = KIND_CONVERTED
+    else:
+        kind = KIND_REMUXED
+    marker = PART_MARKER if kind == KIND_REMUXED else RESIZE_MARKER
 
     encoder = None
     if plan.video in (cp.V_NVENC, cp.V_NVENC_SCALE) and not run.dry_run:

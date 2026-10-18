@@ -169,7 +169,7 @@ def build_sections(history_actions: tuple[PrefAction, ...] = (),
         filenames_section(),
         PrefSection("transcode", "Transcode", (
             PrefSpec(KEY_CRF, "Video quality (CRF)", "int", DEFAULT_CRF,
-                     help="Used by Convert to MP4 (H.264). Lower means higher quality and a "
+                     help="Used by Media > Convert, re-encode to H.264. Lower means higher quality and a "
                           "larger file; 18 to 28 is the usual range.",
                      minimum=0, maximum=51),
             PrefSpec(KEY_AUDIO_BITRATE, "Audio bitrate", "str", DEFAULT_AUDIO_BITRATE,
@@ -177,9 +177,9 @@ def build_sections(history_actions: tuple[PrefAction, ...] = (),
             PrefSpec(KEY_THREADS, "Threads", "int", DEFAULT_THREADS,
                      help="How many CPU threads ffmpeg may use. 0 lets ffmpeg decide.",
                      minimum=0, maximum=256),
-        ), "Defaults for Media > Convert to MP4 (H.264), the plain H.264/AAC re-encode, only. The conversion "
-           "rules (Media > Convert to MP4/MKV (Rules), Import and Convert, the Redact convert step) have their "
-           "own limits on the Conversion page."),
+        ), "Defaults for Media > Convert in its 'Re-encode to H.264' mode, the plain H.264/AAC re-encode, only. The "
+           "conversion rules (Media > Convert in Automatic mode, Import and Convert, the Redact convert step) have "
+           "their own limits on the Conversion page."),
         PrefSection("duplicates", "Duplicates", (
             PrefSpec(KEY_DUPLICATE_THRESHOLD, "Duplicate sensitivity (bits apart)", "int",
                      HAMMING_THRESHOLD,

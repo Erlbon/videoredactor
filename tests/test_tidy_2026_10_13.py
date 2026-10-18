@@ -148,12 +148,13 @@ def test_safety_page_writes_only_on_ok_or_apply(monkeypatch):
 
 
 def test_no_text_points_to_tools_external_tools_for_the_h264_defaults():
-    import gui.main_window as mw
+    import gui.convert_dialog as cd
+    from core import convert_modes
     from core.preferences_backend import build_sections
 
-    source = Path(mw.__file__).read_text(encoding="utf-8")
+    source = Path(cd.__file__).read_text(encoding="utf-8") + Path(convert_modes.__file__).read_text(encoding="utf-8")
     assert "Adjust these defaults via \"\n" not in source
-    assert "Tools > Preferences > Transcode" in source
+    assert "Preferences > Transcode" in source
     transcode = next(s for s in build_sections() if s.key == "transcode")
     assert "Conversion page" in transcode.description
 
@@ -164,7 +165,7 @@ def test_conversion_page_says_what_the_transcode_page_is_for():
 
     conversion, safety = ConversionPage(), SafetyPage()  # kept alive while their labels are read
     texts = " ".join(label.text() for label in conversion.findChildren(QLabel))
-    assert "Transcode page" in texts and "Convert to MP4 (H.264)" in texts
+    assert "Transcode page" in texts and "Re-encode to H.264" in texts
     assert "Conversion page" in " ".join(label.text() for label in safety.findChildren(QLabel))
 
 
@@ -189,26 +190,6 @@ def test_apply_and_refresh_with_nothing_to_do_say_why(window):
 
 
 # --- P1: re-reading results is under a progress dialog ------------------------------------------------------
-
-
-def test_h264_convert_reloads_results_under_progress(window, monkeypatch, tmp_path):
-    import gui.main_window as mw
-
-    files = []
-    for name in ("a.avi", "b.avi"):
-        (tmp_path / name).write_bytes(b"")
-        files.append(VideoFile(path=tmp_path / name))
-    window.video_files = files
-    window._refresh_table_rows()
-    window.table.selectAll()
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
-    monkeypatch.setattr(window, "_run_transcode_jobs", lambda jobs, settings, title: {i: (True, "") for i in range(len(jobs))})
-    monkeypatch.setattr(mw.VideoFile, "load", lambda self: None)
-    monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.Ok)  # the end summary
-    calls = _record_progress(monkeypatch)
-    window._on_convert_to_mp4()
-    assert ("Reading the converted files...", 2, False) in calls
-    assert sorted(vf.path.name for vf in window.video_files) == ["a.avi", "a.mp4", "b.avi", "b.mp4"]
 
 
 # --- P2: lookups and rename loops show progress -------------------------------------------------------------
