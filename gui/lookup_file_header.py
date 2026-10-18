@@ -230,4 +230,5 @@ def add_bottom_skip_button(dialog, row, label: str = "Skip This File", index: in
     button.clicked.connect(lambda: dialog.skip_file())
     row.insertWidget(index, button)
     dialog.skip_button = button
+    header.skip_button.setVisible(False)  # one Skip per dialog: the bottom row's (owner saw two, 2026-10-18)
     return button

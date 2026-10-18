@@ -510,3 +510,17 @@ def test_batch_buttons_skip_leaves_the_file_cancel_cancels_the_lookup(window):
     assert cancelled.stop_requested is True and cancelled.result() == QDialog.DialogCode.Rejected
     single = SceneSearchDialog(make_source(), vf, parent=window, context=file_context(vf))
     assert not hasattr(single, "skip_button")
+
+
+def test_a_batch_lookup_dialog_shows_exactly_one_skip_button(window):
+    """The owner saw two 'Skip This File' buttons (header and bottom row) on 2026-10-18: one is enough."""
+    from PyQt6.QtWidgets import QPushButton
+
+    from gui.lookup_file_header import file_context
+
+    vf = window.video_files[0]
+    dialog = SceneSearchDialog(make_source(), vf, parent=window, context=file_context(vf, 2, 4))
+    dialog.show()
+    visible = [b for b in dialog.findChildren(QPushButton) if b.text() == "Skip This File" and b.isVisible()]
+    assert len(visible) == 1 and visible[0] is dialog.skip_button
+    dialog.hide()
