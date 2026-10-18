@@ -447,6 +447,7 @@ class MainWindow(QMainWindow):
         self.tag_panel.apply_requested.connect(self._on_apply_to_selected)
         self.tag_panel.move_track_title_requested.connect(self._on_move_track_title)
         self.tag_panel.clear_fields_requested.connect(self._on_clear_fields)
+        self.tag_panel.fields_mode_changed.connect(self._on_selection_changed)
         self.tag_panel.collapseToggleRequested.connect(self._toggle_tag_panel)
         self.tag_panel.play_button.clicked.connect(lambda _checked=False: self.actions_by_key["play"].trigger())
         # Deliberately low minimum -- lets the panel be dragged down to a
@@ -1877,6 +1878,7 @@ class MainWindow(QMainWindow):
         if not selected:
             self.tag_panel.set_preview_image(None)
             return
+        self.tag_panel.show_fields_for(selected)  # only the fields that belong to the selection's Content Type
         merged = self._merge_metadata_for_panel(selected)
         self.tag_panel.load_values(merged)
         self.tag_panel.set_sources(selected)
@@ -2083,6 +2085,8 @@ class MainWindow(QMainWindow):
             vf.dirty = True
         self._refresh_table_rows()
         self.tag_panel.set_old_track_title(selected)
+        if self.tag_panel.show_fields_for(selected):  # a changed Content Type changes which fields belong
+            self.tag_panel.load_values(self._merge_metadata_for_panel(selected))
         self.status_bar.showMessage(
             f"Applied {len(changed_fields)} field(s) to {len(selected)} file(s) -- not yet saved to disk"
         )

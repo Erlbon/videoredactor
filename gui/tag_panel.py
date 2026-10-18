@@ -20,7 +20,7 @@ from typing import Optional
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFormLayout, QLineEdit,
-    QTextEdit, QSpinBox, QComboBox, QLabel, QPushButton, QStyle, QToolButton,
+    QTextEdit, QSpinBox, QComboBox, QLabel, QPushButton, QStyle, QToolButton, QCheckBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
@@ -113,6 +113,7 @@ class TagPanel(QWidget):
     move_track_title_requested = pyqtSignal()  # "Move track title into Title" for the selected music video
     clear_fields_requested = pyqtSignal()  # the "Clear All Fields..." button (MainWindow opens the Clear Fields dialog)
     collapseToggleRequested = pyqtSignal()  # the panel doesn't control its own width -- MainWindow does
+    fields_mode_changed = pyqtSignal()  # "Show all fields" was toggled: MainWindow re-runs the selection refresh
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -120,6 +121,9 @@ class TagPanel(QWidget):
         self._labels: dict[str, QLabel] = {}
         self._touched: set[str] = set()
         self._current_filter: Optional[ContentType] = None
+        self._current_extra: frozenset = frozenset()  # fields shown although the type does not use them (they hold a value)
+        self._show_all = False
+        self._last_files: list = []
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(4, 4, 4, 4)
@@ -129,6 +133,11 @@ class TagPanel(QWidget):
         # collapses to a slim strip, not to zero width, for exactly this
         # reason (see redactor_common's SplitterPaneCollapser).
         toggle_row = QHBoxLayout()
+        self.show_all_box = QCheckBox("Show all fields")
+        self.show_all_box.setToolTip("Off: the panel shows only the fields that belong to the selected files' Content "
+                                     "Type (plus any other field that holds a value). On: every field.")
+        self.show_all_box.toggled.connect(self._on_show_all_toggled)
+        toggle_row.addWidget(self.show_all_box)
         toggle_row.addStretch(1)
         self.collapse_toggle_btn = CollapseToggleButton()
         self.collapse_toggle_btn.clicked.connect(self.collapseToggleRequested.emit)
@@ -309,8 +318,37 @@ class TagPanel(QWidget):
         by hand."""
         self.collapse_toggle_btn.set_collapsed(collapsed)
 
-    def set_content_type_filter(self, content_type: Optional[ContentType]) -> None:
-        """Rebuild the form for the given filter. None = show all editable fields.
+    def _on_show_all_toggled(self, checked: bool) -> None:
+        self._show_all = checked
+        self.show_fields_for(self._last_files)
+        self.fields_mode_changed.emit()
+
+    def show_fields_for(self, files: list) -> bool:
+        """Dynamic field visibility: one Content Type across the whole selection shows that type's fields (the
+        universal ones plus its own); a mixed or unset selection, or "Show all fields", shows everything. A field the
+        type does not use but that holds a value in a selected file stays visible, so nothing stray is hidden.
+        Rebuilds the form only when the set of fields changes; returns True then (the caller reloads the values)."""
+        self._last_files = list(files)
+        content_type: Optional[ContentType] = None
+        extra: set[str] = set()
+        if files and not self._show_all:
+            types = {f.metadata.content_type for f in files}
+            if len(types) == 1 and ContentType.UNSET not in types:
+                content_type = next(iter(types))
+                own = set(fields_for_content_type(content_type))
+                for f in files:
+                    for name in FIELD_LABELS:
+                        if name not in own and getattr(f.metadata, name, None) not in (None, "", 0):
+                            extra.add(name)
+        key = (content_type, frozenset(extra))
+        if key == (self._current_filter, self._current_extra):
+            return False
+        self.set_content_type_filter(content_type, frozenset(extra))
+        return True
+
+    def set_content_type_filter(self, content_type: Optional[ContentType], extra: frozenset = frozenset()) -> None:
+        """Rebuild the form for the given filter. None = show all editable fields. `extra` = further fields to show
+        although the type does not use them.
 
         Also filters out any field the user has hidden via Settings'
         Add/Remove Columns -- hiding a column and hiding its panel
@@ -321,6 +359,7 @@ class TagPanel(QWidget):
         independent settings that could drift out of sync.
         """
         self._current_filter = content_type
+        self._current_extra = frozenset(extra)
 
         # Clear existing rows
         while self.form_layout.rowCount():
@@ -333,6 +372,7 @@ class TagPanel(QWidget):
             field_names = list(FIELD_LABELS.keys())
         else:
             field_names = fields_for_content_type(content_type)
+            field_names += [f for f in FIELD_LABELS if f in extra and f not in field_names]
 
         hidden = self._get_hidden_fields()
         # The Lyrics COLUMN starts hidden (a whole song per cell), so its hidden state is not the panel's: the
@@ -387,7 +427,7 @@ class TagPanel(QWidget):
         is needed for either case.
         """
         self.apply_pending_changes()
-        self.set_content_type_filter(self._current_filter)
+        self.set_content_type_filter(self._current_filter, self._current_extra)
 
     def _make_input_widget(self, field_name: str) -> QWidget:
         if field_name == "content_type":

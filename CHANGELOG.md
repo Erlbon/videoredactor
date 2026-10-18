@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-18#07 -- The side panel shows only the fields that belong to the selection's Content Type
+
+- **Dynamic field visibility**: select one file (or several of the same Content Type) and the panel shows the universal fields plus that type's own (Movie: director, cast, writer, studio, collection; TV: show title, season, episode, network; Music Video: artist, album, composer, lyrics; Porn like Movie; Clip and Misc: universal only). A mixed or unset selection shows every field, so setting the type is what narrows the panel.
+- **Nothing hidden that holds a value**: a field the type does not use but that has a value in a selected file stays visible.
+- **Show all fields**: a tickbox at the top of the panel overrides it.
+- Applying a changed Content Type rebuilds the panel for the new type at once. Table columns are unchanged.
+
 ## 2026-10-18#06 -- Fixed: the side panel's Content Type box was blank
 
 - The Content Type box in the side panel stayed blank for every selected file (the table showed it correctly). The panel looked the value up by the enum object instead of its text, which the combo box does not match. It now shows the selected file's content type; a mixed selection stays blank. Regression test: tests/test_panel_shows_content_type.py (fails without the fix).
