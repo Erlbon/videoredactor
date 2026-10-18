@@ -267,6 +267,7 @@ def remux_to_mp4(
     input_path: str,
     output_path: str,
     cancel_event: Optional[threading.Event] = None,
+    audio_language: str = "",
 ) -> tuple[bool, str]:
     """Remux (repackage streams, no re-encode) into an MP4 container.
 
@@ -282,15 +283,25 @@ def remux_to_mp4(
     MP4") and the caller needs it verbatim to show the user, not a
     generic exception message. (False, "Cancelled") if `cancel_event`
     fired.
+
+    `-movflags +faststart` puts the index (moov) at the front, so the file starts playing at once and Check Files
+    does not report it as 'index at the end'. With an `audio_language` (Preferences > Conversion) the audio tracks
+    that have no language tag get it (an existing tag is never overwritten).
     """
     temp = partial_path(output_path)
     message = ""
+    language_args: list[str] = []
+    if audio_language:
+        from core.conversion_plan import audio_language_args  # noqa: PLC0415 -- conversion_plan imports config only
+
+        info = probe_media(input_path)
+        language_args = audio_language_args(info.of("audio"), audio_language) if info is not None else []
     try:
         for attempt, maps in enumerate(_REMUX_ATTEMPTS):
             if attempt:
                 _remove_quietly(temp)  # the half-written file of the attempt before: ours, from this run
             code, stderr = _run_ffmpeg(
-                ["ffmpeg", "-n", "-i", input_path, *maps, "-c", "copy", temp],
+                ["ffmpeg", "-n", "-i", input_path, *maps, "-c", "copy", *language_args, "-movflags", "+faststart", temp],
                 cancel_event=cancel_event, timeout=REMUX_TIMEOUT_SECONDS,
             )
             if code is None:

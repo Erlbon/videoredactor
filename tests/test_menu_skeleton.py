@@ -50,7 +50,7 @@ def test_other_menus_hold_what_the_spec_says(window):
         "Show Metadata Panel", "Zoom In", "Zoom Out", "Reset Zoom", "Clear All Filters", "Refresh List",
         "Command Palette…",
     ]
-    assert _labels(menus["Metadata"]) == ["Parse Filename…", "Look Up", "Number Episodes…", "Set Track Language…"]
+    assert _labels(menus["Metadata"]) == ["Parse Filename…", "Look Up", "Get Poster…", "Number Episodes…", "Set Track Language…"]
     look_up = next(a for a in menus["Metadata"].actions() if a.menu()).menu()
     assert _labels(look_up) == [
         "TMDB (Movie)…", "TMDB (TV Show)…", "TheTVDB (TV Show)…", "IMDb (Local Database)…",
@@ -320,8 +320,8 @@ def test_context_menu_follows_the_skeleton(window, monkeypatch):
 
     tail = ["Clear Fields…", "Set Track Language…", "-", "Check Files…", "Fix and Convert", "-", "Organize", "Subtitles",
             "Create Notes for This Folder…", "-", "Save Selected (0)"]
-    assert shape(seen["single"]) == ["-", "Play", "-", "Redact", "Look Up", "Rename File…"] + tail
-    assert shape(seen["multi"]) == ["-", "Redact", "Look Up"] + tail
+    assert shape(seen["single"]) == ["-", "Play", "-", "Redact", "Look Up", "Get Poster…", "Rename File…"] + tail
+    assert shape(seen["multi"]) == ["-", "Redact", "Look Up", "Get Poster…"] + tail
     fix = next(i for i in seen["single"] if isinstance(i, mw.Submenu) and i.text == "Fix and Convert")
     assert fix.items == [reg["convert"], reg["join_files"]]
     organize = next(i for i in seen["single"] if isinstance(i, mw.Submenu) and i.text == "Organize")

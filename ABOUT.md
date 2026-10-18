@@ -76,6 +76,11 @@ into files one at a time.
   AVI, MOV, WMV, FLV, WebM, MPG and other formats into MP4 or MKV,
   copying streams wherever a container can hold them — see "Library
   safety and conversion" below.
+- **Metadata > Get Poster** fetches the poster of the selected files from the source ids they ALREADY carry (TMDB,
+  TheTVDB, IMDb through TMDB, ThePornDB, StashDB; a TV episode gets its series' poster), without searching, under
+  the same true-poster rule below. A file that already has a poster is left alone unless you tick Replace (then the
+  usual review asks, with the new poster unticked). Staged like a lookup: Save embeds it, Undo takes it back. The
+  Redact step `get_poster` (off by default) does the same for files without a poster.
 - **Poster art embedded in the video** (MP4: the cover atom; MKV: an attachment named `cover.jpg`), which
   Jellyfin, Plex and Kodi read from the file. A lookup (TMDB, TheTVDB, ThePornDB, StashDB) embeds one only
   when you tick "Save the poster in the file", and only a TRUE poster: the source's own poster picture,
@@ -358,7 +363,9 @@ Guesses below the confidence threshold are listed under "needs review" and not a
 
 Steps: `check_repair`, `filename_tags`, `path_tags`, `lookup`, `scene_lookup` (off by default: asks ThePornDB and
 StashDB about the file's own fingerprint and only ever produces a "needs review" suggestion, whatever the
-threshold), `track_title_to_title` (off by default: a Music Video with an old track title and an empty title gets
+threshold), `get_poster` (off by default: a file that carries a source id and has no poster gets the true poster
+of that record from TMDB, TheTVDB, IMDb (through TMDB), ThePornDB or StashDB, without searching; applied as an
+id match, so at the default threshold it needs no review), `track_title_to_title` (off by default: a Music Video with an old track title and an empty title gets
 it as the title, only ever as a "needs review" suggestion), `subtitles`, `translate_subtitles`, `remux_mkv_to_mp4`, `convert_library`,
 `rename`, `move_into_folders`. Without `--recipe` the recipe saved in the app is used (the defaults if none was saved). A
 repair is only automatic when a lossless remux fully fixes the file; a damaged file is reported and left alone.

@@ -20,6 +20,7 @@ Rules, in short (the numbers are settings, ConversionSettings):
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field, fields
 
 from core import container_check
@@ -178,10 +179,32 @@ class ConversionSettings:
     # off: software scale=-2:<height>, no -hwaccel.
     hw_decode: bool = False
     x265_crf: int = 27  # libx265 for the bitrate re-encodes: about the size/quality of NVENC cq 30
+    # Language code (eng, nor, en ...) written onto audio tracks that have none (missing, und, unk, mis) during a
+    # conversion or remux; "" = off, tracks are left as they are. A tag that exists is never overwritten.
+    default_audio_language: str = ""
 
 
 ENCODER_AUTO = "auto"
 ENCODER_NVENC = "nvenc"
+
+UNTAGGED_LANGUAGES = frozenset({"", "und", "unk", "mis"})  # a language tag that says nothing
+
+
+def audio_language_args(audio: list, language: str) -> list[str]:
+    """The ffmpeg arguments that tag every audio track without a language with `language` (an existing tag is never
+    overwritten), and mark the first track default when several tracks have none (the Check Files rule
+    `no_default_audio`). `audio` are the StreamInfo of the audio tracks in output order. [] when `language` is empty
+    (the feature is off) or there is nothing to do."""
+    code = (language or "").strip().lower()
+    if not code:
+        return []
+    args: list[str] = []
+    for position, stream in enumerate(audio):
+        if (stream.language or "").strip().lower() in UNTAGGED_LANGUAGES:
+            args += [f"-metadata:s:a:{position}", f"language={code}"]
+    if args and len(audio) > 1 and not any(stream.default for stream in audio):
+        args += ["-disposition:a", "0", "-disposition:a:0", "default"]
+    return args
 ENCODER_X265 = "x265"
 ENCODERS = (ENCODER_AUTO, ENCODER_NVENC, ENCODER_X265)
 
@@ -504,8 +527,9 @@ def build_ffmpeg_args(
             args += [f"-metadata:s:s:{position}", f"title={extra.title}"]
         flags = [f for f, on in (("default", extra.default), ("hearing_impaired", extra.hearing_impaired)) if on]
         args += [f"-disposition:s:{position}", "+".join(flags) if flags else "0"]
-    if mp4 and (plan.wrong_container or plan.video == V_X264):
-        args += ["-movflags", "+faststart"]  # a fixed file should play at once, and not read as 'index at the end'
+    args += audio_language_args(info.of("audio"), s.default_audio_language)
+    if mp4:
+        args += ["-movflags", "+faststart"]  # the index first: the file plays at once and does not read as 'index at the end'
     args += [out]
     return args
 
@@ -546,6 +570,9 @@ def get_conversion_settings(get=get_setting) -> ConversionSettings:
         result.encoder = ENCODER_AUTO
     if not 0 <= result.x265_crf <= 51:
         result.x265_crf = defaults.x265_crf
+    result.default_audio_language = result.default_audio_language.strip().lower()
+    if result.default_audio_language and not re.fullmatch(r"[a-z]{2,3}", result.default_audio_language):
+        result.default_audio_language = ""  # a hand-damaged value: the feature stays off
     return result
 
 

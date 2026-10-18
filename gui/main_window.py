@@ -528,6 +528,8 @@ class MainWindow(QMainWindow):
                                self._on_import_metadata_from_filename, shortcut=shortcuts.PARSE_FILENAME),
                     Separator(),
                     look_up_submenu(self._look_up_entries("lookup_")),
+                    MenuAction("get_poster", "Get Poste&r…", self._on_get_poster,
+                               tooltip="Fetch the poster of the selected files from the source ids they already carry"),
                     Separator(),
                     MenuAction("number_episodes", "&Number Episodes…", self._on_number_episodes),
                     Separator(),
@@ -1687,6 +1689,7 @@ class MainWindow(QMainWindow):
         if not (one_ok and files[0].metadata.content_type is ContentType.MUSIC_VIDEO):
             look_up = [e for e in look_up if e.key != "ctx_get_lyrics"]  # Get Lyrics: one Music Video only
         items.append(Submenu("Look Up", look_up))
+        items.append(self.actions_by_key["get_poster"])
         # Renaming several files to the same name doesn't make sense; also reachable by double-clicking the Filename
         # cell (see _on_cell_double_clicked()).
         if one_ok:
@@ -2653,6 +2656,13 @@ class MainWindow(QMainWindow):
         from gui.join_files_dialog import run_join_files
 
         run_join_files(self, self._selected_video_files() or self._visible_video_files(), _error_details)
+
+    def _on_get_poster(self) -> None:
+        """Metadata > Get Poster...: the true poster of the selected files from the source ids they carry; see
+        gui/poster_flow.py and core/poster_fetch.py."""
+        from gui.poster_flow import run_get_poster
+
+        run_get_poster(self, self._selected_video_files())
 
     def _on_embed_posters(self) -> None:
         """Media > Embed Existing Poster Files...: the `<name>-poster.jpg` files beside the selected videos (all loaded

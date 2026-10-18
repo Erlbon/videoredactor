@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-18#13 -- Get Poster from the ids in the file, MP4 index first, optional audio language
+
+- **Metadata > Get Poster… (also right-click)**: fetches the TRUE POSTER (the service's own poster, portrait, at least 400 x 600) of the selected files from the source ids they ALREADY carry, without searching: a film from its TMDB id (or its IMDb id through TMDB), a TV episode from the series' TMDB or TheTVDB id, a scene from its ThePornDB or StashDB id (a Porn file asks the scene services first). Each source the file has an id for is tried until one gives a poster; the report says why a file got none (no key, no poster, not a true poster). A file that already has a poster is left alone unless you tick Replace (then the usual per-field review asks, with the new poster unticked); "Accept a landscape cover" is the same off-by-default box as in the lookups. Staged like a lookup: Save embeds it, one Undo takes it back, a progress dialog with Cancel runs the downloads.
+- **Redact step `get_poster`** (off by default, runs after the lookup steps so an id they just found is used): a file with a source id and no poster gets that record's poster as an id match (applied at the default threshold). A file with a poster is left alone.
+- **MP4 index first**: every MP4 the app writes by a conversion or remux now gets `-movflags +faststart` (Convert's rules, remux and re-encode modes and the Redact Remux step; Check Files' repair already did). Before, a remux left the index (moov) at the end of the file. Matroska is unchanged.
+- **Tag untagged audio as…** (Preferences > Conversion, off by default): a language code (eng, nor) written onto audio tracks whose language is missing, und, unk or mis during a conversion or remux; an existing tag is never changed, and when several tracks have no default the first becomes default (the Check Files rule). Check Files still reports a missing language: it cannot guess one.
+- Not live-tested against the services (no keys here): try Get Poster on a few real files first.
+
 ## 2026-10-18#12 -- One Convert for everything, and one conversion policy (shared with the other Redactor apps)
 
 Shared part: redactor_common 2026-10-18-05/-06 (core/conversion_policy.py, gui/conversion_policy_widget.py).

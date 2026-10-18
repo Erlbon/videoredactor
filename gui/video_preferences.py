@@ -26,6 +26,8 @@ reads and writes plain settings.
 
 from __future__ import annotations
 
+import re
+
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
     QMessageBox, QPushButton, QSpinBox, QVBoxLayout, QWidget,
@@ -237,6 +239,12 @@ _DISC_LABELS = {
 }
 
 
+AUDIO_LANGUAGE_HELP = (
+    "A language code such as eng or nor. During a conversion or remux, an audio track whose language is missing "
+    "(und, unk, mis or empty) gets this tag; a tag that exists is never changed, and when several tracks have no "
+    "default the first is marked default. Empty: off, tracks are left as they are. Check Files still reports a "
+    "missing language, since it cannot guess one."
+)
 MANY_SUBS_HELP = (
     "A file with this many subtitle tracks or more is converted to MKV, not MP4 (MP4 players handle many "
     "tracks badly). Default: 4."
@@ -323,6 +331,12 @@ class ConversionPage(QWidget):
         self.languages.setPlaceholderText("all")
         self.languages.setToolTip('"all", or ISO codes separated by commas, for example: en, nl, de')
         form.addRow("Subtitle languages to ingest:", self.languages)
+        self.audio_language = QLineEdit(s.default_audio_language)
+        self.audio_language.setPlaceholderText("off")
+        self.audio_language.setMaximumWidth(80)
+        self.audio_language.setToolTip(AUDIO_LANGUAGE_HELP)
+        form.addRow("Tag untagged audio as:", self.audio_language)
+        self._help(form, AUDIO_LANGUAGE_HELP)
         layout.addLayout(form)
 
         # The Bitrate column's colours (core/bitrate_bands.py): bits per pixel per frame, H.264-equivalent.
@@ -396,6 +410,8 @@ class ConversionPage(QWidget):
         current.many_subtitle_tracks = self.many_subs.value()
         current.disc_images = self.disc.currentData()
         current.subtitle_languages = self.languages.text().strip() or "all"
+        code = self.audio_language.text().strip().lower()
+        current.default_audio_language = code if re.fullmatch(r"[a-z]{2,3}", code) else ""
         conversion_plan.set_conversion_settings(current)
         poor, good = round(self.poor_bpp.value(), 2), round(self.good_bpp.value(), 2)
         if bitrate_bands.valid_thresholds(poor, good):

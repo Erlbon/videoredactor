@@ -68,7 +68,7 @@ from redactor_common.core.rename_pattern import render_filename, unique_path, ze
 from redactor_common.core.trash import move_to_trash
 
 from core import controlled_vocab, imdb_import, imdb_local, lyrics_subtitles, opensubtitles_client, scene_lookup, stashdb_client
-from core import theporndb_client, tmdb_client, tvdb_client
+from core import poster_fetch, theporndb_client, tmdb_client, tvdb_client
 from core import subtitle_translation, translation_settings
 from core import conversion_plan, conversion_run, file_access, history, library_safety
 from core.config import get_setting, set_setting
@@ -1274,6 +1274,53 @@ class SceneLookupStep(VideoStep):
         return [f"from {fill.source} '{fill.label}'"] + lines
 
 
+# --- the poster, from the ids the file already carries ---
+
+
+@dataclass
+class PosterChoice:
+    service: str
+    jpeg: bytes
+    description: str
+
+    def __str__(self) -> str:
+        return f"poster from {self.service} ({self.description})"
+
+
+class PosterStep(VideoStep):
+    key = "get_poster"
+    label = "Get the poster from the file's source ids"
+    description = (
+        "A file that carries a source id (TMDB, TheTVDB, IMDb, ThePornDB or StashDB, put there by a lookup) and has no "
+        "poster yet gets the poster of THAT record, without searching: only a true poster is used (the service's own "
+        "poster, portrait, big enough; never a frame from the video). A film or TV episode asks TMDB, TheTVDB or IMDb "
+        "(through TMDB), a scene asks ThePornDB or StashDB. A file that already has a poster is left alone. Runs after "
+        "the lookup steps, so an id they just found is used. Saved inside the file with the other changes. Off by default."
+    )
+    default_enabled = False
+
+    def execute(self, ctx: VideoCtx) -> StepResult:
+        meta = ctx.work.metadata
+        if meta.cover_info or meta.cover_pending is not None:
+            return StepResult.nothing()
+        if not poster_fetch.services_for(meta):
+            return StepResult.nothing()
+        outcome = ctx.bg(poster_fetch.fetch_poster, meta, cancel_event=ctx.env.cancel_event)
+        if not outcome.found:
+            return StepResult.nothing(note=f"no poster: {outcome.why_not()}")
+        return StepResult.suggestion(
+            PosterChoice(outcome.service, outcome.poster.jpeg, outcome.poster.description()), LOOKUP_ID,
+            f"the {outcome.service} id in the file",
+        )
+
+    def apply_suggestion(self, ctx: VideoCtx, result: StepResult) -> list[str]:
+        choice: PosterChoice = result.value
+        ctx.work.metadata.cover_pending = choice.jpeg
+        ctx.work.metadata.cover_remove = False
+        ctx.work.dirty = True
+        return [f"poster = {choice.description} (from {choice.service})"]
+
+
 # --- music videos: the retired track title ---
 
 
@@ -1539,7 +1586,8 @@ class RemuxStep(VideoStep):
         if os.path.lexists(final):
             return StepResult.nothing(note=f"not remuxed: {os.path.basename(final)} already exists")
         target = ctx.new_scratch(".mp4")
-        ok, message = ctx.bg(remux_to_mp4, ctx.current, target)
+        audio_language = conversion_plan.get_conversion_settings(ctx.env.setting).default_audio_language
+        ok, message = ctx.bg(remux_to_mp4, ctx.current, target, audio_language=audio_language)
         if not ok:
             _remove_quietly(target)
             return StepResult.failed(f"not remuxed, the file is untouched: {(message or 'remux failed').strip().splitlines()[-1]}")
@@ -1866,6 +1914,7 @@ def build_catalogue(
         PathTagsStep(env=env, sample=sample),
         LookupStep(),
         SceneLookupStep(),
+        PosterStep(),
         TrackTitleStep(),
         SubtitlesStep(),
         SubtitleTranslateStep(),

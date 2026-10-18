@@ -270,6 +270,18 @@ def get_tv_episode_details(tmdb_id: int, season: int, episode: int) -> dict:
     }
 
 
+def find_poster_by_imdb(imdb_id: str) -> str:
+    """The poster path of the film or show TMDB lists for an IMDb title id ("" when TMDB has none): the way from an
+    IMDb id to a poster. Movies first, then shows."""
+    data = _get_json(f"/find/{imdb_id}", {"external_source": "imdb_id"})
+    for key in ("movie_results", "tv_results"):
+        for result in dict_items(data.get(key)):
+            path = _path_or_none(result.get("poster_path"))
+            if path:
+                return path
+    return ""
+
+
 def download_poster(poster_path: str) -> bytes:
     """Download poster image bytes at POSTER_SIZE resolution."""
     url = f"{IMAGE_BASE_URL}{POSTER_SIZE}{poster_path}"
