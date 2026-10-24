@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-24#01 -- Dialogs no longer stay in memory after they are closed
+
+Shared part: redactor_common 2026-10-24#03 (gui/owned_dialog.py).
+- **A memory leak is fixed.** Every dialog was made with the main window as its parent, and Qt keeps a child alive as long as its parent, so each dialog that had been opened stayed in memory with all its widgets until the program closed: about 15 dialogs, 0.2 to 1.4 MB each time. Now every dialog uses the shared `OwnedDialog` base, whose `exec()` frees the dialog once control is back in the event loop, so what the code reads from it right after it closes is still there. A test fails when a new dialog class is made straight from QDialog.
+- Join Files reads its choices right after the dialog closes, and its tests run the real `exec()`.
+
 ## 2026-10-18#13 -- Get Poster from the ids in the file, MP4 index first, optional audio language
 
 - **Metadata > Get Poster… (also right-click)**: fetches the TRUE POSTER (the service's own poster, portrait, at least 400 x 600) of the selected files from the source ids they ALREADY carry, without searching: a film from its TMDB id (or its IMDb id through TMDB), a TV episode from the series' TMDB or TheTVDB id, a scene from its ThePornDB or StashDB id (a Porn file asks the scene services first). Each source the file has an id for is tried until one gives a poster; the report says why a file got none (no key, no poster, not a true poster). A file that already has a poster is left alone unless you tick Replace (then the usual per-field review asks, with the new poster unticked); "Accept a landscape cover" is the same off-by-default box as in the lookups. Staged like a lookup: Save embeds it, one Undo takes it back, a progress dialog with Cancel runs the downloads.

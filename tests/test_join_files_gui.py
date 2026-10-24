@@ -7,7 +7,7 @@ import os
 import shutil
 
 import pytest
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QDialog, QMessageBox
 
 from core import join_files as jf
@@ -60,6 +60,19 @@ def test_the_dialog_lists_movies_and_parts_and_blocks_a_movie_that_cannot_be_joi
     assert not dialog.join_button.isEnabled()
 
 
+def _accept_through_the_real_exec(monkeypatch, dry: bool) -> None:
+    """The dialog is run by its REAL exec() (closed from inside it): a stub that skips exec() makes the dialog delete itself at close, in the
+    middle of the nested loops the join runs, which the real flow never does."""
+    real_exec = dialog_mod.JoinFilesDialog.exec
+
+    def run(self):
+        if dry:
+            self.dry_run_box.setChecked(True)
+        QTimer.singleShot(0, self._on_accept)
+        return real_exec(self)
+    monkeypatch.setattr(dialog_mod.JoinFilesDialog, "exec", run)
+
+
 def test_a_real_join_replaces_the_parts_in_the_list_with_the_joined_file(window, tmp_path, monkeypatch):
     _no_recent_guard()
     a, b = tmp_path / "Movie cd1.mp4", tmp_path / "Movie cd2.mp4"
@@ -67,7 +80,7 @@ def test_a_real_join_replaces_the_parts_in_the_list_with_the_joined_file(window,
     make_mp4(b, audio_tracks=1)
     _load(window, a, b)
     window.table.selectAll()
-    monkeypatch.setattr(dialog_mod.JoinFilesDialog, "exec", lambda self: (self._on_accept(), QDialog.DialogCode.Accepted)[1])
+    _accept_through_the_real_exec(monkeypatch, dry=False)
     monkeypatch.setattr(QMessageBox, "exec", lambda self: 0)
     dialog_mod.run_join_files(window, window._selected_video_files(), lambda lines: "\n".join(lines))
     assert [vf.path.name for vf in window.video_files] == ["Movie.mp4"]
@@ -82,12 +95,7 @@ def test_a_dry_run_changes_nothing_and_the_list_stays(window, tmp_path, monkeypa
     make_mp4(b, audio_tracks=1)
     _load(window, a, b)
 
-    def accept_dry(self):
-        self.dry_run_box.setChecked(True)
-        self._on_accept()
-        return QDialog.DialogCode.Accepted
-
-    monkeypatch.setattr(dialog_mod.JoinFilesDialog, "exec", accept_dry)
+    _accept_through_the_real_exec(monkeypatch, dry=True)
     monkeypatch.setattr(QMessageBox, "exec", lambda self: 0)
     dialog_mod.run_join_files(window, list(window.video_files), lambda lines: "\n".join(lines))
     assert len(window.video_files) == 2 and a.is_file() and b.is_file() and not (tmp_path / "Movie.mp4").exists()

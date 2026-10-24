@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 from core import convert_modes as cm
 from core import library_safety
 from core.library_safety import SafetySettings
+from redactor_common.gui.owned_dialog import OwnedDialog
 
 
 def originals_sentence(safety: SafetySettings) -> str:
@@ -32,7 +33,7 @@ def originals_sentence(safety: SafetySettings) -> str:
     return "The original is moved to a dated 'originals' folder beside the file (with an undo log)."
 
 
-class ConvertDialog(QDialog):
+class ConvertDialog(OwnedDialog):
     """After exec(): `mode`, `dry_run` and `keep` hold the choices."""
 
     def __init__(self, paths: list[str], parent: Optional[QWidget] = None, *, mode: str = cm.MODE_RULES,

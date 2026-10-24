@@ -50,6 +50,7 @@ from core.deep_scan import DeepScanCancelled
 from core.file_check import deep_tooltip, quick_check, repair
 from core.video_file import VideoFile
 from core.video_fingerprint import video_fingerprint
+from redactor_common.gui.owned_dialog import OwnedDialog
 
 TITLE = "Check Files"
 DEEP_SCAN_LABEL = "Deep scan (reads the whole file)"
@@ -112,7 +113,7 @@ def eligible_fixes(files) -> dict[str, list[VideoFile]]:
     }
 
 
-class FileCheckResultsDialog(QDialog):
+class FileCheckResultsDialog(OwnedDialog):
     """The files with findings, worst first; "Repair" accepts the dialog (`action` "repair"), "Cut Out Damaged
     Parts..." accepts it with `action` "cut", "Fix All" with `action` "all" (every step that applies, in order)."""
 

@@ -19,9 +19,10 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QLineEdit,
     QPushButton, QLabel, QMessageBox,
 )
+from redactor_common.gui.owned_dialog import OwnedDialog
 
 
-class VocabularyEditorDialog(QDialog):
+class VocabularyEditorDialog(OwnedDialog):
     """Usage:
         dialog = VocabularyEditorDialog(
             "Genres", get_genre_options, add_genre_option, remove_genre_option, parent=self,

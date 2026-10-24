@@ -25,6 +25,7 @@ from redactor_common.gui.work_progress import run_work_with_progress
 
 from core import join_files
 from core.video_file import VideoFile
+from redactor_common.gui.owned_dialog import OwnedDialog
 
 TITLE = "Join Files"
 OK_TINT = ("#EAF3DE", "#27500A", "#27500A", "#C0DD97")    # light bg, light text, dark bg, dark text
@@ -47,7 +48,7 @@ class _SortItem(QTreeWidgetItem):
         return natural_key(self.text(column)) < natural_key(other.text(column))
 
 
-class JoinFilesDialog(QDialog):
+class JoinFilesDialog(OwnedDialog):
     """`plans`: the checked groups. After exec(): `chosen` are the plans ticked, `chapters` and `dry_run` the options."""
 
     def __init__(self, plans: list[join_files.JoinPlan], parent=None):
@@ -239,15 +240,17 @@ def run_join_files(window, files: list[VideoFile], error_details) -> None:
         QMessageBox.information(window, TITLE, "Nothing to join.")
         return
     dialog = JoinFilesDialog(plans, window)
-    if dialog.exec() != QDialog.DialogCode.Accepted or not dialog.chosen:
+    accepted = dialog.exec() == QDialog.DialogCode.Accepted
+    chosen, chapters, dry_run = dialog.chosen, dialog.chapters, dialog.dry_run   # read now: the dialog is freed once control is back in the event loop
+    if not accepted or not chosen:
         return
-    results, log_path, cancelled = join_chosen(window, dialog.chosen, dialog.chapters, dialog.dry_run)
-    if not dialog.dry_run:
-        apply_to_list(window, files, dialog.chosen, results)
+    results, log_path, cancelled = join_chosen(window, chosen, chapters, dry_run)
+    if not dry_run:
+        apply_to_list(window, files, chosen, results)
     done = [r for r in results if r.status in (join_files.JOINED, join_files.WOULD)]
     bad = [r for r in results if r.status in (join_files.FAILED, join_files.SKIPPED)]
-    verb = "would be joined" if dialog.dry_run else "joined"
-    parts = [("Dry run: " if dialog.dry_run else "") + f"{len(done)} of {len(dialog.chosen)} movie(s) {verb}"]
+    verb = "would be joined" if dry_run else "joined"
+    parts = [("Dry run: " if dry_run else "") + f"{len(done)} of {len(chosen)} movie(s) {verb}"]
     if bad:
         parts.append(f"{len(bad)} not joined")
     if cancelled:
@@ -257,11 +260,11 @@ def run_join_files(window, files: list[VideoFile], error_details) -> None:
     lines = [r.line() for r in results]
     if log_path:
         lines += ["", f"Undo log: {log_path}", f'Undo: videoredactor undo-join "{log_path}"']
-    if dialog.dry_run:
+    if dry_run:
         lines += ["", "DRY RUN: nothing was changed or written."]
     box = QMessageBox(window)
     box.setIcon(QMessageBox.Icon.Warning if bad else QMessageBox.Icon.Information)
-    box.setWindowTitle("Dry run" if dialog.dry_run else TITLE)
+    box.setWindowTitle("Dry run" if dry_run else TITLE)
     box.setText(summary + ".")
     box.setDetailedText("\n".join(lines))
     box.setStandardButtons(QMessageBox.StandardButton.Ok)

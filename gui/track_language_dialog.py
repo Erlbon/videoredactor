@@ -28,6 +28,7 @@ from redactor_common.gui.table_columns import make_columns_resizable
 
 from core import track_language as tl
 from core import track_language_codes as codes
+from redactor_common.gui.owned_dialog import OwnedDialog
 
 TITLE = "Set Track Language"
 KEEP = ""  # a row's combo data: leave the tracks alone
@@ -68,7 +69,7 @@ def row_label(row: _Row) -> str:
     return f"{text}  \"{title}\"" if title else text
 
 
-class TrackLanguageDialog(QDialog):
+class TrackLanguageDialog(OwnedDialog):
     """`entries` = [(path, [TrackInfo])] of the files to edit. After accept, `plan()` is what to apply."""
 
     play_requested = pyqtSignal(str, int)  # path, 0-based position among the file's AUDIO tracks

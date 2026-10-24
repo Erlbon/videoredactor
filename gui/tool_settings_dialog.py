@@ -22,6 +22,7 @@ from core.external_tools import (
     get_tool_override, set_tool_override, is_executable_available,
     KNOWN_EXECUTABLES,
 )
+from redactor_common.gui.owned_dialog import OwnedDialog
 
 # Display order and labels for the four executables this app shells
 # out to. Order matches how they're introduced elsewhere (ffmpeg tools
@@ -77,7 +78,7 @@ class ToolPathsWidget(SharedToolPathsWidget):
         super().__init__([_row(exe, name) for exe, name in EXECUTABLE_ROWS], INTRO, parent=parent)
 
 
-class ToolSettingsDialog(QDialog):
+class ToolSettingsDialog(OwnedDialog):
     """Usage: dialog = ToolSettingsDialog(parent=self); dialog.exec()
     Tools > External Tools. Changes are saved immediately per row; Done just
     closes."""

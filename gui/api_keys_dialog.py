@@ -26,13 +26,14 @@ from core.config import remove_setting
 from redactor_common.gui.progress import run_busy
 from redactor_common.gui.secret_field import SecretField
 from redactor_common.gui.secret_prompts import save_with_fallback_prompt
+from redactor_common.gui.owned_dialog import OwnedDialog
 
 
 # The keys with a "Check the key" button (one cheap authenticated request each).
 CHECKABLE = ("theporndb", "stashdb")
 
 
-class ApiKeysDialog(QDialog):
+class ApiKeysDialog(OwnedDialog):
     """Usage: dialog = ApiKeysDialog(parent=self); dialog.exec() --
     saves directly on click (Save button), no further caller action
     needed; nothing needs to refresh elsewhere in response, since each

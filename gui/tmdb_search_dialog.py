@@ -29,6 +29,7 @@ from gui.tmdb_attribution import TmdbAttributionFooter
 from core.tmdb_client import (
     search_movies, search_tv, MovieCandidate, TVCandidate, TMDBError,
 )
+from redactor_common.gui.owned_dialog import OwnedDialog
 
 Candidate = Union[MovieCandidate, TVCandidate]
 
@@ -53,7 +54,7 @@ class SearchSource:
     poster_setting: str = ""       # settings section remembering that box ("tmdb_lookup"...); default ON (the old default)
 
 
-class TMDBSearchDialog(QDialog):
+class TMDBSearchDialog(OwnedDialog):
     """Search TMDB and let the user pick exactly one candidate.
 
     Usage: dialog = TMDBSearchDialog(mode='movie', initial_query=guess, initial_year=year);

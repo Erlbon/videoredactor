@@ -36,6 +36,7 @@ from core.video_metadata import ContentType
 from core.opensubtitles_client import (
     search_by_hash, search_by_title, SubtitleCandidate, OpenSubtitlesError,
 )
+from redactor_common.gui.owned_dialog import OwnedDialog
 
 # Matched (background, foreground) pair -- same DIRTY_BG/DIRTY_FG tint
 # as the main table's "pay attention" color, and same reasoning: never
@@ -52,7 +53,7 @@ SOURCE_OPENSUBTITLES = "opensubtitles"
 SOURCE_LRCLIB = "lrclib"
 
 
-class SubtitleSearchDialog(QDialog):
+class SubtitleSearchDialog(OwnedDialog):
     """Usage: dialog = SubtitleSearchDialog(video_path, language='en', parent=self, video=vf);
     if dialog.exec(): dialog.source says which page was used:
       "opensubtitles": dialog.selected_candidate (download it);

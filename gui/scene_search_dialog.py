@@ -48,6 +48,7 @@ from core.scene_lookup import (
 from core.video_file import VideoFile
 from gui.lookup import CANCELLED, run_cancellable_lookup
 from gui.lookup_file_header import add_bottom_skip_button, add_file_header, file_context
+from redactor_common.gui.owned_dialog import OwnedDialog
 
 HEADERS = ["Match", "Title", "Studio", "Date", "Performers"]
 COL_MATCH, COL_TITLE, COL_STUDIO, COL_DATE, COL_PERFORMERS = range(5)
@@ -132,7 +133,7 @@ def detail_text(result: SceneResult) -> str:
     return "\n".join(lines)
 
 
-class SceneSearchDialog(QDialog):
+class SceneSearchDialog(OwnedDialog):
     """Usage: dialog = SceneSearchDialog(source, video_file, parent=window, open_api_keys=window._on_add_external_apis);
     if dialog.exec(): result, save_cover = dialog.selected_result, dialog.save_cover"""
 

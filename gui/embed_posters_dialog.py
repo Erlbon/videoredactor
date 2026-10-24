@@ -26,6 +26,7 @@ from redactor_common.gui.table_columns import make_columns_resizable
 
 from core.embed_posters import EmbedOutcome, PosterOffer, embed_offer, find_offers
 from core.poster import MAX_BYTES, MAX_WIDTH
+from redactor_common.gui.owned_dialog import OwnedDialog
 
 TITLE = "Embed Existing Poster Files"
 # What embedding does to the picture: the same limits a looked-up poster gets (core.poster.prepare_poster).
@@ -42,7 +43,7 @@ class TickItem(QTableWidgetItem):
         return self.checkState().value < other.checkState().value
 
 
-class EmbedPostersDialog(QDialog):
+class EmbedPostersDialog(OwnedDialog):
     """The review list. `ticked_offers()` after exec() == Accepted are the ones to embed."""
 
     def __init__(self, offers: list[PosterOffer], parent=None):

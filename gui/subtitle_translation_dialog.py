@@ -31,6 +31,7 @@ from redactor_common.gui.sortable_table import NaturalTableWidgetItem, enable_so
 from redactor_common.gui.table_columns import make_columns_resizable
 
 from core import lyrics_subtitles, subtitle_translation as st, translation_settings
+from redactor_common.gui.owned_dialog import OwnedDialog
 
 MODE_TRANSLATE = "translate"
 MODE_COMPARE = "compare"
@@ -39,7 +40,7 @@ COL_TIME, COL_ORIGINAL, COL_ENGLISH = 0, 1, 2
 CUE_ROLE = Qt.ItemDataRole.UserRole  # on every cell: the cue index, so a sorted table still maps to its cues
 
 
-class SubtitleTranslationDialog(QDialog):
+class SubtitleTranslationDialog(OwnedDialog):
     """Usage: SubtitleTranslationDialog(video, mode=MODE_TRANSLATE, parent=window).exec(), `video` a VideoFile.
     `translator` overrides the configured engine (tests); `preselect` = a sidecar path to start on."""
 

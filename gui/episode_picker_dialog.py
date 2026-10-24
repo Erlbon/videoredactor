@@ -44,6 +44,7 @@ from PyQt6.QtWidgets import (
 from gui.lookup_file_header import add_file_header
 from core.config import get_setting, set_setting
 from redactor_common.gui.remembered_layout import remember_layout, results_detail_splitter
+from redactor_common.gui.owned_dialog import OwnedDialog
 
 
 CHOICE_EPISODE = "episode"
@@ -93,7 +94,7 @@ def episode_label(ep) -> str:
     return f"E{ep.episode_number}: {ep.name}" if ep.name else f"Episode {ep.episode_number}"
 
 
-class EpisodePickerDialog(QDialog):
+class EpisodePickerDialog(OwnedDialog):
     def __init__(
         self, source: EpisodeSource, parent=None, initial_season: Optional[int] = None,
         initial_episode: Optional[int] = None, title: Optional[str] = None, context=None,

@@ -24,9 +24,10 @@ from PyQt6.QtWidgets import QDialog, QHBoxLayout, QPushButton, QVBoxLayout
 
 from gui.lookup_file_header import add_file_header, file_context
 from gui.lyrics_panel import LyricsPanel
+from redactor_common.gui.owned_dialog import OwnedDialog
 
 
-class LyricsDialog(QDialog):
+class LyricsDialog(OwnedDialog):
     def __init__(self, video, parent=None, search: Optional[Callable] = None, context=None):
         super().__init__(parent)
         self.video = video

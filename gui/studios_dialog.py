@@ -16,9 +16,10 @@ from PyQt6.QtWidgets import (
 from redactor_common.gui.sortable_table import enable_sorting, suspend_sorting
 
 from core import studios
+from redactor_common.gui.owned_dialog import OwnedDialog
 
 
-class StudiosDialog(QDialog):
+class StudiosDialog(OwnedDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Studios")
