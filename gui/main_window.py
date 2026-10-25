@@ -151,6 +151,8 @@ from core.controlled_vocab import (
     get_language_options, add_language_option, remove_language_option,
 )
 from core.version import APP_NAME, APP_REPO_URL, APP_VERSION, RELEASE_LABEL
+from core import app_paths
+from redactor_common.gui.update_controller import UpdateController
 from core.external_tools import missing_tools
 from core.app_paths import asset_path
 
@@ -371,11 +373,14 @@ class MainWindow(QMainWindow):
         self._preview_loader.image_ready.connect(self._on_preview_ready)
 
         self._build_ui()
+        # Help > Check for Updates and the opt-in daily check (redactor_common's gui/update_controller.py).
+        self.updates = UpdateController(self, APP_NAME, APP_VERSION, APP_REPO_URL, app_paths.updates_json_path())
         self._build_menu_bar()
         self._build_toolbar()
         self._rebuild_table_columns()
         self._check_external_tools_on_startup()
         self._restore_last_folder_on_startup()
+        self.updates.start_auto_check()  # nothing unless switched on in Preferences > Updates
 
     def _build_ui(self) -> None:
         central = QWidget()
@@ -580,6 +585,7 @@ class MainWindow(QMainWindow):
             ]),
             help=standard_help_items(
                 APP_NAME, self._on_show_changelog, self._on_show_credits, self._on_show_about,
+                updates_slot=self.updates.check_now,
             ),
         )
         build_standard_menu_bar(self, spec)

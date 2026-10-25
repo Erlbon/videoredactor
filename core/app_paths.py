@@ -36,3 +36,8 @@ def settings_ini_path() -> Path:
 
 def crash_log_path() -> Path:
     return _shared.crash_log_path(APP_SLUG, PROJECT_ROOT)
+
+
+def updates_json_path() -> Path:
+    """Help > Check for Updates' own small settings file (redactor_common.core.selfupdate.UpdateSettings)."""
+    return base_dir() / f"{APP_SLUG}_updates.json"

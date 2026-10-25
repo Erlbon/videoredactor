@@ -65,7 +65,7 @@ def test_other_menus_hold_what_the_spec_says(window):
         "Preferences…", "Create Notes…", "API Keys…", "External Tools…", "IMDb Database…", "Studios…", "Porn Tags…", "Columns…", "Genres…",
         "Languages…", "History…",
     ]
-    assert _labels(menus["Help"]) == ["Changelog…", "Credits…", "About " + mw.APP_NAME]
+    assert _labels(menus["Help"]) == ["Changelog…", "Credits…", "Check for Updates…", "About " + mw.APP_NAME]
 
 
 # Every action key of the old menus -> where it lives now.

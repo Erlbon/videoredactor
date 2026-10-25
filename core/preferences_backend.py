@@ -38,7 +38,9 @@ from redactor_common.core.preferences import (
     filenames_section,
 )
 
-from core import config, history, notes_settings, scene_lookup
+from redactor_common.core import selfupdate
+
+from core import app_paths, config, history, notes_settings, scene_lookup
 from core.transcode_settings import DEFAULT_AUDIO_BITRATE, DEFAULT_CRF, DEFAULT_THREADS
 from core.video_duplicates import HAMMING_THRESHOLD
 
@@ -192,6 +194,7 @@ def build_sections(history_actions: tuple[PrefAction, ...] = (),
         notes_section(notes_actions),
         scene_lookup_section(),
         history_section(history_actions),
+        selfupdate.updates_section(),
     ]
 
 
@@ -219,4 +222,6 @@ def _set(values: dict) -> None:
 
 
 def make_backend() -> CallbackBackend:
-    return CallbackBackend(_get, _set)
+    """The ini, plus the Updates page's switch, which lives in videoredactor_updates.json."""
+    return selfupdate.with_update_settings(CallbackBackend(_get, _set),
+                                           selfupdate.UpdateSettings(app_paths.updates_json_path()))

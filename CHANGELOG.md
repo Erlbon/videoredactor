@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-25#01 -- Help > Check for Updates: the program can update itself
+
+Shared part: redactor_common 2026-10-25#01 (core/selfupdate.py, gui/update_controller.py).
+- New: **Help > Check for Updates…** asks GitHub for the newest release. If there is a newer one it shows its release notes with **Update Now**, **Skip This Version** and **Not Now**. Update Now downloads the new exe next to the running one under a progress bar (with Cancel), checks it against the SHA-256 checksum GitHub lists for the file (a file that does not match is thrown away), and swaps it in. The old exe is kept as `videoredactor.exe.old` until the next start. **Restart Now** closes the window the normal way first, so unsaved changes are still asked about.
+- New: **Preferences > Updates > Check for a new version once a day** (off by default). When on, the check runs quietly at startup at most once a day and says nothing unless there is a version you have not skipped. Nothing about you or your files is sent. The switch lives in `videoredactor_updates.json` next to the settings.
+- Running from source, or on Linux, the dialog offers the download page instead of replacing anything.
+
 ## 2026-10-24#01 -- Dialogs no longer stay in memory after they are closed
 
 Shared part: redactor_common 2026-10-24#03 (gui/owned_dialog.py).
