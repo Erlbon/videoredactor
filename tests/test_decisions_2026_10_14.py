@@ -46,12 +46,15 @@ def _files(window, tmp_path, *names):
 # --- V1: no Ctrl+S / Ctrl+Shift+S aliases ------------------------------------------------------------------------
 
 
-def test_v1_ctrl_s_is_bound_to_nothing(window):
+def test_v1_ctrl_s_is_save_all_only(window):
+    # Ctrl+S is Save All for good (owner, 2026-11-04), not an alias.
     from PyQt6.QtGui import QAction
 
     keys = {k.toString() for a in window.findChildren(QAction) for k in a.shortcuts()}
-    assert "Ctrl+S" not in keys and "Ctrl+Shift+S" not in keys and "F8" not in keys
-    assert [k.toString() for k in window.actions_by_key["save_all"].shortcuts()] == ["Ctrl+Shift+A"]
+    assert "Ctrl+Shift+S" not in keys and "F8" not in keys
+    save_all = window.actions_by_key["save_all"]
+    assert [k.toString() for k in save_all.shortcuts()] == ["Ctrl+S", "Ctrl+Shift+A"]
+    assert [a for a in window.findChildren(QAction) if "Ctrl+S" in {k.toString() for k in a.shortcuts()}] == [save_all]
 
 
 # --- V2: the menu's own words ------------------------------------------------------------------------------------

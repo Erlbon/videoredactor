@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-04#03 -- Ctrl+S saves again
+
+- **Ctrl+S** is Save All again, for good, and the menu shows it. Ctrl+Shift+A still works too. It was dropped on 2026-10-14 as an expiring alias, but that was never the intent: Ctrl+S is the key everybody presses to save. Ctrl+Shift+S stays unbound (it is Save As everywhere else).
+
 ## 2026-11-04#02 -- Typed edits in the side panel are no longer lost when you select other files
 
 - **Selecting other files applies what you typed.** A field changed in the side panel but not Applied used to vanish the moment you clicked another row. Now it is applied to the files you had selected before the click, exactly as Apply would (one Undo entry, rows marked changed), and the status bar says "Applied pending edits to N files". Apply (Ctrl+Return) is still there, it is just no longer required.

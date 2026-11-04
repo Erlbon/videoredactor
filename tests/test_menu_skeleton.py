@@ -381,8 +381,8 @@ def test_skeleton_shortcuts_and_one_release_aliases(window):
     reg = window.actions_by_key
     assert _keys(reg["open_files"]) == ["Ctrl+O"]
     assert _keys(reg["open_folder"]) == ["Ctrl+Shift+O"]
-    # Save All is Ctrl+Shift+A only; the Ctrl+S / Ctrl+Shift+S aliases are gone.
-    assert _keys(reg["save_all"]) == ["Ctrl+Shift+A"]
+    # Save All is Ctrl+S (for good, owner 2026-11-04) and Ctrl+Shift+A; the Ctrl+Shift+S alias is gone.
+    assert _keys(reg["save_all"]) == ["Ctrl+S", "Ctrl+Shift+A"]
     assert _keys(reg["lookup_subtitles"]) == ["Ctrl+Shift+L"]  # was Ctrl+Shift+O
     assert _keys(reg["lookup_tmdb_movie"]) == ["Ctrl+M"] and _keys(reg["lookup_tmdb_tv"]) == ["Ctrl+T"]
     assert _keys(reg["lookup_tvdb"]) == ["Ctrl+Shift+T"] and _keys(reg["convert"]) == ["Ctrl+Shift+C"]

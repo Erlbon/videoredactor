@@ -609,8 +609,9 @@ class MainWindow(QMainWindow):
                         sub_action.menu().aboutToShow.connect(self._update_get_lyrics_visibility)
         self._update_get_lyrics_visibility()
 
-        # Save All is Ctrl+Shift+A only: the one-release Ctrl+S / Ctrl+Shift+S
-        # compatibility aliases were dropped (owner decision 2026-10-14).
+        # Save All is Ctrl+S and Ctrl+Shift+A (owner, 2026-11-04; set where
+        # save_all_action is picked up). The old Ctrl+Shift+S alias is gone:
+        # that key is Save As everywhere else.
         # F1 used to open About; F1 is Help contents everywhere else, so it is
         # simply unbound now (no alias: lint forbids F1 on About).
 
@@ -632,6 +633,7 @@ class MainWindow(QMainWindow):
             registry["include_subfolders"], load=_load_include_subfolders, save=_save_include_subfolders,
         )
         self.save_all_action = registry["save_all"]
+        self.save_all_action.setShortcuts([QKeySequence(shortcuts.SAVE), QKeySequence(shortcuts.SAVE_ALL)])
         self.rename_file_action = registry["rename_file"]
         self.remove_from_list_action = registry["remove_from_list"]
         self.apply_action = registry["apply"]
