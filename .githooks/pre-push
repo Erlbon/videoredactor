@@ -3,5 +3,12 @@
 # Uses pytest's own exit code (never piped into tail). Qt runs offscreen so no window is needed.
 # A one-off Windows file-lock failure has happened; rerun before assuming the code is broken.
 # Emergency bypass for a docs-only push: git push --no-verify (say why in the commit message).
-QT_QPA_PLATFORM=offscreen python -m pytest -q -p no:cacheprovider || { echo "pre-push: the tests fail; not pushing" >&2; exit 1; }
+# The tests run in this repo's own .venv (2026-11-04): redactor-build-tools/devenv/venv_sync.py makes it and keeps its
+# redactor_common at the pin in requirements.txt, so another repo's pin can no longer break these tests. The script is
+# found next to the main checkout (also from a worktree), or where REDACTOR_BUILD_TOOLS points.
+TOP="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+SYNC="${REDACTOR_BUILD_TOOLS:-$TOP/../redactor-build-tools}/devenv/venv_sync.py"
+[ -f "$SYNC" ] || { echo "pre-push: $SYNC is missing: clone https://github.com/Erlbon/redactor-build-tools next to this repo" >&2; exit 1; }
+PY="$(python "$SYNC" .)" || { echo "pre-push: could not prepare .venv; not pushing" >&2; exit 1; }
+QT_QPA_PLATFORM=offscreen "$PY" -m pytest -q -p no:cacheprovider || { echo "pre-push: the tests fail; not pushing" >&2; exit 1; }
 exit 0

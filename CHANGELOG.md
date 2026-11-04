@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-04#04 -- redactor_common 2026-11-04-02, and tests in the repo's own venv
+
+- **redactor_common 2026-11-04-02** (was 2026-11-04-01), the tag the other Redactors use: it adds the shared tag
+  writer; nothing video uses changes behaviour. The family keeps one pin from now on.
+- **The pre-push hook tests in this repo's own `.venv`**, made and kept at the pin by
+  `redactor-build-tools/devenv/venv_sync.py`. With one shared install, one repo's pin broke the others' pushes.
+  `tests/test_pre_push_hook.py` guards the hook; `.venv/` is ignored.
+
 ## 2026-11-04#03 -- Ctrl+S saves again
 
 - **Ctrl+S** is Save All again, for good, and the menu shows it. Ctrl+Shift+A still works too. It was dropped on 2026-10-14 as an expiring alias, but that was never the intent: Ctrl+S is the key everybody presses to save. Ctrl+Shift+S stays unbound (it is Save As everywhere else).
