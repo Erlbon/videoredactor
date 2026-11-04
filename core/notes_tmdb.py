@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from core.tmdb_client import BASE_URL, USER_AGENT, TMDBError, get_api_key
+from redactor_common.core.lookups.tmdb import BASE_URL, USER_AGENT, TMDBError, get_api_key
 from redactor_common.core.lookup_client import build_request, fetch_json, make_default_fetch
 
 SEARCH_LIMIT = 8

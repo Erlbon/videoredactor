@@ -39,12 +39,12 @@ from core.filename_pattern import (
     DEFAULT_RENAME_PATTERN, PARSE_NUMERIC_FIELDS, PARSE_STRIP_ZEROS_FIELDS, VALID_FIELD_KEYS,
     default_parse_pattern, field_text, load_pattern_history, placeholder_values, save_pattern_to_history, set_field_text,
 )
-from core.tmdb_client import (
+from redactor_common.core.lookups.tmdb import (
     get_movie_details, get_tv_show_details, get_tv_episode_details,
     download_poster, TMDBError, MovieCandidate, TVCandidate,
 )
 from core.tvdb_client import get_series_details, get_episode_details, download_image, TVDBError
-from core.release_name_parser import parse_release_name
+from redactor_common.core.lookups.release_name import parse_release_name
 from core.redact_steps import _tv_guess, conversion_is_series
 from core.sidecars import with_sidecars
 from core.lookup_sources import imdb_values, tmdb_values, tvdb_values
@@ -2501,7 +2501,7 @@ class MainWindow(QMainWindow):
         TVDBEpisodePickerDialog (which fetches all episodes once, no per-season network call).
 
         `filename_stem`, when given, is parsed for a season/episode number to pre-select in the picker (see
-        core.release_name_parser); `context` is the file header (gui/lookup_file_header.py)."""
+        redactor_common's lookups/release_name.py); `context` is the file header (gui/lookup_file_header.py)."""
         file_guess = parse_release_name(filename_stem)
         episode_dialog = TVDBEpisodePickerDialog(
             tvdb_id, initial_season=file_guess.season,

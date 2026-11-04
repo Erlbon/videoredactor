@@ -8,7 +8,7 @@ import threading
 import pytest
 
 import core.opensubtitles_client as osub
-import core.tmdb_client as tmdb
+from redactor_common.core.lookups import tmdb
 import core.tvdb_client as tvdb
 
 

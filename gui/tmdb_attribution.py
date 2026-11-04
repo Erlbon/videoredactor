@@ -19,8 +19,8 @@ from PyQt6.QtWidgets import QHBoxLayout, QLabel, QWidget
 from core.app_paths import asset_path
 from redactor_common.gui.about_dialog import CreditsDialog
 
-# The wording TMDB prescribes lives in core/tmdb_client.py (the folder notes carry it too): one definition.
-from core.tmdb_client import TMDB_NOTICE, TMDB_URL  # noqa: E402,F401
+# The wording TMDB prescribes lives in redactor_common's core/lookups/tmdb.py (the folder notes carry it too): one definition.
+from redactor_common.core.lookups.tmdb import TMDB_NOTICE, TMDB_URL  # noqa: E402,F401
 
 # Small on purpose: TMDB wants its logo less prominent than the app's own.
 LOGO_HEIGHT = 14

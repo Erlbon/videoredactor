@@ -12,7 +12,7 @@ season number, episode number and episode title. NO plot, poster, cast,
 director or studio -- those still come from TMDB/TheTVDB. Nothing here
 touches the network.
 
-Results are shaped like the online lookups' (core/tmdb_client's
+Results are shaped like the online lookups' (redactor_common lookups/tmdb.py's
 MovieCandidate / TVCandidate / EpisodeInfo, as subclasses that carry the
 IMDb extras), so gui/tmdb_search_dialog.py's flow and the Redact lookup
 step can treat both alike. `exact` on a candidate says the searched title
@@ -54,7 +54,7 @@ from redactor_common.core.local_db import (
 
 from core import imdb_import
 from core.imdb_import import ImdbDatabaseError, imdb_id, tconst_number
-from core.tmdb_client import EpisodeInfo, MovieCandidate, TVCandidate
+from redactor_common.core.lookups.tmdb import EpisodeInfo, MovieCandidate, TVCandidate
 
 SERVICE_NAME = "IMDb (local database)"
 KIND = "an IMDb lookup database built by this app (Tools > IMDb Database)"

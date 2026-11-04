@@ -6,7 +6,8 @@ import pytest
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 import core.config as config
-from core import api_keys, opensubtitles_client, tmdb_client, tvdb_client
+from core import api_keys, opensubtitles_client, tvdb_client
+from redactor_common.core.lookups import tmdb as tmdb_client
 from gui.api_keys_dialog import ApiKeysDialog
 from redactor_common.core import secret_store
 

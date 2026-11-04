@@ -10,7 +10,8 @@ import pytest  # noqa: E402
 from redactor_common.core.local_db import forget_cached  # noqa: E402
 from redactor_common.core.pipeline import FileStatus  # noqa: E402
 
-from core import imdb_local, tmdb_client, tvdb_client  # noqa: E402
+from core import imdb_local, tvdb_client  # noqa: E402
+from redactor_common.core.lookups import tmdb as tmdb_client  # noqa: E402
 from core import redact_steps as rs  # noqa: E402
 from core.video_metadata import ContentType  # noqa: E402
 from tests.imdb_fixture import AKAS, BASICS, EPISODES, RATINGS, build  # noqa: E402

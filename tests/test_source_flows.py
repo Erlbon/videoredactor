@@ -15,7 +15,8 @@ from redactor_common.core.pipeline import FileStatus  # noqa: E402
 
 import gui.main_window as mw  # noqa: E402
 from core import redact_steps as rs  # noqa: E402
-from core import stashdb_client, theporndb_client, tmdb_client, tvdb_client  # noqa: E402
+from core import stashdb_client, theporndb_client, tvdb_client  # noqa: E402
+from redactor_common.core.lookups import tmdb as tmdb_client  # noqa: E402
 from core.scene_lookup import MATCH_FILE, MATCH_ID, SceneResult  # noqa: E402
 from core.video_file import VideoFile  # noqa: E402
 from core.video_metadata import ContentType, VideoMetadata  # noqa: E402

@@ -9,7 +9,7 @@ from core.notes_flow import (
     Fetchers, NotesEngine, build_proposals, scan, summarize, write_proposal, undo_note_entry,
 )
 from core.notes_tmdb import TitleDetails
-from core.tmdb_client import TMDBError
+from redactor_common.core.lookups.tmdb import TMDBError
 from redactor_common.core.notes import note_status, parse_front_matter
 from redactor_common.core.notes_cache import ResponseCache
 from redactor_common.core.notes_model import Confidence
@@ -142,7 +142,7 @@ def test_a_missing_api_key_is_said_once_and_stops_the_requests(tmp_path):
     make_movie(tmp_path)
     tmdb = FakeFetch(tmdb_routes())
     fetchers = Fetchers(tmdb=tmdb, wiki=FakeFetch(), key=None)
-    import core.tmdb_client as client
+    from redactor_common.core.lookups import tmdb as client
 
     original = client.get_api_key
     client.get_api_key = lambda: None

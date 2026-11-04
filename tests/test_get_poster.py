@@ -10,7 +10,8 @@ from PyQt6.QtWidgets import QApplication, QMessageBox
 import core.config as config
 from core import api_keys, poster_fetch as pf
 from core import redact_steps as rs
-from core import stashdb_client, theporndb_client, tmdb_client, tvdb_client
+from core import stashdb_client, theporndb_client, tvdb_client
+from redactor_common.core.lookups import tmdb as tmdb_client
 from core.scene_lookup import SceneResult
 from core.video_metadata import ContentType, VideoMetadata
 from tests.test_poster import solid

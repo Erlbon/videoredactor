@@ -3,7 +3,7 @@ TheTVDB (thetvdb.com) v4 API client -- a second, TV-focused metadata
 source alongside TMDB. TMDB remains the source for movies; for TV,
 the user can now choose between TMDB and TheTVDB when importing.
 
-Auth is the one real structural difference from tmdb_client.py: TMDB
+Auth is the one real structural difference from redactor_common's lookups/tmdb.py: TMDB
 takes a simple api_key query parameter on every request, but TheTVDB's
 v4 API requires a login step first (POST the API key, get back a JWT
 bearer token) before any other endpoint will respond. That token is
@@ -13,7 +13,7 @@ every single call.
 
 Reads the API key from the TVDB_API_KEY env var first (useful for
 testing/CI without touching disk), then the secret store
-(core/api_keys.py) -- same convention as tmdb_client.py and
+(core/api_keys.py) -- same convention as redactor_common's lookups/tmdb.py and
 opensubtitles_client.py. No key baked in, none requested from
 the user in chat.
 
@@ -92,7 +92,7 @@ class SeasonInfo:
     def display_name(self) -> str:
         # TheTVDB uses season_number 0 for specials, same convention
         # TMDB uses -- labeled clearly rather than a confusing "Season 0",
-        # matching tmdb_client.py's SeasonInfo.display_name exactly.
+        # matching redactor_common's lookups/tmdb.py's SeasonInfo.display_name exactly.
         if self.season_number == 0:
             return f"Specials ({self.episode_count} episodes)"
         return f"Season {self.season_number} ({self.episode_count} episodes)"
@@ -185,7 +185,7 @@ def search_series(query: str, year: Optional[str] = None) -> list[SeriesCandidat
     """Search TheTVDB for TV series matching `query`. Always returns
     the full candidate list -- the picker dialog is responsible for
     letting the user choose, never this function auto-selecting a
-    "best" match, same principle as tmdb_client.py's search_movies/
+    "best" match, same principle as redactor_common's lookups/tmdb.py's search_movies/
     search_tv (always show the picker, even for one strong match).
     """
     for extra in ([{"year": year}, {}] if year else [{}]):  # the year first, then without it
@@ -211,7 +211,7 @@ def search_series(query: str, year: Optional[str] = None) -> list[SeriesCandidat
 def get_series_details(series_id: int) -> dict:
     """Show-level details, returned as a dict of VideoMetadata-shaped
     field names -- caller applies these onto a VideoMetadata instance,
-    matching tmdb_client.py's get_tv_show_details() return shape
+    matching redactor_common's lookups/tmdb.py's get_tv_show_details() return shape
     exactly so the GUI layer can treat either source's result the same way.
     """
     data = _get_json(f"/series/{series_id}/extended")
@@ -258,7 +258,7 @@ def get_episode_details(series_id: int, season: int, episode: int) -> dict:
     """Episode-level details for a specific season/episode -- fetches
     the full episode list and filters client-side (same reasoning as
     get_series_episodes: no per-episode-lookup endpoint that's simpler
-    than this), returned in the same shape as tmdb_client.py's
+    than this), returned in the same shape as redactor_common's lookups/tmdb.py's
     get_tv_episode_details() so the GUI layer can treat either source
     identically.
     """
@@ -279,5 +279,5 @@ def download_image(image_url: str) -> bytes:
     """Download poster/banner image bytes from a full TheTVDB image URL
     (unlike TMDB, TheTVDB's API responses already contain the complete
     URL, so there's no base-URL-plus-size-plus-path assembly needed
-    here the way tmdb_client.py's download_poster() does)."""
+    here the way redactor_common's lookups/tmdb.py's download_poster() does)."""
     return fetch_bytes(image_url, _image_fetch, TVDBError, what="the image")

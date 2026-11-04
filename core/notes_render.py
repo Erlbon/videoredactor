@@ -19,7 +19,7 @@ from __future__ import annotations
 from typing import Iterable, Optional
 
 from core.notes_tmdb import TitleDetails
-from core.tmdb_client import TMDB_NOTICE, TMDB_URL
+from redactor_common.core.lookups.tmdb import TMDB_NOTICE, TMDB_URL
 from core.version import APP_VERSION
 from redactor_common.core.note_text import credit_footer, fact_lines, join_blocks
 from redactor_common.core.notes import NoteFrontMatter, render_note

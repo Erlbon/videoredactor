@@ -39,7 +39,7 @@ from typing import Callable, Optional
 
 from core import config
 from core.opensubtitles_hash import compute_moviehash
-from core.release_name_parser import parse_release_name
+from redactor_common.core.lookups.release_name import parse_release_name
 from core.scene_name_parser import (  # noqa: F401 -- re-exported: the tests and the dialog import them from here
     MIN_PLAUSIBLE_YEAR, parse_scene_name, split_leading_date, squash_name, studio_prefix,
 )

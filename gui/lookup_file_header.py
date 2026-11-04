@@ -33,7 +33,7 @@ from PyQt6.QtGui import QFontMetrics
 from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
 from core.format_helpers import format_duration, format_file_size
-from core.release_name_parser import parse_release_name
+from redactor_common.core.lookups.release_name import parse_release_name
 from core.source_tags import sources_summary
 
 

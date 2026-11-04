@@ -17,7 +17,7 @@ import pytest  # noqa: E402
 from PyQt6.QtWidgets import QApplication, QDialog, QMessageBox  # noqa: E402
 
 import gui.main_window as mw  # noqa: E402
-from core import tmdb_client  # noqa: E402
+from redactor_common.core.lookups import tmdb as tmdb_client  # noqa: E402
 from core.video_file import VideoFile  # noqa: E402
 from core.video_metadata import ContentType, VideoMetadata  # noqa: E402
 from gui.episode_picker_dialog import CHOICE_EPISODE, CHOICE_SHOW_ONLY, CHOICE_SKIP, EpisodePickerDialog, EpisodeSource  # noqa: E402

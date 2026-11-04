@@ -21,7 +21,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from core import api_keys, stashdb_client, theporndb_client, tmdb_client, tvdb_client
+from core import api_keys, stashdb_client, theporndb_client, tvdb_client
+from redactor_common.core.lookups import tmdb as tmdb_client
 from core.poster import PosterRejected, PreparedPoster, prepare_poster
 from core.scene_lookup import SceneLookupError
 from core.source_tags import ref_in

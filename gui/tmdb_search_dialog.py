@@ -26,7 +26,7 @@ from gui.lookup import run_lookup
 from redactor_common.gui.remembered_layout import remember_layout, results_detail_splitter
 from gui.lookup_file_header import add_bottom_skip_button, add_file_header
 from gui.tmdb_attribution import TmdbAttributionFooter
-from core.tmdb_client import (
+from redactor_common.core.lookups.tmdb import (
     search_movies, search_tv, MovieCandidate, TVCandidate, TMDBError,
 )
 from redactor_common.gui.owned_dialog import OwnedDialog

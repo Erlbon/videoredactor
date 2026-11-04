@@ -1,6 +1,6 @@
 import json
 
-from core import tmdb_client as tmdb
+from redactor_common.core.lookups import tmdb
 from core import tvdb_client as tvdb
 
 

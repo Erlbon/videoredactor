@@ -157,7 +157,7 @@ def test_field_mapping(db):
 
 
 def test_candidates_have_the_shape_the_tmdb_dialog_uses(db):
-    from core.tmdb_client import EpisodeInfo, MovieCandidate, TVCandidate
+    from redactor_common.core.lookups.tmdb import EpisodeInfo, MovieCandidate, TVCandidate
 
     movie = imdb_local.search_movies(db, "Zarnak", "1984")[0]
     assert isinstance(movie, MovieCandidate) and movie.release_date == "1984" and movie.poster_path is None

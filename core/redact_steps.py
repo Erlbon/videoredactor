@@ -68,7 +68,8 @@ from redactor_common.core.rename_pattern import render_filename, unique_path, ze
 from redactor_common.core.trash import move_to_trash
 
 from core import controlled_vocab, imdb_import, imdb_local, lyrics_subtitles, opensubtitles_client, scene_lookup, stashdb_client
-from core import poster_fetch, theporndb_client, tmdb_client, tvdb_client
+from core import poster_fetch, theporndb_client, tvdb_client
+from redactor_common.core.lookups import tmdb as tmdb_client
 from core import subtitle_translation, translation_settings
 from core import conversion_plan, conversion_run, file_access, history, library_safety
 from core.config import get_setting, set_setting
@@ -85,7 +86,7 @@ from core.filename_pattern import (
     placeholder_values,
     set_field_text,
 )
-from core.release_name_parser import parse_release_name
+from redactor_common.core.lookups.release_name import parse_release_name
 from core.sidecars import sidecar_moves, sidecar_pairs, sidecar_suffixes
 from core.video_file import VideoFile
 from core.video_fingerprint import video_fingerprint

@@ -11,7 +11,7 @@ from typing import Optional
 
 from PyQt6.QtWidgets import QMessageBox  # noqa: F401 -- tests patch picker.QMessageBox
 
-from core.tmdb_client import TMDBError, get_season_episodes, get_tv_seasons
+from redactor_common.core.lookups.tmdb import TMDBError, get_season_episodes, get_tv_seasons
 from gui.episode_picker_dialog import EpisodePickerDialog, EpisodeSource
 from gui.lookup import run_lookup
 from gui.tmdb_attribution import TmdbAttributionFooter

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-04#01 -- The TMDB client and the release-name parser now come from redactor_common
+
+Shared part: redactor_common 2026-11-04#01 (core/lookups/tmdb.py, core/lookups/release_name.py).
+- No visible change. The TMDB client (`core/tmdb_client.py`) and the scene/release-name parser (`core/release_name_parser.py`) moved to redactor_common's `core/lookups/`, because the coming Folder Redactor uses them too. The app sets the shared TMDB client up once in `core/__init__.py`: the same User-Agent, and the key still read from the TMDB_API_KEY variable, then the credential store, then the old settings value.
+- The release-name parser's tests moved with it.
+
 ## 2026-10-30#01 -- The exe is no longer UPX-compressed
 
 - Windows Defender flagged a UPX-packed release exe of the family (epubredactor 2026-10-18#03) as `Trojan:Win32/Yomal!rfn`, a false positive that UPX-packed, unsigned programs often draw. The build no longer runs UPX (`upx=False` in the spec, `build_exe.bat` no longer puts it on PATH). The exe grows from 47.0 MB to 53.9 MB (+15%).

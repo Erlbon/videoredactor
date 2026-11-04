@@ -23,7 +23,7 @@ from core.notes_flow import Fetchers, NotesEngine, build_proposals, live_fetcher
 from core.notes_local import (
     ALL_KINDS, KIND_MOVIE, KIND_SERIES, classify, count_targets, is_season_folder, title_and_year,
 )
-from core.tmdb_client import get_api_key
+from redactor_common.core.lookups.tmdb import get_api_key
 from redactor_common.core.notes import existing_note
 from redactor_common.core.notes_scope import ScopeChoice, is_root, merge_choices, opened_caption, opened_folder
 from redactor_common.core.notes_timing import format_duration

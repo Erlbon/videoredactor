@@ -21,7 +21,8 @@ from redactor_common.gui.redact_dialog import run_redact  # noqa: E402
 
 from core import opensubtitles_client as osc  # noqa: E402
 from core import redact_steps as rs  # noqa: E402
-from core import tmdb_client, tvdb_client  # noqa: E402
+from core import tvdb_client  # noqa: E402
+from redactor_common.core.lookups import tmdb as tmdb_client  # noqa: E402
 from core.file_check import CheckResult, Finding, NOTE, mp4_index_at_end  # noqa: E402
 from core.mp4_backend import read_mp4_metadata  # noqa: E402
 from core.video_file import VideoFile  # noqa: E402

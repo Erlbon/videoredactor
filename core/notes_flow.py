@@ -34,7 +34,7 @@ from core.notes_render import (
     TMDB_CREDIT, render_local_note, render_movie_note, render_series_note,
 )
 from core.notes_tmdb import Tmdb, TitleDetails, TitleHit, make_fetch as make_tmdb_fetch
-from core.tmdb_client import TMDBError
+from redactor_common.core.lookups.tmdb import TMDBError
 from core.version import APP_VERSION
 from redactor_common.core import note_text
 from redactor_common.core import wikipedia as wp

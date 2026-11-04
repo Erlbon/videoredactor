@@ -14,7 +14,7 @@ differs lives in an EpisodeSource:
 "Always confirm explicitly, never auto-pick": guessing the wrong episode
 writes wrong metadata just as badly as guessing the wrong show.
 `initial_season`/`initial_episode`, when given (typically parsed from the
-file's own name via core.release_name_parser), only PRE-SELECT that season
+file's own name via redactor_common's lookups/release_name.py), only PRE-SELECT that season
 and episode -- the user still has to click "Use Selected Episode" (or
 double-click) for anything to happen.
 
