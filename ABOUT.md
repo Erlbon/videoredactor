@@ -13,7 +13,12 @@ into files one at a time.
 - **Bulk-edit metadata** across MP4 and MKV files from one panel: title,
   description, genre, cast, director, season/episode numbering, and
   more — and filter the file list from the funnel in any column header
-  (Content Type, Status, Filename, Year and more).
+  (Content Type, Status, Filename, Year and more). Forgot to Apply?
+  Clicking other files applies what you typed to the files you were
+  editing (one undo step; only the fields that were showing, so a
+  Director typed for a movie goes to the movie only), and Refresh
+  List, Clear List, Open Folder and closing count it as an unsaved
+  change before they ask.
 - **TMDB lookup** — search and match a file against The Movie Database,
   pulling in cast, crew, synopsis, and poster art. Every match is
   confirmed by hand; nothing is auto-applied. This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.
