@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-04#02 -- Typed edits in the side panel are no longer lost when you select other files
+
+- **Selecting other files applies what you typed.** A field changed in the side panel but not Applied used to vanish the moment you clicked another row. Now it is applied to the files you had selected before the click, exactly as Apply would (one Undo entry, rows marked changed), and the status bar says "Applied pending edits to N files". Apply (Ctrl+Return) is still there, it is just no longer required.
+- Only the fields that panel showed are applied: typing a Director for a Movie and then clicking a TV episode gives the Director to the Movie only.
+- Nothing happens when nothing was selected before, when nothing was typed, or when the typed value is what the files already have (no Undo entry, no message).
+- **Undo, Redo, lookups, fixes, Show all fields and Settings changes (genres, languages, hidden columns) keep the edit pending** (still typed in, not applied) as long as the same files stay selected. A Settings change used to apply it, and left the panel's boxes empty until the next click; the boxes now show the selection's values again.
+- **Refresh List, Clear List, Open Folder and closing the window ask about a typed edit too.** It is applied to the selected files first, so the "You have unsaved changes" question comes up; answer No and the edit is kept (applied, and undoable). Remove from List (Delete) does not: the edit goes with the removed files.
+
 ## 2026-11-04#01 -- The TMDB client and the release-name parser now come from redactor_common
 
 Shared part: redactor_common 2026-11-04#01 (core/lookups/tmdb.py, core/lookups/release_name.py).

@@ -113,7 +113,7 @@ class TagPanel(QWidget):
     move_track_title_requested = pyqtSignal()  # "Move track title into Title" for the selected music video
     clear_fields_requested = pyqtSignal()  # the "Clear All Fields..." button (MainWindow opens the Clear Fields dialog)
     collapseToggleRequested = pyqtSignal()  # the panel doesn't control its own width -- MainWindow does
-    fields_mode_changed = pyqtSignal()  # "Show all fields" was toggled: MainWindow re-runs the selection refresh
+    fields_mode_changed = pyqtSignal()  # the rows were rebuilt ("Show all fields", Settings): MainWindow refills them
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -332,8 +332,20 @@ class TagPanel(QWidget):
 
     def _on_show_all_toggled(self, checked: bool) -> None:
         self._show_all = checked
+        pending = self.pending_edits()  # the rebuild below would drop a not-yet-Applied edit
         self.show_fields_for(self._last_files)
+        self.restore_pending(pending)
         self.fields_mode_changed.emit()
+
+    def current_files(self) -> list:
+        """The files the panel was last filled from -- the selection a pending edit was typed against (MainWindow
+        applies it to these when the selection moves on)."""
+        return list(self._last_files)
+
+    def set_no_selection(self) -> None:
+        """Nothing is selected any more: the panel belongs to no files, and nothing typed now has a target."""
+        self._last_files = []
+        self._touched.clear()
 
     def show_fields_for(self, files: list) -> bool:
         """Dynamic field visibility: one Content Type across the whole selection shows that type's fields (the
@@ -424,12 +436,13 @@ class TagPanel(QWidget):
         immediately rather than only on the next filter change or file
         selection.
 
-        Applies any pending (typed but not yet Applied) changes FIRST,
-        via the same apply_pending_changes() Save already uses. A full
-        rebuild necessarily discards the panel's current widget state
-        -- without this, an in-progress edit to some OTHER field
-        sitting in the panel while the user happens to visit Settings
-        would be lost outright rather than merely staying pending.
+        A full rebuild discards the panel's widget state, so a pending
+        (typed but not yet Applied) edit is carried over into the
+        rebuilt rows and stays pending (2026-11-04: it used to be
+        applied here; a refresh of the same selection keeps it pending
+        everywhere else too), and fields_mode_changed asks MainWindow to
+        refill the rebuilt rows with the selection's values (they came
+        back empty before).
 
         Just re-runs the existing full rebuild with the same filter
         already active -- _make_input_widget already reads live from
@@ -438,8 +451,10 @@ class TagPanel(QWidget):
         straightforward rebuild is sufficient; no separate fast path
         is needed for either case.
         """
-        self.apply_pending_changes()
+        pending = self.pending_edits()
         self.set_content_type_filter(self._current_filter, self._current_extra)
+        self.restore_pending(pending)
+        self.fields_mode_changed.emit()
 
     def _make_input_widget(self, field_name: str) -> QWidget:
         if field_name == "content_type":
@@ -509,14 +524,29 @@ class TagPanel(QWidget):
         "load 5 files, only edit Genre, Apply" leave the other 4 fields'
         existing per-file values alone rather than blanking them.
         """
+        self.apply_requested.emit(self.pending_edits())
+        self._touched.clear()
+
+    def pending_edits(self) -> dict[str, object]:
+        """{field_name: value} for every touched field the panel shows -- exactly what Apply would apply, without
+        applying or clearing anything."""
         values: dict[str, object] = {}
         for field_name in self._touched:
             widget = self._inputs.get(field_name)
             if widget is None:
                 continue
             values[field_name] = self._read_widget_value(field_name, widget)
-        self.apply_requested.emit(values)
-        self._touched.clear()
+        return values
+
+    def restore_pending(self, values: dict[str, object]) -> None:
+        """Puts pending_edits() back after the panel was refilled or rebuilt for the SAME files, so a
+        not-yet-Applied edit survives the refresh. A field the panel no longer shows is left out."""
+        for field_name, value in values.items():
+            widget = self._inputs.get(field_name)
+            if widget is None:
+                continue
+            self._set_widget_value(widget, value)
+            self._touched.add(field_name)
 
     def _read_widget_value(self, field_name: str, widget: QWidget) -> object:
         if isinstance(widget, MultiSelectComboBox):
@@ -545,22 +575,26 @@ class TagPanel(QWidget):
         """
         self._touched.clear()
         for field_name, widget in self._inputs.items():
-            value = metadata_dict.get(field_name)
-            if isinstance(widget, MultiSelectComboBox):
-                # Checked before the generic QComboBox branch below --
-                # same subclass-ordering reason as _read_widget_value.
-                selected = parse_multi_value(value if isinstance(value, str) else "")
-                widget.set_checked_items(selected)
-            elif isinstance(widget, QComboBox):
-                # A str-Enum (the content type) must be looked up by its plain text: findData() does not match the
-                # enum object itself, so the box would silently stay blank.
-                plain = value.value if isinstance(value, Enum) else value
-                idx = widget.findData(plain if plain is not None else "")
-                widget.setCurrentIndex(idx if idx >= 0 else 0)
-            elif isinstance(widget, QSpinBox):
-                widget.setValue(value if isinstance(value, int) else 0)
-            elif isinstance(widget, QTextEdit):
-                widget.setPlainText(value if isinstance(value, str) else "")
-            elif isinstance(widget, QLineEdit):
-                widget.setText(value if isinstance(value, str) else "")
+            self._set_widget_value(widget, metadata_dict.get(field_name))
         self._touched.clear()  # loading values must never count as "touched"
+
+    @staticmethod
+    def _set_widget_value(widget: QWidget, value: object) -> None:
+        """One field's value into its widget (the reverse of _read_widget_value)."""
+        if isinstance(widget, MultiSelectComboBox):
+            # Checked before the generic QComboBox branch below --
+            # same subclass-ordering reason as _read_widget_value.
+            selected = parse_multi_value(value if isinstance(value, str) else "")
+            widget.set_checked_items(selected)
+        elif isinstance(widget, QComboBox):
+            # A str-Enum (the content type) must be looked up by its plain text: findData() does not match the
+            # enum object itself, so the box would silently stay blank.
+            plain = value.value if isinstance(value, Enum) else value
+            idx = widget.findData(plain if plain is not None else "")
+            widget.setCurrentIndex(idx if idx >= 0 else 0)
+        elif isinstance(widget, QSpinBox):
+            widget.setValue(value if isinstance(value, int) else 0)
+        elif isinstance(widget, QTextEdit):
+            widget.setPlainText(value if isinstance(value, str) else "")
+        elif isinstance(widget, QLineEdit):
+            widget.setText(value if isinstance(value, str) else "")

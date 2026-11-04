@@ -270,6 +270,12 @@ def _set_field_from_text(vf: VideoFile, field_name: str, text: str) -> bool:
     return set_field_text(vf.metadata, field_name, text)
 
 
+def _same_panel_value(current: object, typed: object) -> bool:
+    """Whether a field already holds what the panel would apply. Empty and unset are the same (a blank box reads
+    as "", an empty spin box as None); the content type compares as text (it is a str Enum)."""
+    return (None if current in (None, "") else current) == (None if typed in (None, "") else typed)
+
+
 def _error_details(lines: list[str]) -> str:
     """A bounded "N file(s): a; b; c, ..." message-box body -- ffmpeg's
     stderr alone can run to hundreds of lines per file, and a failed
@@ -353,6 +359,8 @@ class MainWindow(QMainWindow):
         # which is the right degrade for something this cosmetic.
 
         self.video_files: list[VideoFile] = []
+        self._rebuilding_table = False  # see _on_selection_changed()
+        self._committing_pending = False  # see _commit_pending_panel_edits()
         self.notes_fetchers = None  # Create Notes: a callable returning core.notes_flow.Fetchers (None = the real services; tests inject)
         # In-memory edits (bulk edit, lookups, batch text operations) are
         # undoable, same as epub/mp3/cbz -- this project had no undo at
@@ -1295,7 +1303,7 @@ class MainWindow(QMainWindow):
         if not self.video_files:
             self.status_bar.showMessage("The list is already empty")
             return
-        if self._count_dirty() and not self._confirm_discard("clear the list (discarding unsaved changes)"):
+        if self._has_unsaved_changes() and not self._confirm_discard("clear the list (discarding unsaved changes)"):
             return
         count = len(self.video_files)
         self.video_files = []
@@ -1334,9 +1342,10 @@ class MainWindow(QMainWindow):
         # Replaces self.video_files wholesale -- shared by both Open Folder
         # and the startup restore below, so this one check covers both call
         # sites. Startup restore always finds video_files empty (nothing's
-        # been loaded yet), so _count_dirty() is always 0 there and this
-        # never actually prompts on launch.
-        if self._count_dirty() and not self._confirm_discard("load a new folder (discarding unsaved changes)"):
+        # been loaded yet), so nothing is unsaved there and this never
+        # actually prompts on launch. A typed, not yet Applied panel edit
+        # counts (_has_unsaved_changes applies it first).
+        if self._has_unsaved_changes() and not self._confirm_discard("load a new folder (discarding unsaved changes)"):
             return
         self.video_files = []
         self._clear_undo()
@@ -1420,7 +1429,7 @@ class MainWindow(QMainWindow):
         if not self.video_files:
             self.status_bar.showMessage("Nothing to refresh: the list is empty (use Open Folder first)")
             return
-        if self._count_dirty() and not self._confirm_discard("refresh the list (discarding unsaved changes)"):
+        if self._has_unsaved_changes() and not self._confirm_discard("refresh the list (discarding unsaved changes)"):
             return
 
         existing_paths = [str(vf.path) for vf in self.video_files]
@@ -1499,6 +1508,18 @@ class MainWindow(QMainWindow):
         # column, Apply on S01E01 left S01E03 selected, and the NEXT
         # Apply silently edited S01E03. Reselect by file instead.
         selected_ids = [id(vf) for vf in self._selected_video_files()]
+        self._rebuilding_table = True
+        try:
+            self._refresh_table_rows_impl(selected_ids)
+        finally:
+            self._rebuilding_table = False
+        # Once, with the final selection, and only if it is no longer what the panel shows (a file was removed or
+        # filtered out): a pending panel edit then goes to the files it was typed against, or is dropped with them
+        # if they left the list. The same files still selected -> the panel and its pending edit are left alone.
+        if not self._panel_shows(self._selected_video_files()):
+            self._on_selection_changed()
+
+    def _refresh_table_rows_impl(self, selected_ids: list[int]) -> None:
         with suspend_sorting(self.table):
             self.table.setRowCount(len(self.video_files))
             band_settings = bitrate_bands.get_band_settings()  # read once per refresh, not per row
@@ -1540,20 +1561,18 @@ class MainWindow(QMainWindow):
 
     def _reselect_files(self, file_ids: list[int]) -> None:
         """Selects exactly the rows holding these VideoFiles (by id()),
-        signals blocked so a pending panel edit isn't wiped. Only if a
-        file dropped out of the selection (e.g. it was removed) does the
-        panel get reloaded."""
+        signals blocked so a pending panel edit isn't wiped. Whether the
+        panel gets reloaded is _refresh_table_rows()'s call, made once
+        the rebuild is over."""
         wanted = set(file_ids)
         selection = QItemSelection()
         first_row = -1
-        found: list[int] = []
         for row in range(self.table.rowCount()):
             item = self.table.item(row, 0)
             vf = item.data(FILE_ROLE) if item is not None else None
             if vf is not None and id(vf) in wanted:
                 selection.select(self.table.model().index(row, 0),
                                  self.table.model().index(row, self.table.columnCount() - 1))
-                found.append(id(vf))
                 if first_row < 0:
                     first_row = row
         model = self.table.selectionModel()
@@ -1566,8 +1585,6 @@ class MainWindow(QMainWindow):
                 model.select(selection, QItemSelectionModel.SelectionFlag.Select)
         finally:
             self.table.blockSignals(was_blocked)
-        if len(found) != len(wanted):
-            self._on_selection_changed()
 
     def _make_table_item(self, vf: VideoFile, field_name: str, text: str) -> QTableWidgetItem:
         """Numeric-looking columns sort as numbers, not text ("2" before
@@ -1856,19 +1873,35 @@ class MainWindow(QMainWindow):
         """The side panel's Play button: on only for exactly one selected file that loaded without error."""
         self.tag_panel.play_button.setEnabled(len(selected) == 1 and not selected[0].load_error)
 
+    def _panel_shows(self, files: list[VideoFile]) -> bool:
+        """True if the panel was last filled from exactly these files (in any order)."""
+        return {id(vf) for vf in files} == {id(vf) for vf in self.tag_panel.current_files()}
+
     def _on_selection_changed(self) -> None:
+        if self._rebuilding_table or self._committing_pending:
+            # Mid-rebuild the selection flickers (rows replaced, cleared, restored); _refresh_table_rows() calls
+            # this once at the end. Mid-commit the old selection's Apply refreshes the table; the caller goes on
+            # to load the new selection itself.
+            return
         selected = self._selected_video_files()
+        same_selection = self._panel_shows(selected)
+        if not same_selection:
+            self._commit_pending_panel_edits()
+        # A refresh of the same selection (after Undo, a lookup, a fix, a rebuild) keeps the pending edit pending.
+        pending = self.tag_panel.pending_edits() if same_selection else {}
         self._update_get_lyrics_visibility()
         self._update_track_language_action(selected)
         self._update_play_button(selected)
         set_apply_count(self.apply_action, len(selected))  # 'Apply to N Selected', greyed at 0
         if not selected:
+            self.tag_panel.set_no_selection()
             self.tag_panel.set_preview_image(None)
             return
         self.tag_panel.show_fields_for(selected)  # only the fields that belong to the selection's Content Type
         self.tag_panel.set_website(self._selection_website(selected))
         merged = self._merge_metadata_for_panel(selected)
         self.tag_panel.load_values(merged)
+        self.tag_panel.restore_pending(pending)
         self.tag_panel.set_sources(selected)
         self.tag_panel.set_old_track_title(selected)
         self._update_preview(selected)
@@ -2033,7 +2066,7 @@ class MainWindow(QMainWindow):
         return reply == QMessageBox.StandardButton.Yes
 
     def closeEvent(self, event) -> None:
-        if self._count_dirty() and not self._confirm_discard("quit without saving"):
+        if self._has_unsaved_changes() and not self._confirm_discard("quit without saving"):
             event.ignore()
             return
         # A conversion still running (Redact's convert step, Media > Convert) must not keep
@@ -2054,7 +2087,38 @@ class MainWindow(QMainWindow):
             return
         self.tag_panel.apply_pending_changes()
 
-    def _on_apply_to_selected(self, changed_fields: dict[str, object]) -> None:
+    def _commit_pending_panel_edits(self) -> int:
+        """Applies what is typed in the bulk-edit panel but not yet Applied to the files the panel was filled from
+        (the PREVIOUS selection, when called on a selection change), through the normal Apply path: one undo entry,
+        rows marked changed. Otherwise a selection change silently threw the typing away. Only the fields that panel
+        showed count (a Movie's panel, say, when the click goes to a TV episode). Files since removed from the list
+        are skipped, as are fields already holding the typed value; nothing left -> no undo entry, no message.
+        Returns the number of files."""
+        live = {id(vf) for vf in self.video_files}
+        files = [vf for vf in self.tag_panel.current_files() if id(vf) in live]
+        values = {
+            name: value for name, value in self.tag_panel.pending_edits().items()
+            if any(not _same_panel_value(getattr(vf.metadata, name, None), value) for vf in files)
+        }
+        if not files or not values:
+            return 0
+        self._committing_pending = True
+        try:
+            self._on_apply_to_selected(values, files)
+        finally:
+            self._committing_pending = False
+        self.status_bar.showMessage(f"Applied pending edits to {len(files)} file{'' if len(files) == 1 else 's'}")
+        return len(files)
+
+    def _has_unsaved_changes(self) -> bool:
+        """For the "discard unsaved changes?" checks: a typed, not yet Applied panel edit is applied first
+        (undoable), so it counts and is asked about instead of vanishing with the list; answering No keeps it."""
+        self._commit_pending_panel_edits()
+        return self._count_dirty() > 0
+
+    def _on_apply_to_selected(self, changed_fields: dict[str, object], files: Optional[list[VideoFile]] = None) -> None:
+        """files: None = the current selection (Apply); otherwise the files a pending edit was typed against (see
+        _commit_pending_panel_edits), where the panel is left for the caller to reload."""
         if not changed_fields:
             # Nothing was actually touched -- marking every selected
             # file dirty anyway (the previous behavior here) would
@@ -2064,7 +2128,7 @@ class MainWindow(QMainWindow):
             # what triggering it with nothing pending should do.
             self.status_bar.showMessage("Nothing to apply: no field in the panel was changed")
             return
-        selected = self._selected_video_files()
+        selected = self._selected_video_files() if files is None else files
         if not selected:
             self.status_bar.showMessage("Nothing to apply to: select the file(s) first")
             return
@@ -2078,9 +2142,10 @@ class MainWindow(QMainWindow):
                     vf.metadata.content_type_from_media_type = False  # now the user's own choice
             vf.dirty = True
         self._refresh_table_rows()
-        self.tag_panel.set_old_track_title(selected)
-        if self.tag_panel.show_fields_for(selected):  # a changed Content Type changes which fields belong
-            self.tag_panel.load_values(self._merge_metadata_for_panel(selected))
+        if files is None:
+            self.tag_panel.set_old_track_title(selected)
+            if self.tag_panel.show_fields_for(selected):  # a changed Content Type changes which fields belong
+                self.tag_panel.load_values(self._merge_metadata_for_panel(selected))
         self.status_bar.showMessage(
             f"Applied {len(changed_fields)} field(s) to {len(selected)} file(s) -- not yet saved to disk"
         )
