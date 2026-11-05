@@ -80,7 +80,7 @@ def test_unchanged_languages_do_not_touch_the_file(tmp_path):
     assert result.changes == [] and path.stat().st_mtime_ns == stamp
 
 
-def test_read_only_file_is_refused_and_unchanged(mp4):
+def test_read_only_file_is_refused_and_unchanged(mp4, not_as_root):
     original = mp4.read_bytes()
     os.chmod(mp4, stat.S_IREAD)
     try:

@@ -123,6 +123,10 @@ def test_a2_real_ffmpeg_mp4_with_mov_text_to_mkv(tmp_path):
             "sine=frequency=440:duration=1", "-i", str(srt), "-map", "0:0", "-map", "1:0", "-map", "2:0",
             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-c:s", "mov_text", "-shortest", src]
     subprocess.run(make, check=True, timeout=120, stdin=subprocess.DEVNULL)
+    kinds = subprocess.run([os.path.join(os.path.dirname(_ffmpeg()), "ffprobe"), "-v", "error", "-show_entries", "stream=codec_type",
+                            "-of", "csv=p=0", src], capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL).stdout.split()
+    if kinds != ["video", "audio", "subtitle"]:  # ffmpeg 4.4 (the Linux release toolchain) writes no mov_text track here
+        pytest.skip(f"this ffmpeg made the sample with streams {kinds}, not video, audio and subtitle")
     m = cp.MediaInfo(src, os.path.getsize(src), 1.0, [
         cp.StreamInfo(0, "video", "h264", width=64, height=64), cp.StreamInfo(1, "audio", "aac"),
         cp.StreamInfo(2, "subtitle", "mov_text"),

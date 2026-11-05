@@ -4,7 +4,17 @@ folder tier (core.external_tools._install_dirs) would otherwise find a
 real MKVToolNix under Program Files and break tests that deliberately
 simulate it being absent."""
 
+import os
+
 import pytest
+
+
+@pytest.fixture
+def not_as_root():
+    """For a test of a read-only file: root writes read-only files anyway (the Release workflow's Linux build runs the
+    tests as root in its Docker toolchain), so such a test is skipped there."""
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root writes read-only files (the Release workflow's Linux build runs the tests as root)")
 
 
 @pytest.fixture(autouse=True)

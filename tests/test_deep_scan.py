@@ -239,6 +239,8 @@ def _audio_only_region(path):
     packets = []
     for line in done.stdout.splitlines():
         fields = dict(part.split("=") for part in line.split("|") if "=" in part)
+        if not all(fields.get(key, "").isdigit() for key in ("pos", "size", "stream_index")):
+            continue  # ffprobe 4.4 (the Linux release toolchain) also prints lines without them
         packets.append((int(fields["pos"]), int(fields["size"]), int(fields["stream_index"])))
     packets.sort()
     groups, current = [], []

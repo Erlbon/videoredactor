@@ -40,7 +40,7 @@ def test_only_unlabelled_keeps_a_labelled_track(tmp_path):
     assert probe_languages(path)["audio"] == ["swe", "eng"]
 
 
-def test_a_failing_file_is_listed_and_the_rest_still_run(tmp_path, capsys):
+def test_a_failing_file_is_listed_and_the_rest_still_run(tmp_path, capsys, not_as_root):
     locked = make_mp4(tmp_path / "locked.mp4")
     fine = make_mp4(tmp_path / "fine.mp4")
     os.chmod(locked, stat.S_IREAD)

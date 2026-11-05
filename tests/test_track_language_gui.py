@@ -101,7 +101,7 @@ def test_subtitle_checkbox_and_hand_picked_row(tmp_path, qapp):
     assert len(dialog.plan()[str(path)]) == 2
 
 
-def test_apply_runs_a_batch_with_a_failing_file_and_refreshes_everything(window, tmp_path, monkeypatch):
+def test_apply_runs_a_batch_with_a_failing_file_and_refreshes_everything(window, tmp_path, monkeypatch, not_as_root):
     good1 = make_mp4(tmp_path / "good1.mp4")
     good2 = make_mp4(tmp_path / "good2.mp4")
     locked = make_mp4(tmp_path / "locked.mp4")

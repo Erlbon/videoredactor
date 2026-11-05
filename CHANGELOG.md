@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-05#04 -- the Linux release build's tests pass again
+
+- **The Release workflow's Linux build failed 7 tests**, so no Linux download was made. It runs the tests as root in
+  an Ubuntu 22.04 toolchain with ffmpeg 4.4. Five tests made a file read-only and expected a refusal, but root writes
+  read-only files anyway; they now skip as root (one shared `not_as_root` test fixture). The deep-scan tests read
+  ffprobe 4.4's packet list, which has lines without a byte position, and now pass those over. The mov_text test
+  skips when this ffmpeg made its sample without a subtitle track. Only tests changed.
+
 ## 2026-11-05#03 -- the side panel no longer crashes on Linux
 
 - **Changing the Content Type filter (or a Settings import) could crash the app on Linux.** Since the fields could
