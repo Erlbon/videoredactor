@@ -385,9 +385,18 @@ class TagPanel(QWidget):
         self._current_filter = content_type
         self._current_extra = frozenset(extra)
 
-        # Clear existing rows
+        # Clear existing rows: taken out and deleted later, not deleted on the spot by removeRow, and with the
+        # field-order controller's event filter taken off first. Deleting rows it watched inside this call crashed
+        # Qt on Linux (segfault in removeRow, GitHub's Linux test run since 2026-10-17).
+        for widget in [*self._labels.values(), *self._inputs.values()]:
+            for watched in (widget, *widget.findChildren(QWidget)):
+                watched.removeEventFilter(self._field_order)
         while self.form_layout.rowCount():
-            self.form_layout.removeRow(0)
+            row = self.form_layout.takeRow(0)
+            for item in (row.labelItem, row.fieldItem):
+                if item is not None and item.widget() is not None:
+                    item.widget().hide()
+                    item.widget().deleteLater()
         self._inputs.clear()
         self._labels.clear()
         self._touched.clear()

@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-05#03 -- the side panel no longer crashes on Linux
+
+- **Changing the Content Type filter (or a Settings import) could crash the app on Linux.** Since the fields could
+  be dragged into your own order (2026-10-17#15), the panel deleted its rows on the spot while the drag helper was
+  still watching them; GitHub's Linux test run crashed there every time. The rows are now taken out first and
+  deleted afterwards, with the drag helper's watch removed. Windows never showed it, but it was the same unsafe
+  delete.
+- **A Create Notes test split folder names on `\` only**, so it failed on Linux. Either slash now works.
+
 ## 2026-11-05#02 -- tests that only passed on this machine
 
 No change to the app. GitHub's Windows test run had failed since 2026-10-15 on three tests, and the Release build would have hit a fourth:

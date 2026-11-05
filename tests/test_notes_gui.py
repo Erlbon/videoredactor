@@ -145,7 +145,8 @@ def test_several_folders_open_the_list_with_the_tick_rules_a_pick_and_a_write(wi
         dlg = review()
         s = dlg.session
         assert dlg.view == "list"
-        rows = {dlg.tree.topLevelItem(i).text(0).split("\\")[-1]: dlg.tree.topLevelItem(i) for i in range(dlg.tree.topLevelItemCount())}
+        rows = {dlg.tree.topLevelItem(i).text(0).replace("/", "\\").split("\\")[-1]: dlg.tree.topLevelItem(i)
+                for i in range(dlg.tree.topLevelItemCount())}  # the folder name, with either kind of slash
         assert set(rows) == {show.name, movie.name, "Dark"}
         assert rows[show.name].checkState(0) == Qt.CheckState.Checked and rows[movie.name].checkState(0) == Qt.CheckState.Checked
         dark = rows["Dark"]
