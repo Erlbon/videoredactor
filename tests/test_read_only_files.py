@@ -27,8 +27,14 @@ pytestmark = pytest.mark.skipif(bool(SKIP_REASON), reason=SKIP_REASON or "sample
 _app = QApplication.instance() or QApplication([])
 
 
+def _skip_as_root():
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root writes read-only files (the Release workflow's Linux build runs the tests as root)")
+
+
 @pytest.fixture
 def ro_clip(tmp_path):
+    _skip_as_root()
     path = tmp_path / "Show.S01E01.mp4"
     shutil.copy(SAMPLE, path)
     os.chmod(path, stat.S_IREAD)
@@ -111,6 +117,7 @@ def test_a_writable_files_permissions_are_not_touched(tmp_path):
 
 
 def test_redact_refuses_a_read_only_original_before_making_a_working_copy(tmp_path):
+    _skip_as_root()
     work = tmp_path / "videos"
     work.mkdir()
     path = work / "The Office S02E05 Halloween.mp4"

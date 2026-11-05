@@ -67,7 +67,7 @@ def test_real_mp4_round_trip_with_cyrillic_quotes_blank_lines_and_10_kb(tmp_path
     assert MP4(str(clip)).tags["\xa9lyr"] == [LYRICS]  # the iTunes lyrics atom, as written
     probe = json.loads(subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format_tags:stream=codec_type", "-of", "json", str(clip)],
-        capture_output=True, text=True, check=True).stdout)
+        capture_output=True, text=True, encoding="utf-8", check=True).stdout)  # not the locale's (cp1252 on 3.12)
     assert probe["format"]["tags"]["lyrics"].replace("\r\n", "\n") == LYRICS  # and ffprobe reads it
     assert {s["codec_type"] for s in probe["streams"]} == {"video", "audio"}  # still a playable file
 

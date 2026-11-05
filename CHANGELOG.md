@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-05#02 -- tests that only passed on this machine
+
+No change to the app. GitHub's Windows test run had failed since 2026-10-15 on three tests, and the Release build would have hit a fourth:
+- **The Cyrillic lyrics test** read ffprobe's output in the system's text encoding. Python 3.15 uses UTF-8 by
+  default; the 3.12 on GitHub uses cp1252, which garbled the text. The test now reads it as UTF-8, as the app's own
+  ffmpeg calls already do.
+- **The two audio-only damage tests** looked for at least 1 KB of audio with no video in between. In the 30 fps
+  sample, that existed only by luck of one ffmpeg build: GitHub's ffmpeg 9.0.2 never puts more than 0.93 KB of
+  audio between two frames. These two tests now use a 10 fps sample, which has about 2.7 KB between frames on any
+  build.
+- **The read-only tests skip when run as root.** The Release workflow's Linux build runs the tests as root in
+  Docker, and root can write a read-only file (mp3redactor's last releases lost their Linux download to this).
+
 ## 2026-11-05#01 -- redact -n previews a whole run; Undo keeps 50 steps
 
 - **`redact -n` / `--dry-run`** saves nothing at all. Only the steps that never write to disk run (tags from the

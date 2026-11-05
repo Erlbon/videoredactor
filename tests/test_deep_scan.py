@@ -28,12 +28,13 @@ def _ffmpeg(*args):
     subprocess.run(["ffmpeg", "-v", "error", "-y", *args], check=True, capture_output=True)
 
 
-def _make_video(dest, moov_at_start: bool):
+def _make_video(dest, moov_at_start: bool, rate: int = 30, seconds: int = 60):
     flags = ["-movflags", "+faststart"] if moov_at_start else []
+    gop = str(2 * rate)  # a keyframe every 2 s
     _ffmpeg(
-        "-f", "lavfi", "-i", "testsrc2=duration=60:size=640x360:rate=30",
-        "-f", "lavfi", "-i", "sine=frequency=440:duration=60:sample_rate=44100",
-        "-c:v", "libx264", "-preset", "ultrafast", "-b:v", "1500k", "-g", "60", "-keyint_min", "60",
+        "-f", "lavfi", "-i", f"testsrc2=duration={seconds}:size=640x360:rate={rate}",
+        "-f", "lavfi", "-i", f"sine=frequency=440:duration={seconds}:sample_rate=44100",
+        "-c:v", "libx264", "-preset", "ultrafast", "-b:v", "1500k", "-g", gop, "-keyint_min", gop,
         "-sc_threshold", "0", "-bf", "2", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "256k",
         "-metadata:s:a:0", "language=eng",
         *flags, str(dest),
@@ -47,6 +48,16 @@ def pristine(tmp_path_factory):
     _make_video(d / "end.mp4", False)
     assert fc.mp4_index_at_end(str(d / "start.mp4")) is False
     assert fc.mp4_index_at_end(str(d / "end.mp4")) is True
+    return d
+
+
+@pytest.fixture(scope="module")
+def few_frames(tmp_path_factory):
+    """10 frames a second, so the audio between two video frames is about 3 KB on any ffmpeg. At 30 the muxer
+    interleaves about 0.7 KB of audio per frame; the 2.7 KB stretch the tests found was luck of one build
+    (ffmpeg 9.0.2 on GitHub's runner has none above 0.93 KB)."""
+    d = tmp_path_factory.mktemp("few_frames")
+    _make_video(d / "end.mp4", False, rate=10, seconds=20)
     return d
 
 
@@ -242,8 +253,8 @@ def _audio_only_region(path):
     return best[0][0], best[-1][0] + best[-1][1]
 
 
-def test_damage_in_audio_only_is_reported_as_audio(pristine, tmp_path):
-    path = _copy(pristine, tmp_path, "end.mp4")
+def test_damage_in_audio_only_is_reported_as_audio(few_frames, tmp_path):
+    path = _copy(few_frames, tmp_path, "end.mp4")
     start, end = _audio_only_region(path)
     assert end - start >= 1024
     _zero(path, start, end)
@@ -350,8 +361,8 @@ def test_cut_out_when_the_first_keyframe_is_damaged_and_next_to_the_index(pristi
     assert 1.0 < outcome.new_duration < 58.0
 
 
-def test_cut_out_of_audio_only_damage_keeps_streams_in_sync(pristine, tmp_path):
-    path = _copy(pristine, tmp_path, "end.mp4")
+def test_cut_out_of_audio_only_damage_keeps_streams_in_sync(few_frames, tmp_path):
+    path = _copy(few_frames, tmp_path, "end.mp4")
     start, end = _audio_only_region(path)
     _zero(path, start, end)
     before = fc.quick_check(str(path), deep=True)  # 64 KiB minimum: invisible
