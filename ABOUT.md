@@ -212,7 +212,7 @@ what is.
 | `--json` | Print one JSON document on stdout instead of text (see "JSON output"). Nothing else goes to stdout. |
 | `-q`, `--quiet` | No progress lines and no warnings on stderr (errors are still shown). |
 | `-o FILE`, `--output FILE` | Write the result (the text, or with `--json` the JSON document) to FILE instead of stdout. The file is complete when the program exits. This is the reliable way for a script to read a result. |
-| `-n`, `--dry-run` | On the commands that change files (`set`, `rename`, `move`, and `check` with `--repair` or `--stamp`): show what would happen and change nothing. |
+| `-n`, `--dry-run` | On the commands that change files (`set`, `clear`, `rename`, `move`, `redact`, and `check` with `--repair` or `--stamp`): show what would happen and change nothing. |
 | `-h`, `--help` | Help for the program or for one command. |
 | `--version` | The version (top level only). |
 
@@ -345,7 +345,7 @@ checked (FFmpeg's ffprobe is missing).
 
 ### redact
 
-`videoredactor redact [PATH...] [--recipe FILE] [--enable STEP] [--disable STEP] [--threshold N] [--trash-dir FOLDER] [--convert-dry-run] [--list-steps]`
+`videoredactor redact [PATH...] [--recipe FILE] [--enable STEP] [--disable STEP] [--threshold N] [--trash-dir FOLDER] [-n | --convert-dry-run] [--list-steps]`
 
 Runs the Redact recipe on the videos, the same steps as Edit > Redact: check and repair, tags from the filename
 and from the folder path, lookups on IMDb, TMDB and TheTVDB, subtitles, MKV to MP4 remux, convert to MP4/MKV and
@@ -353,12 +353,14 @@ ingest subtitles, rename, move into folders. Each changed file is saved in place
 Recycle Bin (or `--trash-dir`). The convert step (`convert_library`, off unless the recipe or `--enable` turns it
 on) converts for real unless `--convert-dry-run` is given; it follows the app's Library safety settings for the
 quarantine folder and delete-after-conversion. The old saved dry-run setting is not read any more.
-Guesses below the confidence threshold are listed under "needs review" and not applied. There is no
-`--dry-run` for the whole recipe: use `info` and `check` first, and `--disable` for the steps you do not want.
+Guesses below the confidence threshold are listed under "needs review" and not applied. Preview a run with
+`-n` / `--dry-run`: the report then starts with "DRY RUN" and shows what a real run would change, and nothing
+is written.
 
 | Option | Meaning |
 | --- | --- |
-| `--convert-dry-run` | The convert step only lists what it would convert ("DRY RUN, nothing changed: would convert ...") and changes nothing; the other steps still run and save. Without it the conversion is real. |
+| `-n`, `--dry-run` | Save nothing at all. Only the steps that never write to disk run (`filename_tags`, `path_tags`, `lookup`, `scene_lookup`, `get_poster`, `track_title_to_title`; lookups still ask the web) and their changes are reported, not saved. The steps that write (`check_repair`, `subtitles`, `translate_subtitles`, `remux_mkv_to_mp4`, `convert_library`, `rename`, `move_into_folders`) are left out and named in the run notes. The JSON summary has `dry_run: true`. |
+| `--convert-dry-run` | A real run, except the convert step: it only lists what it would convert ("DRY RUN, nothing changed: would convert ...") and changes nothing, while the other steps still run and save. Without it the conversion is real. Not the same as `-n`, which saves nothing (and leaves the convert step out). |
 | `--recipe FILE` | Use this recipe (a JSON file in the format the app stores) instead of the one saved in the app. |
 | `--enable STEP` | Turn a step on for this run (repeatable). |
 | `--disable STEP` | Turn a step off for this run (repeatable). |

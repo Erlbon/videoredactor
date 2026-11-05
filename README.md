@@ -79,6 +79,12 @@ Rename and Move run last, after the save. When the convert step is on, every Red
 conversion step" in its confirm question (ticked by default: the report then lists what would happen and nothing
 is converted). On the command line, `redact --convert-dry-run` does the same; without it the conversion is real.
 
+To preview a whole Redact run from the command line, use `redact -n` (`--dry-run`): nothing is saved, only the
+steps that never write to disk run (tags from the filename and path, the lookups, the poster, the track title),
+and the report shows what a real run would change. The steps that write (check and repair, subtitles, remux,
+convert, rename, move) are left out and named in the report. This is not the same as `--convert-dry-run`, which is
+a real run in which only the convert step lists instead of converting.
+
 ## Change history (Tools > History)
 
 Opt-in, off by default: turn it on in Tools > Preferences > History (or say Yes when Tools > History asks), and

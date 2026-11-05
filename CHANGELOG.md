@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-05#01 -- redact -n previews a whole run; Undo keeps 50 steps
+
+- **`redact -n` / `--dry-run`** saves nothing at all. Only the steps that never write to disk run (tags from the
+  filename and path, the IMDb/TMDB/TheTVDB lookup, ThePornDB/StashDB, the poster, the track title); the report
+  says DRY RUN and lists what a real run would change. The steps that write (check and repair, subtitles,
+  translate subtitles, remux, convert, rename, move) are left out and named in the run notes; the JSON summary has
+  `dry_run: true`. `--convert-dry-run` is unchanged: a real run in which only the convert step lists instead of
+  converting. Each step's dry-run safety was checked in code (core/redact_steps.py says why);
+  `tests/test_redact_dry_run.py` pins the safe set and runs `-n` on a real clip, checking every byte and time.
+- **Undo keeps the last 50 changes** (was 5), from redactor_common.
+- **redactor_common 2026-11-05-01** (was 2026-11-04-02): the dry run in the shared engine and the deeper undo.
+
 ## 2026-11-04#04 -- redactor_common 2026-11-04-02, and tests in the repo's own venv
 
 - **redactor_common 2026-11-04-02** (was 2026-11-04-01), the tag the other Redactors use: it adds the shared tag

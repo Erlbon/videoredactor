@@ -6,8 +6,14 @@ videocli/cmd_redact.py
                    subtitles, MKV to MP4 remux, convert to MP4/MKV and ingest subtitles, rename, move), saved
                    in place with each original in the Recycle Bin (or moved to --trash-dir).
 
-The convert step (convert_library) converts for real unless --convert-dry-run is given (then it only lists what it
-would do; the other steps still run and save). It follows the app's Library safety settings for the quarantine
+Two different dry runs:
+  -n / --dry-run       the WHOLE recipe saves nothing: only the steps that never write to disk run (tags from the
+                       filename and path, the lookups, the poster, the track title; see core/redact_steps.py), the
+                       changes they would make are reported, no file is saved, and every step that writes (check and
+                       repair, subtitles, remux, convert, rename, move) is left out and named in the run notes.
+  --convert-dry-run    a REAL run (every enabled step runs and saves) in which only the convert step
+                       (convert_library) lists what it would convert instead of converting.
+Without either, the convert step converts for real. It follows the app's Library safety settings for the quarantine
 folder and delete-after-conversion (when that is on, a converted original is deleted for good). The old persistent
 dry-run setting is no longer read: the choice is made per run, like the app's Redact confirm.
 
@@ -38,14 +44,16 @@ def add_redact_parser(sub) -> None:
     parser = sub.add_parser(
         "redact", help="run the Redact recipe",
         description="Run the Redact recipe on the video files. Each changed file is saved in place and its original goes to "
-                    "the Recycle Bin (or --trash-dir). Guesses below the confidence threshold are listed, not applied.",
+                    "the Recycle Bin (or --trash-dir). Guesses below the confidence threshold are listed, not applied. "
+                    "-n/--dry-run saves nothing at all (only the steps that never write run; the rest are left out). "
+                    "--convert-dry-run is a real run in which only the convert step lists instead of converting.",
     )
     parser.add_argument("paths", nargs="*", metavar="PATH", help="video files, folders or wildcards")
     parser.add_argument("-R", "--no-recurse", action="store_true", help="for a folder, look only at the files directly in it")
     parser.add_argument(
         "--convert-dry-run", action="store_true",
-        help="the convert step (convert_library) only lists what it would convert and changes nothing; the other "
-             "steps still run (without it the conversion is real)",
+        help="a real run, except that the convert step (convert_library) only lists what it would convert; the other "
+             "steps still run and save (without it the conversion is real; -n saves nothing at all)",
     )
     add_redact_options(parser)
     add_common_options(parser)
@@ -69,4 +77,5 @@ def run_redact(args: argparse.Namespace, out: Output) -> int:
     return redact_items(
         videos, recipe, catalogue, make_context=lambda v: VideoCtx(v, env), describe=lambda v: v.path.name,
         finalize=finalize_file, finalize_label="Save", path_of=lambda v: str(v.path), out=out,
+        dry_run=bool(args.dry_run),
     )

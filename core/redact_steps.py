@@ -30,6 +30,23 @@ pattern) without the dialogs. How one file flows:
      on the finished file; sidecar files (-poster.jpg, .lang.srt) travel
      with the video.
 
+A dry run (redact -n; redactor_common's run_recipe(dry_run=True)) runs only
+the steps marked `dry_run_safe` and never calls finalize_file. Audited
+2026-11-05, prepare/run/apply_suggestion and what they call:
+  safe:   filename_tags, path_tags (parse names and settings), lookup (the
+          offline IMDb database is opened read-only; TMDB/TheTVDB only read
+          the web), scene_lookup (reads the file to hash it; its apply adds
+          tags to the Porn tag list in the app's settings ini, but its
+          suggestion is review_only, so the engine never applies it),
+          get_poster (the poster is kept in memory and written inside the
+          file at the save), track_title_to_title (in memory).
+  unsafe: check_repair (a REPAIRABLE file is remuxed to a scratch copy
+          beside the video), subtitles and translate_subtitles (their
+          apply writes <name>.<lang>.srt), remux_mkv_to_mp4 (scratch copy
+          beside the video), convert_library, rename, move_into_folders
+          (after_save: they convert, rename and move the files).
+tests/test_redact_dry_run.py pins the safe set.
+
 The check never acts on a failed tool: a scan where ffprobe/ffmpeg was
 missing or stopped is never stamped and never triggers a repair. A
 repair is only automatic when a lossless remux fully fixes the file
@@ -609,6 +626,7 @@ class FieldFill:
 
 class FilenameTagsStep(PatternStep):
     key = "filename_tags"
+    dry_run_safe = True  # parses the name; changes the working copy only
     label = "Fill empty tags from the filename"
     description = (
         "Parses the filename with your most recent saved pattern (Import Metadata from Filename / "
@@ -656,6 +674,7 @@ class FilenameTagsStep(PatternStep):
 
 class PathTagsStep(PatternStep):
     key = "path_tags"
+    dry_run_safe = True  # parses the path; changes the working copy only
     trail_kind = "path"
     label = "Fill empty tags from the folder path"
     description = (
@@ -762,7 +781,8 @@ def conversion_is_series(content_type, stem: str) -> bool:
 
 class LookupStep(VideoStep):
     key = "lookup"
-    label = "Look up metadata (IMDb, TMDB, TheTVDB)"
+    dry_run_safe = True  # the local IMDb database is opened read-only; TMDB/TheTVDB are only read
+    label ="Look up metadata (IMDb, TMDB, TheTVDB)"
     description = (
         "Finds the movie or show named by the filename and fills fields that are EMPTY. With a local IMDb "
         "database set up (Tools > IMDb Database) that is asked FIRST, offline: title, year, genres and, for TV, "
@@ -1193,7 +1213,8 @@ class LookupStep(VideoStep):
 
 class SceneLookupStep(VideoStep):
     key = "scene_lookup"
-    label = "Fill from ThePornDB/StashDB (file match only)"
+    dry_run_safe = True  # reads the file to hash it; review_only, so its apply (Porn tag list) never runs here
+    label ="Fill from ThePornDB/StashDB (file match only)"
     description = (
         "Asks ThePornDB and StashDB (the ones you have a key for, Tools > API Keys) whether they know THIS file, by "
         "its fingerprint (the OSHASH: only that hash leaves the computer, never the name; the MD5 only when "
@@ -1290,7 +1311,8 @@ class PosterChoice:
 
 class PosterStep(VideoStep):
     key = "get_poster"
-    label = "Get the poster from the file's source ids"
+    dry_run_safe = True  # the poster stays in memory; only the save writes it, inside the file
+    label ="Get the poster from the file's source ids"
     description = (
         "A file that carries a source id (TMDB, TheTVDB, IMDb, ThePornDB or StashDB, put there by a lookup) and has no "
         "poster yet gets the poster of THAT record, without searching: only a true poster is used (the service's own "
@@ -1335,7 +1357,8 @@ class TrackTitleMove:
 
 class TrackTitleStep(VideoStep):
     key = "track_title_to_title"
-    label = "Use the track title as the title"
+    dry_run_safe = True  # in memory only
+    label ="Use the track title as the title"
     description = (
         "Music videos: the title is the song and the old separate 'track title' field is gone. A Music Video "
         "that still has an old track title in the file and an EMPTY title gets that value as its title, as a "
