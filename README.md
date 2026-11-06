@@ -24,10 +24,12 @@ More detail, the command line, and the licences of the data sources: [ABOUT.md](
   **MKVToolNix** (`mkvpropedit`, `mkvmerge`, `mkvextract`, for MKV tags). The app finds them on PATH, in a bundled
   `tools/` folder, in their default install folder, or where Tools > External Tools points; a missing tool is
   reported at launch but does not block it.
-- From source: `pip install -r requirements.txt`, then `python main.py`.
-- Tests: `python -m pytest -q`.
-- Windows exe: `build_exe.bat` (PyInstaller, `videoredactor.spec`); see [BUILD.md](BUILD.md). It must be built on
-  Windows. `python bump_version.py` sets the version first.
+- From source: `python ../redactor-build-tools/devenv/venv_sync.py .` makes this repo's own `.venv` at the
+  redactor_common pin (never `pip install -r requirements.txt` into the shared Python), then
+  `.venv\Scripts\python main.py`.
+- Tests: `.venv\Scripts\python -m pytest -q`.
+- Windows exe: `build_exe.bat` (PyInstaller, `videoredactor.spec`, built with the `.venv`); see [BUILD.md](BUILD.md).
+  It must be built on Windows. `.venv\Scripts\python bump_version.py` sets the version first.
 
 ## The Bitrate column's colours
 

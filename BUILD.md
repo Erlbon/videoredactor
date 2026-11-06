@@ -28,8 +28,11 @@ just warns, so features that don't need the missing tool still work.
 ## Build steps
 
 **Easiest: run `build_exe.bat`** from the project root. It pins itself
-to its own folder, checks Python is on PATH, upgrades pip, installs
-dependencies, runs PyInstaller, and verifies the output exe actually
+to its own folder, checks Python is on PATH, makes or refreshes this
+repo's own `.venv` at the redactor_common pin with
+`..\redactor-build-tools\devenv\venv_sync.py` (so `redactor-build-tools`
+must sit next to this folder), runs PyInstaller from that `.venv`, and
+verifies the output exe actually
 exists -- stopping with a clear message on the first failed step
 rather than continuing into a broken build. Matches the reliability
 pattern of the epub tool's own proven build script.
@@ -42,16 +45,14 @@ doesn't inflate the official version history every time you build.
 Or run the steps manually:
 
 ```
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-python -m PyInstaller videoredactor.spec --noconfirm
+python ..\redactor-build-tools\devenv\venv_sync.py .
+.venv\Scripts\python -m PyInstaller videoredactor.spec --noconfirm
 ```
 
-(`python -m pip` / `python -m PyInstaller` rather than the bare `pip`
-and `pyinstaller` commands -- both route through whichever `python` you
-already confirmed works, rather than depending on a possibly-different
-Python's `pip`/`pyinstaller` being separately on PATH, which is a real
-class of bug this project already hit once.)
+(Never `pip install -r requirements.txt` into the shared Python: the
+Redactor apps pin different redactor_common tags, so one install breaks
+the others. `.venv\Scripts\python -m PyInstaller` rather than the bare
+`pyinstaller` command, which is often not on PATH.)
 
 The built exe lands at `dist/videoredactor.exe` -- a single
 portable file, not a folder. (The spec's `EXE()` call includes
