@@ -98,6 +98,7 @@ HANDLERS = {
     "redact_recipe": "_on_edit_redact_recipe", "search_replace": "_on_search_replace",
     "change_case": "_on_case_conversion", "auto_number": "_on_auto_numbering", "convert": "_on_convert",
     "check_files": "_on_check_files", "embed_posters": "_on_embed_posters",
+    "translate_subtitles": "_on_translate_subtitles", "compare_subtitles": "_on_compare_subtitles",
     "find_duplicates": "_on_find_duplicates", "api_keys": "_on_add_external_apis",
     "external_tools": "_on_locate_tools", "imdb_settings": "_on_open_imdb_settings", "columns": "_on_open_column_visibility",
     "genres": "_on_open_genres", "languages": "_on_open_languages", "history": "_on_open_history",
@@ -113,9 +114,10 @@ HANDLERS = {
 
 
 def test_actions_are_connected_to_their_handlers(monkeypatch, tmp_path):
-    """Triggering each registered action reaches its own handler (handlers are
-    patched on the class before the menu is built, so the bound slots are the
-    stubs)."""
+    """Triggering each registered action reaches its own handler with no arguments
+    (handlers are patched on the class before the menu is built, so the bound slots
+    are the stubs). PyQt6 used to pass triggered's checked=False along, which put
+    False into Translate Subtitles' `preselect`."""
     import core.config as config
 
     monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "settings.ini")
@@ -123,13 +125,13 @@ def test_actions_are_connected_to_their_handlers(monkeypatch, tmp_path):
     monkeypatch.setattr(mw.MainWindow, "_check_external_tools_on_startup", lambda self: None)
     called = []
     for handler in set(HANDLERS.values()):
-        monkeypatch.setattr(mw.MainWindow, handler, lambda self, *a, name=handler: called.append(name))
+        monkeypatch.setattr(mw.MainWindow, handler, lambda self, *a, name=handler: called.append((name, a)))
     fresh = mw.MainWindow()
     try:
         for key, handler in HANDLERS.items():
             called.clear()
             fresh.actions_by_key[key].trigger()
-            assert called == [handler], key
+            assert called == [(handler, ())], key
     finally:
         fresh.close()
 

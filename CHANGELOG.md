@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-06#01 -- menu items call their action plainly
+
+Shared part: redactor_common 2026-11-06#01 (menu items no longer pass Qt's "checked" flag into their slots).
+- **Media > Translate Subtitles to English…** handed Qt's "checked" flag (False) to the dialog as the track to
+  preselect. The dialog read it as "none", so nothing went wrong; it now gets no value at all.
+
 ## 2026-11-05#04 -- the Linux release build's tests pass again
 
 - **The Release workflow's Linux build failed 7 tests**, so no Linux download was made. It runs the tests as root in
