@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-07#02 -- embedding lyrics in an MKV works
+
+- **Embedding the lyrics in an MKV failed every time in 2026-11-07#01.** The step that finds mkvmerge looked for it in
+  the wrong place and stopped with an error, so the file stayed unchanged. It is fixed and now tested with real
+  mkvmerge (MKVToolNix 103.0): the Lyrics track goes in next to an existing subtitle, the tags, Content Type and
+  poster stay, embedding again replaces the track, and Save All afterwards writes the staged lyrics into the new
+  file. A new test runs mkvmerge's start-up code even where MKVToolNix is not installed, so this cannot slip through
+  again. MP4 was not affected.
+
 ## 2026-11-07#01 -- lyrics as a subtitle track, and a cover for music videos
 
 - **Get Lyrics can embed the timed lyrics in the video as a subtitle track.** Tick "Also embed the timed lyrics in

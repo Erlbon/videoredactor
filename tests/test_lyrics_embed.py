@@ -180,16 +180,70 @@ def test_mkv_swap_is_verified_with_a_runner_that_writes_what_mkvmerge_would(tmp_
     assert len(_subs(clip)) == 1
 
 
+def test_the_mkvmerge_runner_resolves_the_tool_and_returns_its_exit_code(monkeypatch):
+    """Runs without MKVToolNix: the real runner's own code (imports, path lookup), only the process is faked."""
+    seen = []
+
+    def fake_run_tool(args, timeout=None):
+        seen.append(args)
+        return subprocess.CompletedProcess(args, 1, stdout="Warning: something\n", stderr="")
+
+    monkeypatch.setattr(le, "run_tool", fake_run_tool)
+    monkeypatch.setattr(le, "get_executable_path", lambda name: f"C:/tools/{name}.exe")
+    assert le._run_mkvmerge(["mkvmerge", "-o", "t.mkv", "s.mkv"]) == (1, "Warning: something\n")
+    assert seen == [["C:/tools/mkvmerge.exe", "-o", "t.mkv", "s.mkv"]]
+
+
+def _cue_text(path, index=0):
+    return subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-map", f"0:s:{index}", "-f", "srt", "-"],
+                          capture_output=True, text=True, encoding="utf-8", check=True).stdout
+
+
 @pytest.mark.skipif(not is_tool_available(MKVTOOLNIX) or bool(SKIP_REASON), reason="MKVToolNix not installed")
-def test_mkv_for_real_with_mkvmerge(tmp_path):
-    clip = tmp_path / "song.mkv"
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", SAMPLE, "-c", "copy", str(clip)], check=True)
-    result = le.embed_lyrics_track(str(clip), SRT, "en", _run(tmp_path, []))
+def test_mkv_for_real_with_mkvmerge_keeps_tags_poster_and_other_subtitles(tmp_path):
+    clip = tmp_path / "Depeche Mode - Enjoy the Silence.mkv"
+    other = tmp_path / "other.srt"
+    other.write_text("1\n00:00:00,000 --> 00:00:01,000\nHallo\n", encoding="utf-8")
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", SAMPLE, "-i", str(other), "-map", "0", "-map", "1", "-c", "copy",
+                    "-metadata:s:s:0", "language=ger", str(clip)], check=True)
+    vf = VideoFile(path=clip)
+    vf.load()
+    assert not vf.load_error
+    vf.metadata.content_type = ContentType.MUSIC_VIDEO
+    vf.metadata.artist, vf.metadata.title, vf.metadata.lyrics = "Depeche Mode", "Enjoy the Silence", "Words"
+    vf.dirty = True
+    vf.save()
+    assert vf.save_error == ""
+    from PyQt6.QtCore import QBuffer, QIODevice
+    from PyQt6.QtGui import QColor, QImage
+    image = QImage(400, 400, QImage.Format.Format_RGB32)
+    image.fill(QColor("teal"))
+    buffer = QBuffer()
+    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+    image.save(buffer, "JPG", 85)
+    jpeg = bytes(buffer.data())
+    assert vf.embed_cover_now(jpeg) == ""
+
+    binned: list = []
+    result = le.embed_lyrics_track(str(clip), SRT, "en", _run(tmp_path, binned))
     assert result.ok, result.message
     subs = _subs(clip)
-    assert len(subs) == 1 and subs[0]["tags"].get("title") == "Lyrics" and subs[0]["tags"].get("language") == "eng"
-    second = le.embed_lyrics_track(str(clip), SRT, "en", _run(tmp_path, []))
-    assert second.ok and second.replaced == 1 and len(_subs(clip)) == 1
+    assert [(s["tags"].get("language"), s["tags"].get("title")) for s in subs] == [("ger", None), ("eng", "Lyrics")]
+    assert subs[1]["disposition"]["default"] == 0  # the video already had a subtitle track
+    assert "Words like violence" in _cue_text(clip, 1) and "Hallo" in _cue_text(clip, 0)
+    again = VideoFile(path=clip)
+    again.load()
+    assert (again.metadata.artist, again.metadata.title, again.metadata.lyrics) == ("Depeche Mode", "Enjoy the Silence", "Words")
+    assert again.metadata.content_type is ContentType.MUSIC_VIDEO
+    assert again.read_cover() == jpeg
+    assert len(binned) == 1 and not list(tmp_path.glob("*redact-*"))
+
+    second = le.embed_lyrics_track(str(clip), SRT.replace("violence", "thunder"), "nb", _run(tmp_path, binned))
+    assert second.ok and second.replaced == 1, second.message
+    subs = _subs(clip)
+    assert [(s["tags"].get("language"), s["tags"].get("title")) for s in subs] == [("ger", None), ("nor", "Lyrics")]
+    assert "Words like thunder" in _cue_text(clip, 1)
+    assert VideoFile(path=clip).read_cover() == jpeg
 
 
 # -- the dialog and the flow on the real window --------------------------------------------------------------------

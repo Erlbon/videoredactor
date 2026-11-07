@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from core import conversion_run, library_safety
-from core.external_tools import FFMPEG, MKVTOOLNIX, is_tool_available
+from core.external_tools import FFMPEG, MKVTOOLNIX, get_executable_path, is_tool_available
 from core.ffmpeg_backend import _run_ffmpeg, _stream_summary
 from core.mkv_backend import MKV_TOOL_TIMEOUT_SECONDS, _identify
 from core.subtitle_ingest import language_code
@@ -211,8 +211,6 @@ def embed_lyrics_track(
 
 
 def _run_mkvmerge(args: list[str]) -> tuple[Optional[int], str]:
-    from redactor_common.core.tool_locator import get_executable_path  # noqa: PLC0415
-
     result = run_tool([get_executable_path(args[0])] + args[1:], timeout=MKV_TOOL_TIMEOUT_SECONDS * 6)
     return result.returncode, (result.stdout or "") + (result.stderr or "")
 
