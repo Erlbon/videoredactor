@@ -8,7 +8,9 @@ makes a cover from the video's own frames (the side panel's frame preview is a p
 
 The rule numbers (judge_poster, one pure function):
 
-    kind             must be "poster" (the source's poster-type image); anything else is refused
+    kind             must be "poster" (the source's poster-type image); anything else is refused, except
+    "album cover"    a Music Video's cover (Metadata > Look Up > Get Cover): the song's release artwork from iTunes,
+                     the Cover Art Archive or Discogs, square (height / width 0.8 to 1.25) and at least 400 x 400
     shape            height / width >= 1.3 (a poster is about 2:3 = 1.5) and <= 2.0 (a tall banner is not a poster)
     size             at least 400 x 600 pixels
     "accept landscape" (off by default, per lookup dialog): the shape and size rules are dropped, except that the
@@ -26,6 +28,9 @@ from dataclasses import dataclass
 from typing import Optional
 
 POSTER_KIND = "poster"
+ALBUM_KIND = "album cover"  # a Music Video's cover: the song's square release artwork (core/music_cover.py)
+MIN_ALBUM_SIDE = 400
+MIN_ALBUM_RATIO, MAX_ALBUM_RATIO = 0.8, 1.25
 MIN_WIDTH, MIN_HEIGHT = 400, 600
 MIN_RATIO, MAX_RATIO = 1.3, 2.0
 MIN_WIDTH_LANDSCAPE = 300
@@ -56,6 +61,13 @@ def judge_poster(width: int, height: int, kind: str = POSTER_KIND, accept_landsc
     """Whether a picture of this size and source type is a true poster (see the module text)."""
     if not (isinstance(width, int) and isinstance(height, int)) or width <= 0 or height <= 0:
         return PosterVerdict(False, "its size is unknown", 0, 0)
+    if kind == ALBUM_KIND:
+        ratio = height / width
+        if not MIN_ALBUM_RATIO <= ratio <= MAX_ALBUM_RATIO:
+            return PosterVerdict(False, f"not a square cover ({width}x{height})", width, height)
+        if min(width, height) < MIN_ALBUM_SIDE:
+            return PosterVerdict(False, f"too small ({width}x{height}, at least {MIN_ALBUM_SIDE}x{MIN_ALBUM_SIDE})", width, height)
+        return PosterVerdict(True, "album cover", width, height)
     if kind != POSTER_KIND:
         return PosterVerdict(False, "the source does not label it a poster", width, height)
     if accept_landscape:

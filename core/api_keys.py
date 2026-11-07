@@ -31,6 +31,9 @@ KEYS = {
                        "LibreTranslate API Key (optional, for a server that asks for one)"),
     "theporndb": ("theporndb_api_key", "THEPORNDB_API_KEY", "theporndb", "ThePornDB API Token"),
     "stashdb": ("stashdb_api_key", "STASHDB_API_KEY", "stashdb", "StashDB API Key"),
+    # The family's Discogs entry name (redactor_common.core.lookups.discogs reads the shared entry first, so a token
+    # saved in mp3redactor works here too).
+    "discogs": ("discogs_token", "DISCOGS_TOKEN", "discogs", "Discogs Personal Token (optional, for Music Video covers)"),
 }
 
 # The one non-secret setting here: did the user agree to the UNENCRYPTED

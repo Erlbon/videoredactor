@@ -38,7 +38,11 @@ into files one at a time.
   exact file first (guaranteed sync) with a title-search fallback that's
   clearly flagged as sync-not-guaranteed. For music videos the same
   dialog can fetch time-synced lyrics from LRCLIB and write them as an
-  .srt (with an offset control).
+  .srt (with an offset control). Get Lyrics can also embed them in the
+  video as a "Lyrics" subtitle track (MP4 and MKV, nothing re-encoded).
+- **Music video covers**: Get Cover searches iTunes, MusicBrainz (Cover
+  Art Archive) and Discogs for the song's release artwork and stages the
+  one you pick as the poster.
 - **Music videos: the title is the song** (as MusicBrainz names it, version included). The old separate
   track title field is gone: old values are kept in the file and can be moved into the title (side panel
   button, or the Redact step "Use the track title as the title"). An MP4 music video also gets the iTunes

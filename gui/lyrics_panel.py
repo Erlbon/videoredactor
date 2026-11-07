@@ -7,9 +7,10 @@ The LRCLIB lyrics page, used by two dialogs:
     video; an entry without timing is greyed and cannot be chosen;
   * the Get Lyrics dialog (text_mode=True): the lyrics themselves, to be saved INSIDE the file. An entry is usable
     when it has any lyrics (plain, or synced with the timestamps stripped); instrumental entries say so and offer
-    nothing. Two checkboxes: "Save the lyrics in the file" (default ON) and "Also save the timed lyrics as a
-    subtitle file (.srt)" (default OFF, enabled only for entries with timing; the offset and language below apply
-    only to the .srt).
+    nothing. Three checkboxes: "Save the lyrics in the file" (default ON), "Also save the timed lyrics as a
+    subtitle file (.srt)" and "Also embed the timed lyrics in the video as a subtitle track" (both default OFF,
+    enabled only for entries with timing, the embed box only for an MP4/MKV whose tool is installed; the offset and
+    language below apply only to the timed lyrics).
 
   Artist / Title    what is searched (from the tags, else the file name "Artist - Title"); editable
   Results           title / artist / album, the track's length against the video's, a match label (exact, close,
@@ -37,7 +38,7 @@ from PyQt6.QtWidgets import (
 from redactor_common.core import lrclib
 from redactor_common.gui import work_progress
 
-from core import lyrics_subtitles
+from core import lyrics_embed, lyrics_subtitles
 
 SYNC_WARNING_BG = QColor(255, 244, 200)
 SYNC_WARNING_FG = QColor(70, 55, 0)
@@ -122,14 +123,22 @@ class LyricsPanel(QWidget):
 
         self.save_lyrics_box = QCheckBox("Save the lyrics in the file")
         self.save_srt_box = QCheckBox("Also save the timed lyrics as a subtitle file (.srt)")
+        self.embed_box = QCheckBox("Also embed the timed lyrics in the video as a subtitle track")
+        self._embed_blocked = lyrics_embed.unsupported_reason(str(video.path)) if text_mode else ""
+        self.embed_box.setToolTip(
+            f"Not for this file: {self._embed_blocked}" if self._embed_blocked else
+            "Adds a \"Lyrics\" subtitle track to the file right away (lossless, nothing re-encoded; the original goes "
+            "where Library safety sends replaced files). An earlier Lyrics track is replaced.")
         if text_mode:
             self.save_lyrics_box.setChecked(True)
-            self.save_srt_box.setChecked(False)
-            self.save_srt_box.setEnabled(False)
+            for box in (self.save_srt_box, self.embed_box):
+                box.setChecked(False)
+                box.setEnabled(False)
+                box.toggled.connect(self._on_srt_toggled)
             self.save_lyrics_box.toggled.connect(self._on_selection)
-            self.save_srt_box.toggled.connect(self._on_srt_toggled)
             layout.addWidget(self.save_lyrics_box)
             layout.addWidget(self.save_srt_box)
+            layout.addWidget(self.embed_box)
 
         form = QFormLayout()
         self.offset_spin = QDoubleSpinBox()
@@ -147,7 +156,7 @@ class LyricsPanel(QWidget):
         form.addRow("Lyrics language:", self.language_combo)
         layout.addLayout(form)
         if text_mode:
-            # Only the .srt uses them.
+            # Only the .srt and the embedded track use them.
             self.offset_spin.setEnabled(False)
             self.language_combo.setEnabled(False)
 
@@ -308,16 +317,19 @@ class LyricsPanel(QWidget):
     def wants_srt(self) -> bool:
         return self.text_mode and self.save_srt_box.isEnabled() and self.save_srt_box.isChecked()
 
+    def wants_embed(self) -> bool:
+        return self.text_mode and self.embed_box.isEnabled() and self.embed_box.isChecked()
+
     def can_accept(self) -> bool:
-        """True when the choice would write something: text mode needs the lyrics box (and lyrics) or the .srt
-        box (and timing); subtitle mode needs a timed entry."""
+        """True when the choice would write something: text mode needs the lyrics box (and lyrics) or the .srt /
+        embed box (and timing); subtitle mode needs a timed entry."""
         match = self.selected_match
         if match is None:
             return False
         if not self.text_mode:
             return match.lyrics.has_timing
         return (self.wants_lyrics() and bool(self.current_lyrics_text())) or (
-            self.wants_srt() and bool(self.current_srt()))
+            (self.wants_srt() or self.wants_embed()) and bool(self.current_srt()))
 
     def _on_srt_toggled(self, _checked: bool = False) -> None:
         self._sync_srt_controls()
@@ -329,9 +341,11 @@ class LyricsPanel(QWidget):
         match = self.selected_match
         timed = match is not None and match.lyrics.has_timing
         self.save_srt_box.setEnabled(timed)
-        if not timed:
-            self.save_srt_box.setChecked(False)
-        srt_on = self.save_srt_box.isEnabled() and self.save_srt_box.isChecked()
+        self.embed_box.setEnabled(timed and not self._embed_blocked)
+        for box in (self.save_srt_box, self.embed_box):
+            if not box.isEnabled():
+                box.setChecked(False)
+        srt_on = self.wants_srt() or self.wants_embed()
         self.offset_spin.setEnabled(srt_on)
         self.language_combo.setEnabled(srt_on)
 
@@ -353,11 +367,12 @@ class LyricsPanel(QWidget):
             self.warning_label.setVisible(False)
             return
         if self.text_mode:
-            if self.wants_srt() and not self.wants_lyrics():
+            timed = self.wants_srt() or self.wants_embed()
+            if timed and not self.wants_lyrics():
                 self.preview.setPlainText(lrclib.srt_preview(self.current_srt(), PREVIEW_CUES))
             else:
                 self.preview.setPlainText(self.current_lyrics_text())
-            show_warning = self.wants_srt() and not match.score.is_exact
+            show_warning = timed and not match.score.is_exact
         else:
             self.preview.setPlainText(lrclib.srt_preview(self.current_srt(), PREVIEW_CUES))
             show_warning = not match.score.is_exact

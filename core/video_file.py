@@ -140,6 +140,11 @@ class VideoFile:
         # technical info (e.g. ffmpeg missing) should still show its
         # tags, just with blank technical columns -- not lose the
         # whole load over a secondary probe.
+        self.refresh_technical()
+
+    def refresh_technical(self) -> None:
+        """Re-reads only the technical columns (ffprobe), leaving the tags and any staged edit alone: for a file
+        whose tracks changed on disk under an open edit (Get Lyrics' embedded track)."""
         if is_tool_available(FFMPEG):
             technical = probe_technical_info(str(self.path))
             for key, value in technical.items():

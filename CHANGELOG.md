@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-11-07#01 -- lyrics as a subtitle track, and a cover for music videos
+
+- **Get Lyrics can embed the timed lyrics in the video as a subtitle track.** Tick "Also embed the timed lyrics in
+  the video as a subtitle track" and the file gets a track named "Lyrics" right away, in the language and with the
+  offset chosen in the dialog. Nothing is re-encoded. An MKV goes through mkvmerge, which keeps every track, tag,
+  chapter and attachment as they are. An MP4 goes through ffmpeg (as a mov_text track), and its tags and poster are
+  written back before the result is checked. The new file is checked before it takes the old one's name: the same
+  video and audio, one more subtitle track, the same length. The original goes where Library safety sends replaced
+  files (the Recycle Bin, or the quarantine folder). Embedding again replaces the Lyrics track instead of adding a
+  second one. The track is the default subtitle only when the video has no other subtitle track. Tags you have not
+  saved yet stay staged.
+- **Metadata > Look Up > Get Cover (iTunes, MusicBrainz, Discogs)** finds a cover for one Music Video by its artist
+  and song title. It searches iTunes (1000 x 1000 artwork, no key), MusicBrainz with the Cover Art Archive (no key;
+  official singles and albums first, live recordings and bootlegs last) and Discogs (only with a Discogs token,
+  which is new in Tools > API Keys; a token saved in mp3redactor works here too). The covers are shown side by side
+  with the current poster. The one you pick is staged as the poster through the usual review: Save All embeds it,
+  Undo takes it back. A music video's cover is square release artwork (at least 400 x 400), so it gets its own rule
+  next to the portrait-poster rule, which is unchanged.
+
 ## 2026-11-06#02 -- build_exe.bat builds with this repo's own .venv
 
 - **`build_exe.bat` builds with this repo's own `.venv`** (made at the redactor_common pin by

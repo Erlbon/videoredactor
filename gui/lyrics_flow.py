@@ -8,7 +8,9 @@ Metadata > Look Up > Get Lyrics (LRCLIB): the whole flow for the ONE selected mu
      lookup (a lyrics value the file already has is replaced only when its box is still ticked there); Undo takes
      them back and Save All writes them inside the file (MP4 iTunes lyrics atom, MKV LYRICS tag);
   3. with "Also save the timed lyrics as a subtitle file (.srt)" ticked, one sidecar <stem>.<lang>.srt is written
-     through the usual sidecar path (an existing file is replaced only when the user says so).
+     through the usual sidecar path (an existing file is replaced only when the user says so);
+  4. with "Also embed the timed lyrics in the video as a subtitle track" ticked, the file gets a "Lyrics" subtitle
+     track right away (core/lyrics_embed.py: lossless, verified, the original goes where Library safety says).
 
 Cancel anywhere (the dialog, the review) changes nothing.
 """
@@ -20,6 +22,7 @@ from typing import Optional
 from PyQt6.QtWidgets import QMessageBox
 from redactor_common.gui.overwrite_review_dialog import resolve_overwrite_conflicts
 
+from core.config import get_setting
 from core.filename_pattern import set_field_text
 from core.video_metadata import ContentType
 from gui.lyrics_dialog import LyricsDialog
@@ -66,14 +69,40 @@ def run_get_lyrics(window, dialog_class=LyricsDialog, search=None) -> None:
         parts.append("lyrics from LRCLIB set, not yet saved to disk")
     elif text:
         parts.append("kept the lyrics the file already has")
-    if srt:
+    if srt and getattr(dialog, "save_srt", True):
         saved = _save_srt(window, vf, srt, dialog.srt_language)
         if saved:
             parts.append(f"saved the timed lyrics to {saved}")
+    if srt and getattr(dialog, "embed_track", False):
+        parts.append(embed_track(window, vf, srt, dialog.srt_language))
     window._refresh_table_rows()
     if window._selected_video_files():
         window._on_selection_changed()
     window.status_bar.showMessage("Get Lyrics: " + ("; ".join(parts) if parts else "nothing changed"))
+
+
+def embed_track(window, vf, srt: str, language: str) -> str:
+    """Muxes the timed lyrics into the file as its "Lyrics" subtitle track (core/lyrics_embed.py) under a busy
+    dialog; returns the status-line part. A failure also says why in a box (the file is untouched then). The file's
+    staged tag edits stay staged: only its technical columns are read again."""
+    from redactor_common.gui.progress import run_busy  # noqa: PLC0415
+
+    from core import lyrics_embed  # noqa: PLC0415
+    from core.redact_steps import make_safe_run  # noqa: PLC0415
+
+    path = str(vf.path)
+    run = make_safe_run(get_setting, dry_run=False, path=path)
+    # The recently-modified guard is for batch runs over files that may still be downloading; this is one file the
+    # user has open here and just asked for, often right after saving it.
+    run.recent_minutes = 0
+    result = run_busy(window, f"Embedding the lyrics in {vf.path.name}...", lyrics_embed.embed_lyrics_track,
+                      path, srt, language, run, title="Get Lyrics")
+    if not result.ok:
+        QMessageBox.warning(window, "Lyrics Not Embedded",
+                            f"Couldn't embed the lyrics in {vf.path.name}: {result.message}\n\nThe file is unchanged.")
+        return "lyrics track not embedded"
+    vf.refresh_technical()
+    return result.message
 
 
 def _save_srt(window, vf, srt: str, language: str) -> Optional[str]:

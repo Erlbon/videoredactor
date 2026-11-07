@@ -55,6 +55,7 @@ def test_other_menus_hold_what_the_spec_says(window):
     assert _labels(look_up) == [
         "TMDB (Movie)…", "TMDB (TV Show)…", "TheTVDB (TV Show)…", "IMDb (Local Database)…",
         "ThePornDB…", "StashDB…", "Subtitles (OpenSubtitles, Lyrics)…", "Get Lyrics (LRCLIB)…",
+        "Get Cover (iTunes, MusicBrainz, Discogs)…",
     ]
     assert _labels(menus["Media"]) == [
         "Play", "Convert…", "Join Files…", "Check Files…", "Find Duplicates…",

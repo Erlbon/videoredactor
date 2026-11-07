@@ -480,6 +480,7 @@ class MainWindow(QMainWindow):
             entry("subtitles", "&Subtitles (OpenSubtitles, Lyrics)…", self._on_import_subtitles, "Ctrl+Shift+L"),
             # Shown only for exactly one selected Music Video (see _update_get_lyrics_visibility).
             entry("get_lyrics", "Get L&yrics (LRCLIB)…", self._on_get_lyrics, "Ctrl+Shift+G"),
+            entry("get_cover", "Get &Cover (iTunes, MusicBrainz, Discogs)…", self._on_get_cover, None),
         ]
 
     def _build_menu_bar(self) -> None:
@@ -1712,7 +1713,8 @@ class MainWindow(QMainWindow):
         # live on the menu's own actions).
         look_up = self._look_up_entries("ctx_", with_shortcuts=False)
         if not (one_ok and files[0].metadata.content_type is ContentType.MUSIC_VIDEO):
-            look_up = [e for e in look_up if e.key != "ctx_get_lyrics"]  # Get Lyrics: one Music Video only
+            # Get Lyrics and Get Cover: one Music Video only
+            look_up = [e for e in look_up if e.key not in ("ctx_get_lyrics", "ctx_get_cover")]
         items.append(Submenu("Look Up", look_up))
         items.append(self.actions_by_key["get_poster"])
         # Renaming several files to the same name doesn't make sense; also reachable by double-clicking the Filename
@@ -3179,18 +3181,19 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(f"Saved subtitle to {detail.name} ({sync_note})")
 
     def _update_get_lyrics_visibility(self) -> None:
-        """Metadata > Look Up > Get Lyrics is there only while exactly one file is selected and its Content Type is
-        Music Video (hidden and disabled otherwise, so its shortcut is idle too). Called when the selection changes
-        and whenever the Metadata menu or its Look Up submenu is about to open."""
+        """Metadata > Look Up > Get Lyrics and Get Cover are there only while exactly one file is selected and its
+        Content Type is Music Video (hidden and disabled otherwise, so a shortcut is idle too). Called when the
+        selection changes and whenever the Metadata menu or its Look Up submenu is about to open."""
         from gui.lyrics_flow import lyrics_target
 
-        try:
-            action = self.actions_by_key["lookup_get_lyrics"]
-        except (AttributeError, KeyError):
-            return
         show = lyrics_target(self) is not None
-        action.setVisible(show)
-        action.setEnabled(show)
+        for key in ("lookup_get_lyrics", "lookup_get_cover"):
+            try:
+                action = self.actions_by_key[key]
+            except (AttributeError, KeyError):
+                continue
+            action.setVisible(show)
+            action.setEnabled(show)
 
     def _on_clear_fields(self) -> None:
         """Edit > Clear Fields... (also the side panel's Clear All Fields button and the right-click entry): empties
@@ -3234,6 +3237,13 @@ class MainWindow(QMainWindow):
         from gui.lyrics_flow import run_get_lyrics
 
         run_get_lyrics(self)
+
+    def _on_get_cover(self) -> None:
+        """Metadata > Look Up > Get Cover...: the release artwork of the one selected Music Video, staged as its
+        poster (see gui/cover_flow.py)."""
+        from gui.cover_flow import run_get_cover
+
+        run_get_cover(self)
 
     def _one_loaded_video(self, what: str) -> Optional[VideoFile]:
         files = self._selected_video_files()

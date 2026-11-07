@@ -5,15 +5,19 @@ Metadata > Look Up > Get Lyrics (LRCLIB): the lyrics of one music video, saved I
 
 The page is the LRCLIB lyrics panel in text mode (gui/lyrics_panel.py): artist and title prefilled from the tags or the
 file name and editable, the results with their match label and the track-against-video length, a preview of the text,
-and the two checkboxes "Save the lyrics in the file" (default on) and "Also save the timed lyrics as a subtitle file
-(.srt)" (default off, only for entries with timing; the offset and language apply only to the .srt).
+and the checkboxes "Save the lyrics in the file" (default on), "Also save the timed lyrics as a subtitle file (.srt)"
+and "Also embed the timed lyrics in the video as a subtitle track" (both default off, only for entries with timing;
+the offset and language apply only to the timed lyrics).
 
 Nothing is written here. After exec() the dialog reports the choice:
     selected_match   the lrclib.Match picked
     lyrics_text      the cleaned plain text to stage in the file ("" when "Save the lyrics in the file" is off)
-    srt_text         the finished SRT (offset applied) ("" when the .srt box is off)
-    srt_language     the language code for the .srt's file name
-The flow (gui/lyrics_flow.py) stages the lyrics through the overwrite review and writes the optional sidecar.
+    srt_text         the finished SRT (offset applied) ("" when neither timed box is on)
+    save_srt         write it as a sidecar .srt
+    embed_track      mux it into the video as the "Lyrics" subtitle track
+    srt_language     the language code for the .srt's file name and the track's language tag
+The flow (gui/lyrics_flow.py) stages the lyrics through the overwrite review, writes the optional sidecar and embeds
+the optional track.
 """
 
 from __future__ import annotations
@@ -35,6 +39,8 @@ class LyricsDialog(OwnedDialog):
         self.lyrics_text = ""
         self.srt_text = ""
         self.srt_language = ""
+        self.save_srt = False
+        self.embed_track = False
         self._started = False
 
         self.setWindowTitle("Get Lyrics (LRCLIB)")
@@ -86,6 +92,8 @@ class LyricsDialog(OwnedDialog):
             return
         self.selected_match = panel.selected_match
         self.lyrics_text = panel.current_lyrics_text() if panel.wants_lyrics() else ""
-        self.srt_text = panel.current_srt() if panel.wants_srt() else ""
+        self.save_srt = panel.wants_srt()
+        self.embed_track = panel.wants_embed()
+        self.srt_text = panel.current_srt() if (self.save_srt or self.embed_track) else ""
         self.srt_language = panel.language()
         self.accept()
