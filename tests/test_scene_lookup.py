@@ -220,7 +220,8 @@ def test_bundle_carries_the_endpoint_and_md5_but_no_key(monkeypatch):
     sl.set_md5_enabled(True)
     adapter = settings_adapter.VideoSettingsAdapter()
     values = adapter.read_section("scene_lookup")
-    assert values == {"stashdb_endpoint": "https://box.example.org/graphql", "md5": True}
+    # show_adult: Preferences > Adult Content, "" = never set (its default then follows the saved keys)
+    assert values == {"stashdb_endpoint": "https://box.example.org/graphql", "md5": True, "show_adult": ""}
     everything = json.dumps({k: adapter.read_section(k) for k in settings_adapter.SECTIONS})
     assert KEY not in everything and "api_key" not in everything.lower()
     assert "scene_lookup" in [s.key for s in adapter.sections()]

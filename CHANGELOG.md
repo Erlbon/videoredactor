@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-11-18#02 -- lookups follow the Content Type; Show adult content
+## 2026-11-18#03 -- lookups follow the Content Type; Show adult content
 
 - **The Look Up menu shows only the lookups that fit the selected files' Content Type** (the owner's decisions
   of 2026-11-18). The others are hidden, and their shortcuts do nothing, the way Get Lyrics already worked. The
