@@ -130,6 +130,9 @@ class VideoFile:
             self.load_error = f"Could not read metadata: {e}"
             return
         self.baseline = history.fields_text(self.metadata)
+        # After the baseline: a suggested Collected from is not in the file yet (written with the next save).
+        from core import collected_from
+        collected_from.suggest(self.metadata)
 
         # Technical fields (resolution, codecs, duration, frame rate,
         # container) via ffprobe -- format-agnostic, so this runs the

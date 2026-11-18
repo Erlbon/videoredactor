@@ -539,7 +539,7 @@ def test_two_movies_matching_title_and_year_are_ambiguous(work, bin_, tmp_path, 
 
 def test_lookup_fills_only_empty_fields(work, bin_, tmp_path, monkeypatch):
     fake_tmdb(monkeypatch, movies=[movie("Inception", 2010)])
-    vf = stub(work, "Inception.2010.mp4", director="Mine", content_type=ContentType.CLIP)
+    vf = stub(work, "Inception.2010.mp4", director="Mine", content_type=ContentType.MOVIE)
     env = make_env(bin_, tmp_path)
     recipe, catalogue = only("lookup")
     ctx = rs.VideoCtx(vf, env)
@@ -547,7 +547,23 @@ def test_lookup_fills_only_empty_fields(work, bin_, tmp_path, monkeypatch):
     result = step.run(ctx)
     step.apply_suggestion(ctx, result)
     md = ctx.work.metadata
-    assert md.director == "Mine" and md.content_type is ContentType.CLIP and md.studio == "WB"
+    assert md.director == "Mine" and md.content_type is ContentType.MOVIE and md.studio == "WB"
+
+
+@pytest.mark.parametrize("ctype", [ContentType.MUSIC_VIDEO, ContentType.PORN, ContentType.CLIP, ContentType.MISC])
+def test_lookup_skips_types_it_is_not_for(work, bin_, tmp_path, monkeypatch, ctype):
+    # Owner's decision 4A (2026-11-18): a set Content Type decides; these are not movies or TV.
+    monkeypatch.setattr(tmdb_client, "search_movies", lambda *a: pytest.fail("searched"))
+    vf = stub(work, "Depeche Mode - Enjoy the Silence (1990).mp4", content_type=ctype)
+    assert lookup_entry(vf, make_env(bin_, tmp_path)).status is FileStatus.UNCHANGED
+
+
+def test_a_movie_typed_file_is_looked_up_as_a_movie_whatever_its_name(work, bin_, tmp_path, monkeypatch):
+    fake_tmdb(monkeypatch, movies=[movie("Inception", 2010)])
+    vf = stub(work, "Inception.2010.S01E01.mp4", content_type=ContentType.MOVIE)
+    ctx = rs.VideoCtx(vf, make_env(bin_, tmp_path))
+    result = rs.LookupStep().run(ctx)
+    assert result.value is not None and result.value.content_type is ContentType.MOVIE
 
 
 def test_a_complete_file_makes_no_network_call(work, bin_, tmp_path, monkeypatch):

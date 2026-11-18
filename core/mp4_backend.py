@@ -99,6 +99,7 @@ INTEGER_ATOMS = {"tvsn", "tves"}
 CUSTOM_FIELDS = [
     "sort_title", "language", "personal_rating", "content_type",
     "director", "cast", "writer", "studio", "collection",
+    "collected_from", "collected_from_detail",  # core/collected_from.py
     "scan_stamp",
     # Source ids (core.source_tags): THEPORNDB_ID ... METADATA_MATCH, written only from an accepted lookup.
     *SOURCE_FIELDS,

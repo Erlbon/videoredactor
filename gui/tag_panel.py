@@ -54,6 +54,8 @@ FIELD_LABELS = {
     "language": "Language",
     "personal_rating": "Personal Rating (1-5)",
     "comment": "Comment",
+    "collected_from": "Collected from",
+    "collected_from_detail": "Collected from (detail)",
     "director": "Director",
     "cast": "Cast",
     "writer": "Writer",
@@ -165,6 +167,11 @@ class TagPanel(QWidget):
         self.media_type_note.setWordWrap(True)
         self.media_type_note.setVisible(False)
         scroll_layout.addWidget(self.media_type_note)
+        self.collected_from_note = QLabel("Collected from: suggested from the web address in the file's Comment. "
+                                          "It is saved only when you save this file.")
+        self.collected_from_note.setWordWrap(True)
+        self.collected_from_note.setVisible(False)
+        scroll_layout.addWidget(self.collected_from_note)
         self.old_track_title_label = QLabel()
         self.old_track_title_label.setWordWrap(True)
         self.old_track_title_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -267,6 +274,7 @@ class TagPanel(QWidget):
         self.media_type_note.setVisible(
             md is not None and md.content_type_from_media_type and md.content_type is ContentType.MUSIC_VIDEO
         )
+        self.collected_from_note.setVisible(md is not None and getattr(md, "collected_from_suggested", False))
 
     def _on_sources_toggled(self, expanded: bool) -> None:
         self.sources_toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
@@ -469,9 +477,24 @@ class TagPanel(QWidget):
         if field_name == "content_type":
             combo = QComboBox()
             combo.addItem("", "")  # blank = leave unset/mixed
-            for ct in ContentType:
+            # Porn only while Preferences > Adult Content shows it, or for a file that already is Porn.
+            from core.lookup_types import adult_shown, content_type_choices
+            current = [f.metadata.content_type for f in getattr(self, "_last_files", [])]
+            for ct in content_type_choices(adult_shown(), current):
                 if ct != ContentType.UNSET:
                     combo.addItem(ct.value, ct.value)
+            combo.currentIndexChanged.connect(lambda _, f=field_name: self._mark_touched(f))
+            return combo
+
+        if field_name == "collected_from":
+            from core.collected_from import COLLECTED_FROM_CHOICES
+
+            combo = QComboBox()
+            combo.addItem("", "")  # blank = not set / mixed
+            for choice in COLLECTED_FROM_CHOICES:
+                combo.addItem(choice, choice)
+            combo.setToolTip("Where this copy of the video came from. The detail line below holds the link, the "
+                             "channel and year, or the disc's name.")
             combo.currentIndexChanged.connect(lambda _, f=field_name: self._mark_touched(f))
             return combo
 

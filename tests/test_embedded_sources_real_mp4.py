@@ -174,3 +174,30 @@ def test_unicode_survives_in_the_tags(clip):
     vf.dirty = True
     vf.save()
     assert vf.save_error == "" and loaded(clip).metadata.source_url == vf.metadata.source_url
+
+
+def test_collected_from_round_trips_and_a_suggestion_is_saved_with_the_file(clip):
+    # Owner's decisions 6A and 8A (2026-11-18): two freeform atoms; a suggestion from the Comment is filled on load,
+    # flagged, and written only by a save.
+    vf = loaded(clip)
+    vf.metadata.comment = "https://www.youtube.com/watch?v=zwT6DZCQi9k"
+    vf.dirty = True
+    vf.save()
+    assert vf.save_error == ""
+    again = loaded(clip)
+    assert again.metadata.collected_from == "YouTube" and again.metadata.collected_from_suggested
+    assert not again.dirty  # a suggestion alone does not ask for a save
+    again.metadata.title = "Enjoy the Silence"
+    again.dirty = True
+    again.save()
+    assert again.save_error == ""
+    third = loaded(clip)
+    assert third.metadata.collected_from == "YouTube" and not third.metadata.collected_from_suggested
+    assert third.metadata.collected_from_detail == "https://www.youtube.com/watch?v=zwT6DZCQi9k"
+
+    third.metadata.collected_from, third.metadata.collected_from_detail = "TV broadcast", "MTV Europe, 1990"
+    third.dirty = True
+    third.save()
+    assert third.save_error == ""
+    fourth = loaded(clip)
+    assert (fourth.metadata.collected_from, fourth.metadata.collected_from_detail) == ("TV broadcast", "MTV Europe, 1990")

@@ -1,5 +1,46 @@
 # Changelog
 
+## 2026-11-18#01 -- lookups follow the Content Type; Show adult content
+
+- **The Look Up menu shows only the lookups that fit the selected files' Content Type** (the owner's decisions
+  of 2026-11-18). The others are hidden, and their shortcuts do nothing, the way Get Lyrics already worked. The
+  same goes for the row right-click menu and Get Poster.
+  - TMDB (Movie): Movie and Porn.
+  - TMDB (TV Show) and TheTVDB: TV.
+  - IMDb (Local Database): Movie, TV and Music Video.
+  - ThePornDB and StashDB: Porn.
+  - Get Poster: Movie, TV and Porn.
+  - Get Lyrics and Get Cover: one Music Video, as before.
+  - Subtitles: every type.
+
+  A file with no Content Type yet fits every lookup. When several files are selected, a lookup is shown only if
+  it fits every one of them.
+- **Redact's "Look up metadata" step follows the Content Type when it is set.** Movie is looked up as a movie and
+  TV as a TV show, whatever the filename looks like. Music Video, Porn, Clip and Misc are not looked up there, so
+  a music video named "Artist - Song (1990)" no longer comes back with a film. A file with no type still goes by
+  its filename, as before. "Fill from ThePornDB/StashDB" now asks only about Porn files and files with no type.
+- **New: Tools > Preferences > Adult Content > Show adult content.** Off hides the Porn content type, the ThePornDB
+  and StashDB lookups and API keys, Tools > Porn Tags, and the Redact step that asks those services. That step is
+  still listed in the recipe, but it does nothing and says why. A file already tagged Porn keeps its tags and
+  still shows Porn as its type. Until you set the switch, it is on if a ThePornDB or StashDB key is saved, and off
+  otherwise, so nobody loses the lookups they use. This replaces splitting the adult features into an app of
+  their own.
+- **New field: Collected from**, on every Content Type. It records where this copy of the video came from. A
+  pick list gives the kind: YouTube, Vimeo, Other website, TV broadcast, DVD, Blu-ray, LaserDisc, VHS, CD-ROM /
+  Enhanced CD or Unknown. A detail line holds the rest: the link, the channel and year, or the disc's name. In the
+  side panel they are two rows, "Collected from" and "Collected from (detail)". The table has both as columns, and
+  the kind gets a value filter. They are stored as COLLECTED_FROM and COLLECTED_FROM_DETAIL (MKV tags, and
+  freeform atoms in MP4), apart from the "Source link", which still names the record a lookup matched. On the
+  command line they are `collected_from` (alias `source`) and `collected_from_detail`. `collected_from` takes only
+  the pick-list values.
+- **Collected from is suggested from the file's web address.** When the field is empty and the Comment (or the
+  Description) holds a web address, as yt-dlp writes it, the panel fills in YouTube, Vimeo or Other website with
+  that link and says it is a suggestion. It is written only when the file is saved, the same as a Content Type
+  read from an MP4's media type. A new Redact step, "Fill Collected from from the file's web address", does the
+  same for many files: it is off by default, and its results always go to Needs review.
+- IMVDb (music video credits) is not added yet: its API search is shut down for now. It will be looked at again
+  when search is back.
+
 ## 2026-11-07#02 -- embedding lyrics in an MKV works
 
 - **Embedding the lyrics in an MKV failed every time in 2026-11-07#01.** The step that finds mkvmerge looked for it in

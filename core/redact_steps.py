@@ -802,17 +802,23 @@ class LookupStep(VideoStep):
         opts = self.options_for(ctx)
         stem = ctx.video.path.stem
         guess = parse_release_name(stem)
+        # Owner's decision 4A (2026-11-18): a Content Type, when set, decides which lookup runs; only an untyped file
+        # still goes by its filename. Music Video, Porn, Clip and Misc are not looked up here.
+        content_type = ctx.work.metadata.content_type
+        if content_type not in (ContentType.UNSET, ContentType.MOVIE, ContentType.TV):
+            return StepResult.nothing()
+        kind = {ContentType.MOVIE: "movie", ContentType.TV: "tv"}.get(content_type, guess.kind)
         notes: list[str] = []
         db = self._open_local(ctx, notes)
         outcome = self._by_imdb_id(ctx, db, stem, opts, notes) if db is not None else None
         if outcome is None:
-            if guess.kind == "movie" and opts["movies"]:
+            if kind == "movie" and opts["movies"]:
                 if not any(_is_empty(ctx, f) for f in _MOVIE_FIELDS):
                     outcome = StepResult.nothing()
                 else:
                     year = guess.year or ctx.work.metadata.release_date[:4]
                     outcome = self._movie(ctx, guess.title, year, db, notes)
-            elif guess.kind == "tv" and opts["tv"]:
+            elif kind == "tv" and opts["tv"]:
                 if not any(_is_empty(ctx, f) for f in _TV_FIELDS):
                     outcome = StepResult.nothing()
                 else:
@@ -1230,6 +1236,13 @@ class SceneLookupStep(VideoStep):
     )
 
     def execute(self, ctx: VideoCtx) -> StepResult:
+        from core.lookup_types import adult_shown
+
+        if not adult_shown():
+            return StepResult.nothing(note="adult content is hidden (Tools > Preferences > Adult Content)")
+        # Owner's decision 4A (2026-11-18): only a Porn file, or one with no Content Type yet, is asked about.
+        if ctx.work.metadata.content_type not in (ContentType.UNSET, ContentType.PORN):
+            return StepResult.nothing()
         opts = self.options_for(ctx)
         clients = [(name, client) for name, client, wanted in (
             ("ThePornDB", theporndb_client, opts["theporndb"]), ("StashDB", stashdb_client, opts["stashdb"]),
@@ -1380,6 +1393,50 @@ class TrackTitleStep(VideoStep):
             ctx.work.dirty = True
             return [f"title = {ctx.work.metadata.title!r} (from the old track title)"]
         return []
+
+
+# --- Collected from (owner's decision 8A, 2026-11-18) ---------------------------------
+
+
+@dataclass
+class CollectedFromChoice:
+    kind: str
+    detail: str
+
+    def __str__(self) -> str:
+        return f"collected_from={self.kind!r}, detail={self.detail!r}"
+
+
+class CollectedFromStep(VideoStep):
+    key = "collected_from"
+    dry_run_safe = True  # in memory only
+    label = "Fill Collected from from the file's web address"
+    description = (
+        "A file whose Collected from is empty and whose Comment (or Description) holds a web address, as yt-dlp "
+        "writes it, gets the kind (YouTube, Vimeo or Other website) and that address as the detail. It is a "
+        "SUGGESTION: it always goes to Needs review, and is written with the file's save. Every Content Type. "
+        "Off by default."
+    )
+    default_enabled = False
+
+    def execute(self, ctx: VideoCtx) -> StepResult:
+        from core import collected_from
+
+        md = ctx.work.metadata
+        if not md.collected_from_suggested and not collected_from.suggest(md):
+            return StepResult.nothing()
+        return StepResult.suggestion(
+            CollectedFromChoice(md.collected_from, md.collected_from_detail), 0.9,
+            "the file carries a web address and no Collected from", review_only=True,
+        )
+
+    def apply_suggestion(self, ctx: VideoCtx, result: StepResult) -> list[str]:
+        choice: CollectedFromChoice = result.value
+        md = ctx.work.metadata
+        md.collected_from, md.collected_from_detail = choice.kind, choice.detail
+        md.collected_from_suggested = False
+        ctx.work.dirty = True
+        return [f"collected_from = {choice.kind!r}", f"collected_from_detail = {choice.detail!r}"]
 
 
 # --- step 4: subtitles ----------------------------------------------------------------
@@ -1940,6 +1997,7 @@ def build_catalogue(
         SceneLookupStep(),
         PosterStep(),
         TrackTitleStep(),
+        CollectedFromStep(),
         SubtitlesStep(),
         SubtitleTranslateStep(),
         RemuxStep(),

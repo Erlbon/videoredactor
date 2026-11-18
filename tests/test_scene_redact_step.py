@@ -30,6 +30,27 @@ def video(work):
     return VideoFile(path=path, metadata=VideoMetadata())
 
 
+@pytest.fixture(autouse=True)
+def adult_shown(monkeypatch):
+    # Preferences > Adult Content on, so the step runs; test_adult_off_* switches it off.
+    monkeypatch.setattr("core.lookup_types.adult_shown", lambda: True)
+
+
+def test_adult_off_is_nothing_with_a_note(video, bin_, tmp_path, monkeypatch, keys):
+    monkeypatch.setattr("core.lookup_types.adult_shown", lambda: False)
+    monkeypatch.setattr(theporndb_client, "search_by_hash", lambda *a: pytest.fail("asked"))
+    entry = run_step(video, bin_, tmp_path)
+    assert entry.status is FileStatus.UNCHANGED and any("adult content is hidden" in n for n in entry.notes)
+
+
+def test_a_movie_typed_file_is_not_asked_about(video, bin_, tmp_path, monkeypatch, keys):
+    # Owner's decision 4A (2026-11-18): only Porn, or a file with no Content Type yet.
+    video.metadata.content_type = ContentType.MOVIE
+    monkeypatch.setattr(theporndb_client, "search_by_hash", lambda *a: pytest.fail("asked"))
+    monkeypatch.setattr(stashdb_client, "search_by_hash", lambda *a: pytest.fail("asked"))
+    assert run_step(video, bin_, tmp_path).status is FileStatus.UNCHANGED
+
+
 @pytest.fixture
 def keys(monkeypatch):
     monkeypatch.setenv("THEPORNDB_API_KEY", KEY)
@@ -89,7 +110,7 @@ def test_several_records_with_one_fingerprint_are_left_for_a_person(video, bin_,
 
 def test_only_empty_fields_are_offered(video, bin_, tmp_path, monkeypatch, keys):
     video.metadata.title = "My Own Title"
-    video.metadata.content_type = ContentType.MOVIE
+    video.metadata.content_type = ContentType.PORN
     monkeypatch.setattr(theporndb_client, "search_by_hash", lambda oshash: [scene()])
     monkeypatch.setattr(stashdb_client, "search_by_hash", lambda *a: [])
     entry = run_step(video, bin_, tmp_path)

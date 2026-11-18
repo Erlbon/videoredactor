@@ -197,8 +197,10 @@ FILTER_COLUMN_KINDS = {
     "website": KIND_VALUES,
     "resolution": KIND_VALUES, "language": KIND_VALUES,
     "personal_rating": KIND_VALUES, "season_number": KIND_VALUES, "episode_number": KIND_VALUES,
+    "collected_from": KIND_VALUES,
     **{f: KIND_TEXT for f in (
-        "title", "sort_title", "description", "genre_tags", "release_date", "comment", "director", "cast",
+        "title", "sort_title", "description", "genre_tags", "release_date", "comment", "collected_from_detail",
+        "director", "cast",
         "writer", "studio", "collection", "show_title", "network", "artist", "album", "composer", "lyrics",
     )},
 }
@@ -608,7 +610,7 @@ class MainWindow(QMainWindow):
                 for sub_action in menu.actions():
                     if sub_action.menu() is not None:
                         sub_action.menu().aboutToShow.connect(self._update_get_lyrics_visibility)
-        self._update_get_lyrics_visibility()
+        self._apply_adult_visibility()
 
         # Save All is Ctrl+S and Ctrl+Shift+A (owner, 2026-11-04; set where
         # save_all_action is picked up). The old Ctrl+Shift+S alias is gone:
@@ -810,8 +812,27 @@ class MainWindow(QMainWindow):
         so nothing needs refreshing afterwards; the tool paths are re-checked
         because that page saves as you go."""
         VideoPreferencesDialog(self).exec()
+        self._apply_adult_visibility(rebuild_panel=True)
         if missing_tools():
             self.status_bar.showMessage("Some required tools are still missing.")
+
+    def _apply_adult_visibility(self, rebuild_panel: bool = False) -> None:
+        """Follows Preferences > Adult Content > Show adult content (core/lookup_types.py): Tools > Porn Tags and
+        the adult lookups are shown or hidden, and the side panel's Content Type list is rebuilt so Porn comes or
+        goes."""
+        from core.lookup_types import adult_shown
+
+        adult = adult_shown()
+        try:
+            action = self.actions_by_key["porn_tags"]
+        except (AttributeError, KeyError):
+            action = None
+        if action is not None:
+            action.setVisible(adult)
+            action.setEnabled(adult)
+        self._update_get_lyrics_visibility()
+        if rebuild_panel:
+            self.tag_panel.refresh_fields()  # keeps a pending edit; MainWindow refills the rows
 
     def _on_locate_tools(self) -> None:
         """Open the tool-location settings dialog (Tools menu, or
@@ -1711,12 +1732,13 @@ class MainWindow(QMainWindow):
         items.append(self.redact_action)
         # Every lookup from the Metadata menu, so none needs a trip to the menu bar (no shortcuts here: they already
         # live on the menu's own actions).
-        look_up = self._look_up_entries("ctx_", with_shortcuts=False)
-        if not (one_ok and files[0].metadata.content_type is ContentType.MUSIC_VIDEO):
-            # Get Lyrics and Get Cover: one Music Video only
-            look_up = [e for e in look_up if e.key not in ("ctx_get_lyrics", "ctx_get_cover")]
-        items.append(Submenu("Look Up", look_up))
-        items.append(self.actions_by_key["get_poster"])
+        # Only the lookups that fit the selected files' Content Type (see _visible_lookups).
+        shown = self._visible_lookups(files)
+        look_up = [e for e in self._look_up_entries("ctx_", with_shortcuts=False) if e.key[len("ctx_"):] in shown]
+        if look_up:
+            items.append(Submenu("Look Up", look_up))
+        if "get_poster" in shown:
+            items.append(self.actions_by_key["get_poster"])
         # Renaming several files to the same name doesn't make sense; also reachable by double-clicking the Filename
         # cell (see _on_cell_double_clicked()).
         if one_ok:
@@ -2144,6 +2166,8 @@ class MainWindow(QMainWindow):
                 setattr(vf.metadata, field_name, value)
                 if field_name == "content_type":
                     vf.metadata.content_type_from_media_type = False  # now the user's own choice
+                if field_name in ("collected_from", "collected_from_detail"):
+                    vf.metadata.collected_from_suggested = False  # now the user's own choice
             vf.dirty = True
         self._refresh_table_rows()
         if files is None:
@@ -3180,20 +3204,41 @@ class MainWindow(QMainWindow):
         sync_note = "exact match" if candidate.hash_matched else "title match -- sync not guaranteed"
         self.status_bar.showMessage(f"Saved subtitle to {detail.name} ({sync_note})")
 
-    def _update_get_lyrics_visibility(self) -> None:
-        """Metadata > Look Up > Get Lyrics and Get Cover are there only while exactly one file is selected and its
-        Content Type is Music Video (hidden and disabled otherwise, so a shortcut is idle too). Called when the
-        selection changes and whenever the Metadata menu or its Look Up submenu is about to open."""
-        from gui.lyrics_flow import lyrics_target
+    def _visible_lookups(self, files) -> set[str]:
+        """The lookup keys (core/lookup_types.LOOKUP_TYPES, no menu prefix) that belong in the menus for these
+        selected files: each fits the Content Type of every file (owner's decisions 1A/2B/3B of 2026-11-18), the
+        adult ones only while Preferences > Adult Content shows them, and Get Lyrics / Get Cover only for exactly
+        one Music Video."""
+        from core.lookup_types import LOOKUP_TYPES, adult_shown, lookup_fits
 
-        show = lyrics_target(self) is not None
-        for key in ("lookup_get_lyrics", "lookup_get_cover"):
+        adult = adult_shown()
+        types = [f.metadata.content_type for f in files if not f.load_error]
+        one_music_video = (len(files) == 1 and not files[0].load_error
+                           and files[0].metadata.content_type is ContentType.MUSIC_VIDEO)
+        shown = set()
+        for key in LOOKUP_TYPES:
+            if key in ("get_lyrics", "get_cover"):
+                if one_music_video:
+                    shown.add(key)
+            elif lookup_fits(key, types, adult):
+                shown.add(key)
+        return shown
+
+    def _update_get_lyrics_visibility(self) -> None:
+        """Hides every Look Up entry (and Get Poster) that does not fit the selection (see _visible_lookups):
+        hidden AND disabled, so its shortcut is idle too. Called when the selection changes and whenever the
+        Metadata menu or its Look Up submenu is about to open."""
+        from core.lookup_types import LOOKUP_TYPES
+
+        shown = self._visible_lookups(self._selected_video_files())
+        for key in LOOKUP_TYPES:
+            menu_key = "get_poster" if key == "get_poster" else "lookup_" + key
             try:
-                action = self.actions_by_key[key]
+                action = self.actions_by_key[menu_key]
             except (AttributeError, KeyError):
                 continue
-            action.setVisible(show)
-            action.setEnabled(show)
+            action.setVisible(key in shown)
+            action.setEnabled(key in shown)
 
     def _on_clear_fields(self) -> None:
         """Edit > Clear Fields... (also the side panel's Clear All Fields button and the right-click entry): empties

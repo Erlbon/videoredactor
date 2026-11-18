@@ -47,8 +47,7 @@ class ApiKeysDialog(OwnedDialog):
 
         layout = QVBoxLayout(self)
         intro = QLabel(
-            "Enter your own API keys for the lookup services: TMDB, TheTVDB, OpenSubtitles, and (optionally) "
-            "ThePornDB and StashDB. They are free to obtain from their websites. "
+            "Enter your own API keys for the lookup services. They are free to obtain from their websites. "
             "Keys are kept in your system's credential store, not in a settings file, and are never exported "
             "with File > Export Settings."
         )
@@ -59,7 +58,12 @@ class ApiKeysDialog(OwnedDialog):
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
         self.fields: dict[str, SecretField] = {}
         self.check_buttons: dict[str, QPushButton] = {}
+        from core.lookup_types import ADULT_API_KEYS, adult_shown
+
+        adult = adult_shown()
         for key_id, (name, env_var, _, label) in api_keys.KEYS.items():
+            if key_id in ADULT_API_KEYS and not adult:
+                continue  # Preferences > Adult Content is off: these keys are not shown (a saved one is kept)
             field = SecretField(api_keys.APP, name, env_var=env_var)
             self.fields[key_id] = field
             if key_id in CHECKABLE:
@@ -90,6 +94,7 @@ class ApiKeysDialog(OwnedDialog):
         self.scene_note.setWordWrap(True)
         self.scene_note.setStyleSheet("color: gray;")
         layout.addWidget(self.scene_note)
+        self.scene_note.setVisible(adult)
 
         button_row = QHBoxLayout()
         button_row.addStretch()

@@ -39,6 +39,11 @@ class VideoMetadata:
     language: str = ""
     personal_rating: Optional[int] = None  # 1-5 personal rating; kept — content_rating (PG/TV-MA etc.) dropped for now, unresolved MP4 atom encoding
     comment: str = ""             # catch-all: source URLs, oddball notes, etc.
+    # Where this copy came from (core/collected_from.py): the kind from COLLECTED_FROM_CHOICES, and a free detail.
+    collected_from: str = ""
+    collected_from_detail: str = ""
+    # True when the two above were suggested on load from a web address in the Comment (not yet in the file).
+    collected_from_suggested: bool = field(default=False, compare=False)
 
     # --- Custom field driving GUI filtering ---
     content_type: ContentType = ContentType.UNSET
@@ -140,7 +145,7 @@ EDITABLE_FIELDS = [
     # order (core/video_file.py) -- content_type genuinely does sort
     # first now, which it did not before this fix.
     "content_type", "title", "sort_title", "description", "genre_tags",
-    "release_date", "language", "personal_rating", "comment",
+    "release_date", "language", "personal_rating", "comment", "collected_from", "collected_from_detail",
     "director", "cast", "writer", "studio", "collection",
     "show_title", "season_number", "episode_number", "network",
     "artist", "album", "composer", "lyrics",
@@ -159,7 +164,7 @@ LYRICS_MAX_BYTES = 64 * 1024
 # would no longer match the Genre picker's own entries), release_date
 # (a date format, not free text), and the three int fields below.
 TEXT_FIELDS = [
-    "title", "sort_title", "description", "comment",
+    "title", "sort_title", "description", "comment", "collected_from_detail",
     "director", "cast", "writer", "studio", "collection",
     "show_title", "network",
     "artist", "album", "composer",
@@ -198,7 +203,7 @@ UNIVERSAL_FIELDS = [
     # (Movie/TV/Music Video/etc decides which OTHER fields are even
     # relevant), so it shouldn't be buried at the end of the list.
     "content_type", "title", "sort_title", "description", "genre_tags",
-    "release_date", "language", "personal_rating", "comment",
+    "release_date", "language", "personal_rating", "comment", "collected_from", "collected_from_detail",
 ]
 
 

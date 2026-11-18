@@ -17,6 +17,7 @@ way in, it never moves them:
   history_enabled      [history] enabled (Tools > History, opt-in; core/history.py)
   notes_cache / notes_wikipedia   [notes] cache / wikipedia (Tools > Create Notes; core/notes_settings.py)
   scene_md5            [scene_lookup] md5 (ThePornDB / StashDB lookups; core/scene_lookup.py)
+  show_adult           [adult] show (Show adult content; core/lookup_types.py)
 
 There is no default-language setting in this app (a video's language is read
 from its own tracks), so the shared language section is not offered.
@@ -52,6 +53,7 @@ KEY_HISTORY_ENABLED = "history_enabled"
 KEY_NOTES_CACHE = "notes_cache"
 KEY_NOTES_WIKIPEDIA = "notes_wikipedia"
 KEY_SCENE_MD5 = "scene_md5"
+KEY_SHOW_ADULT = "show_adult"
 KEY_TRANSLATION_ENGINE = "translation_engine"
 KEY_TRANSLATION_URL = "translation_url"
 KEY_TRANSLATION_COMMAND = "translation_command"
@@ -71,6 +73,7 @@ INI_LOCATIONS: dict[str, tuple[str, str]] = {
     KEY_NOTES_CACHE: (notes_settings.SECTION, "cache"),
     KEY_NOTES_WIKIPEDIA: (notes_settings.SECTION, "wikipedia"),
     KEY_SCENE_MD5: (scene_lookup.SECTION, "md5"),
+    KEY_SHOW_ADULT: ("adult", "show"),  # core/lookup_types.ADULT_SECTION / ADULT_KEY
     KEY_TRANSLATION_ENGINE: ("translation", "engine"),
     KEY_TRANSLATION_URL: ("translation", "url"),
     KEY_TRANSLATION_COMMAND: ("tools", "argos-translate"),
@@ -130,8 +133,16 @@ SCENE_PRIVACY_TEXT = (
 
 
 def scene_lookup_section() -> PrefSection:
-    """Preferences > Look Up: the one option of the ThePornDB / StashDB lookups (and what leaves the machine)."""
-    return PrefSection("scene_lookup", "Look Up (ThePornDB, StashDB)", (
+    """Preferences > Adult Content: the "Show adult content" switch (core/lookup_types.py) and the one option of
+    the ThePornDB / StashDB lookups (and what leaves the machine)."""
+    from core.lookup_types import adult_default
+
+    return PrefSection("scene_lookup", "Adult Content (ThePornDB, StashDB)", (
+        PrefSpec(KEY_SHOW_ADULT, "Show adult content", "bool", adult_default(),
+                 help="Off hides the Porn content type, the ThePornDB and StashDB lookups, their API keys, the Redact "
+                      "step that asks them, and Tools > Porn Tags. Files already tagged Porn keep their tags and "
+                      "still show Porn as their type. Until you set it, it is on only if a ThePornDB or StashDB key "
+                      "is saved."),
         PrefSpec(KEY_SCENE_MD5, "Also look files up by their MD5 (StashDB; reads the whole file)", "bool", False,
                  help="Off by default: the MD5 needs every byte of the file (minutes for a large video, with a progress "
                       "window and Cancel). The OSHASH, which reads only 128 KB, is always used."),

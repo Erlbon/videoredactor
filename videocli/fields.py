@@ -26,6 +26,7 @@ _ALIASES = {
     "show": "show_title", "series": "show_title", "season": "season_number", "episode": "episode_number",
     # DEPRECATED: the track title field is retired (the title is the song). Old scripts that name it now reach `title`.
     "track_title": "title", "tracktitle": "title",
+    "source": "collected_from", "collected": "collected_from", "source_detail": "collected_from_detail",
     "type": "content_type", "rating": "personal_rating", "lang": "language", "sorttitle": "sort_title",
 }
 
@@ -57,6 +58,13 @@ def check_value(field: str, value: str) -> str:
         match = next((c for c in CONTENT_TYPES if c.lower() == value.lower()), None)
         if match is None:
             raise CliError(f"content_type must be one of: {', '.join(CONTENT_TYPES)}")
+        return match
+    if field == "collected_from":
+        from core.collected_from import COLLECTED_FROM_CHOICES
+
+        match = next((c for c in COLLECTED_FROM_CHOICES if c.lower() == value.lower()), None)
+        if match is None:
+            raise CliError(f"collected_from must be one of: {', '.join(COLLECTED_FROM_CHOICES)}")
         return match
     if field in NUMERIC_FIELDS:
         if not is_ascii_number(value):

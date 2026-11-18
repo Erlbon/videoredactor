@@ -83,6 +83,9 @@ FIELD_TO_MKV_TAG = {
     "album": "ALBUM",
     "composer": "COMPOSER",
     "lyrics": "LYRICS",
+    # Where this copy came from (core/collected_from.py).
+    "collected_from": "COLLECTED_FROM",
+    "collected_from_detail": "COLLECTED_FROM_DETAIL",
     # Check Files scan stamp (core.scan_stamp text). Listed here so
     # plan_global_tags treats it as this app's own tag (replaced, and
     # cleared when empty) while other tools' tags are carried over.
