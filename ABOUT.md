@@ -257,14 +257,16 @@ command line records nothing either. The same holds for `redact`.
 | `-n`, `--dry-run` | Show the old and new value of each field, save nothing. |
 
 The fields are: content_type, title, sort_title, description, genre_tags, release_date, language,
-personal_rating, comment, director, cast, writer, studio, collection, show_title, season_number, episode_number,
+personal_rating, comment, collected_from, collected_from_detail, director, cast, writer, studio, collection, show_title, season_number, episode_number,
 network, artist, album, composer, lyrics. Field names are case-insensitive and the usual spellings work:
-`genre`, `year`, `season`, `episode`, `show`, `type`, `rating`.
+`genre`, `year`, `season`, `episode`, `show`, `type`, `rating`, `source` (collected_from).
 
 Checks: `content_type` is one of Movie, TV, Music Video, Clip, Misc (any capitalisation); `season_number`,
 `episode_number` and `personal_rating` are whole numbers written with the digits 0-9 (the rating 1 to 5, the
 others up to 99999; `007` is stored as `7`); `release_date` is a real date, `YYYY`, `YYYY-MM` or `YYYY-MM-DD`
-(`2026-02-30` is refused); `language` is a language code (`en`, `eng`, `nb`, `en-GB`). A value with a control
+(`2026-02-30` is refused); `language` is a language code (`en`, `eng`, `nb`, `en-GB`); `collected_from` is one
+of YouTube, Vimeo, Other website, TV broadcast, DVD, Blu-ray, LaserDisc, VHS, CD-ROM / Enhanced CD, Unknown (any
+capitalisation). A value with a control
 character in it (or, outside the description-type fields, a line break or tab) is refused, since no tag format
 can store it. `lyrics` (a music video's song text, up to 64 KB, many lines) takes its text from a file:
 `-s lyrics=@song.txt` (UTF-8; `@-` reads standard input); a value that does not start with `@` is used as it is.
@@ -363,7 +365,7 @@ is written.
 
 | Option | Meaning |
 | --- | --- |
-| `-n`, `--dry-run` | Save nothing at all. Only the steps that never write to disk run (`filename_tags`, `path_tags`, `lookup`, `scene_lookup`, `get_poster`, `track_title_to_title`; lookups still ask the web) and their changes are reported, not saved. The steps that write (`check_repair`, `subtitles`, `translate_subtitles`, `remux_mkv_to_mp4`, `convert_library`, `rename`, `move_into_folders`) are left out and named in the run notes. The JSON summary has `dry_run: true`. |
+| `-n`, `--dry-run` | Save nothing at all. Only the steps that never write to disk run (`filename_tags`, `path_tags`, `lookup`, `scene_lookup`, `get_poster`, `track_title_to_title`, `collected_from`; lookups still ask the web) and their changes are reported, not saved. The steps that write (`check_repair`, `subtitles`, `translate_subtitles`, `remux_mkv_to_mp4`, `convert_library`, `rename`, `move_into_folders`) are left out and named in the run notes. The JSON summary has `dry_run: true`. |
 | `--convert-dry-run` | A real run, except the convert step: it only lists what it would convert ("DRY RUN, nothing changed: would convert ...") and changes nothing, while the other steps still run and save. Without it the conversion is real. Not the same as `-n`, which saves nothing (and leaves the convert step out). |
 | `--recipe FILE` | Use this recipe (a JSON file in the format the app stores) instead of the one saved in the app. |
 | `--enable STEP` | Turn a step on for this run (repeatable). |
@@ -377,7 +379,9 @@ StashDB about the file's own fingerprint and only ever produces a "needs review"
 threshold), `get_poster` (off by default: a file that carries a source id and has no poster gets the true poster
 of that record from TMDB, TheTVDB, IMDb (through TMDB), ThePornDB or StashDB, without searching; applied as an
 id match, so at the default threshold it needs no review), `track_title_to_title` (off by default: a Music Video with an old track title and an empty title gets
-it as the title, only ever as a "needs review" suggestion), `subtitles`, `translate_subtitles`, `remux_mkv_to_mp4`, `convert_library`,
+it as the title, only ever as a "needs review" suggestion), `collected_from` (off by default: a file with an empty
+Collected from and a web address in its Comment or Description gets YouTube, Vimeo or Other website and that
+address, only ever as a "needs review" suggestion), `subtitles`, `translate_subtitles`, `remux_mkv_to_mp4`, `convert_library`,
 `rename`, `move_into_folders`. Without `--recipe` the recipe saved in the app is used (the defaults if none was saved). A
 repair is only automatic when a lossless remux fully fixes the file; a damaged file is reported and left alone.
 Exit code 1 if any file failed; files that need review are not failures. Rename and Move run last, after the

@@ -154,7 +154,12 @@ def test_dialog_fallback_write_failure_is_shown_not_raised(app, monkeypatch, tmp
 def test_dialog_labels_wrap_and_every_key_field_lies_inside_the_dialog(app, fake_keyring):
     """2026-10-17: the long LibreTranslate label stretched the form and the dialog came out lopsided."""
     from PyQt6.QtWidgets import QLabel, QWidget
-    dlg = ApiKeysDialog()
+    import core.lookup_types
+    core.lookup_types.adult_shown, real = (lambda: True), core.lookup_types.adult_shown  # every row shown
+    try:
+        dlg = ApiKeysDialog()
+    finally:
+        core.lookup_types.adult_shown = real
     dlg.show()
     QApplication.processEvents()
     labels = [w for w in dlg.findChildren(QLabel) if w.text().endswith(":") and w.wordWrap()]

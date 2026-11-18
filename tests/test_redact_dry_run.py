@@ -21,7 +21,8 @@ from videocli.main import main
 # The steps that only read (files, ffprobe, the web) and change the in-memory working copy. Every other step writes
 # beside the video (check_repair's repair, subtitles, translate_subtitles, remux_mkv_to_mp4) or runs after the save
 # (convert_library, rename, move_into_folders). Changing this set needs the audit in core/redact_steps.py redone.
-DRY_RUN_SAFE = {"filename_tags", "path_tags", "lookup", "scene_lookup", "get_poster", "track_title_to_title"}
+DRY_RUN_SAFE = {"filename_tags", "path_tags", "lookup", "scene_lookup", "get_poster", "track_title_to_title",
+                "collected_from"}
 
 
 def test_the_dry_run_safe_steps_are_pinned():

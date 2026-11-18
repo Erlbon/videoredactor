@@ -304,6 +304,8 @@ SECTIONS: dict[str, tuple[str, bool, list[Key]]] = {
     "scene_lookup": ("ThePornDB / StashDB lookups: the StashDB address and the MD5 option", True, [
         _key("stashdb_endpoint", "scene_lookup", "stashdb_endpoint", _stash_endpoint_codec()),
         _key("md5", "scene_lookup", "md5", _bool_codec(False)),
+        # Show adult content (core/lookup_types.py). A string, so "never set" stays never set on import.
+        _key("show_adult", "adult", "show", _str_codec()),
     ]),
     "imdb_options": ("IMDb database build options", True, [
         _key("options", "imdb", "options", _imdb_options_codec()),

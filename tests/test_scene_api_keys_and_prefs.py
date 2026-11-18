@@ -14,6 +14,29 @@ from gui.api_keys_dialog import ApiKeysDialog  # noqa: E402
 _app = QApplication.instance() or QApplication([])
 
 
+@pytest.fixture(autouse=True)
+def adult_shown(monkeypatch):
+    # Preferences > Adult Content on: these tests are about the ThePornDB / StashDB rows.
+    monkeypatch.setattr("core.lookup_types.adult_shown", lambda: True)
+
+
+def test_adult_content_off_hides_both_rows_and_the_note(monkeypatch):
+    monkeypatch.setattr("core.lookup_types.adult_shown", lambda: False)
+    dlg = ApiKeysDialog()
+    assert "theporndb" not in dlg.fields and "stashdb" not in dlg.fields
+    assert not hasattr(dlg, "stash_endpoint") and dlg.scene_note.isHidden()
+    assert "tmdb" in dlg.fields
+
+
+def test_preferences_has_the_show_adult_content_switch():
+    from core import preferences_backend as pb
+
+    section = next(s for s in pb.build_sections() if s.key == "scene_lookup")
+    assert section.title == "Adult Content (ThePornDB, StashDB)"
+    spec = next(s for s in section.specs if s.key == pb.KEY_SHOW_ADULT)
+    assert spec.label == "Show adult content"
+
+
 @pytest.fixture
 def boxes(monkeypatch):
     shown = []

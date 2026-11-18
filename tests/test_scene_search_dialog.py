@@ -454,6 +454,8 @@ def test_nothing_selected_says_so(window, no_message_boxes):
 
 
 def test_menu_entries_open_the_flow_for_each_service(window, monkeypatch):
+    monkeypatch.setattr("core.lookup_types.adult_shown", lambda: True)  # Preferences > Adult Content on
+    window._update_get_lyrics_visibility()
     calls = []
     monkeypatch.setattr(flow, "run_scene_lookup", lambda win, key: calls.append(key))
     menus = {a.text().replace("&", ""): a.menu() for a in window.menuBar().actions() if a.menu()}
