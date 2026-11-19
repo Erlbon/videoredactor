@@ -59,9 +59,13 @@ def test_unconvertible_video_is_the_only_lossy_case():
     assert p.video == cp.V_X265 and p.audio_reencode
     args = cp.build_ffmpeg_args(m, p, "in.rmvb", "out.mp4")
     i = args.index("-c:v")
-    assert args[i:i + 6] == ["-c:v", "libx265", "-crf", "23", "-tag:v", "hvc1"]
+    assert args[i:i + 8] == ["-c:v", "libx265", "-preset", "medium", "-crf", "23", "-tag:v", "hvc1"]
     assert "160k" in args
-    assert cp.plan_conversion(info(".avi", vcodec="weirdcodec")).skip_reason
+    # Decision 16A: an unknown codec in a legacy container is re-encoded like rv40; in an MP4/MKV it is left alone.
+    weird = cp.plan_conversion(info(".avi", vcodec="weirdcodec"))
+    assert weird.video == cp.V_X265 and "not one the app knows" in weird.reasons[0]
+    assert cp.plan_conversion(info(".mkv", vcodec="weirdcodec")).skip_reason
+    assert cp.plan_conversion(info(".avi", vcodec="")).skip_reason  # no codec name at all: still left alone
 
 
 def test_disc_images_default_untouched_with_options():
@@ -91,7 +95,12 @@ def test_bitrate_rules_720p_and_below():
 def test_movies_and_small_files_are_exempt():
     big = info(size=3 * GB)
     assert cp.plan_conversion(big, is_series=False).video == cp.V_COPY
-    assert cp.plan_conversion(big, cp.ConversionSettings(apply_to_movies=True), is_series=False).scales
+    # Decision 17A: a movie's "highest resolution kept" is no limit by default, so it is re-encoded at its own size;
+    # with a ceiling it is scaled down to it.
+    movie = cp.plan_conversion(big, cp.ConversionSettings(apply_to_movies=True), is_series=False)
+    assert movie.video == cp.V_NVENC and not movie.scales and "own size" in movie.reasons[-1]
+    capped = cp.plan_conversion(big, cp.ConversionSettings(apply_to_movies=True, max_height_movie=720), is_series=False)
+    assert capped.scales and capped.target_height == 720
     assert cp.plan_conversion(info(size=399 * MB, dur=300)).video == cp.V_COPY  # under 400 MB: ignored
 
 
@@ -170,8 +179,8 @@ def test_the_unplayable_codec_fallback_is_unchanged():
     p = cp.plan_conversion(m)
     for encoder in ("nvenc", "x265"):
         a = cp.build_ffmpeg_args(m, p, "in.rmvb", "out.mp4", NVENC_GPU, encoder=encoder)
-        assert a[a.index("-c:v") + 1: a.index("-c:v") + 5] == ["libx265", "-crf", "23", "-tag:v"]
-        assert "-hwaccel" not in a and "-preset" not in a
+        assert a[a.index("-c:v") + 1: a.index("-c:v") + 7] == ["libx265", "-preset", "medium", "-crf", "23", "-tag:v"]
+        assert "-hwaccel" not in a
 
 
 def test_ffmpeg_args_map_streams_explicitly_and_drop_bitmap_subs_in_mp4():

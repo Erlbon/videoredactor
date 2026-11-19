@@ -10,6 +10,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
+from PyQt6.QtCore import QMetaObject, Qt  # noqa: E402
 from PyQt6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 from redactor_common.core.pipeline import FileStatus  # noqa: E402
 
@@ -177,10 +178,15 @@ def test_a6_media_action_defaults_to_a_dry_run_and_reports_it(window, monkeypatc
         return QMessageBox.StandardButton.Yes
 
     monkeypatch.setattr(QMessageBox, "exec", fake_exec)
+    tables = []
+    monkeypatch.setattr(window, "_show_dry_run_table", lambda rows, summary, report: tables.append((rows, summary, report)) or [])
     window._convert_paths([src])
     assert boxes[0][3] is not None and boxes[0][3].isChecked()  # "Dry run first" shown and on by default
     assert written == [] and os.listdir(lib) == ["Show.S01E01.avi"]
-    assert "DRY RUN" in boxes[1][1] and "DRY RUN" in boxes[1][2] and "would convert Show.S01E01.avi -> Show.S01E01.mp4" in boxes[1][2]
+    # Decision 12B: the dry run ends in the table, one row per file, plus the text lines for "Copy the report".
+    rows, summary, report = tables[0]
+    assert "DRY RUN" in summary and "would convert Show.S01E01.avi -> Show.S01E01.mp4" in report
+    assert len(rows) == 1 and rows[0].changes and rows[0].route == "Remux" and rows[0].action.endswith(".mp4, copy")
 
 
 def test_a6_media_action_real_run_converts_and_adds_the_row(window, monkeypatch, tmp_path):
@@ -233,12 +239,18 @@ def test_a8_cancel_in_the_progress_dialog_sets_the_event_and_stops(window, monke
         calls.append(path)
         dialog = window.findChild(QProgressDialog)
         if dialog is not None:
-            dialog.canceled.emit()  # Cancel clicked while the first file is "encoding" (queued to the GUI thread)
+            # Cancel clicked while the first file is "encoding": a click happens on the GUI thread, so it is queued
+            # there (the dialog's cancel slot touches widgets).
+            QMetaObject.invokeMethod(dialog, "canceled", Qt.ConnectionType.QueuedConnection)
         assert kw["cancel_event"].wait(5)  # what _run_ffmpeg's poll loop sees within half a second
         return cr.ConversionOutcome(False, message="Cancelled")
 
     monkeypatch.setattr(mw.conversion_run, "process_file", fake_process)
     monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(window, "_show_dry_run_table", lambda rows, summary, report: [])
+    # One file at a time (Preferences > Conversion), so the second one is still waiting when Cancel is clicked.
+    monkeypatch.setattr(mw.conversion_plan, "get_conversion_settings",
+                        lambda *a, **k: cp.ConversionSettings(remux_jobs=1, encode_jobs=1))
     window._convert_paths([a, b])
     assert calls == [a]  # the second file never started
 

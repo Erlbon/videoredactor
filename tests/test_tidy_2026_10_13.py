@@ -70,7 +70,7 @@ def test_convert_step_passes_the_new_series_rule(monkeypatch, tmp_path):
     seen = {}
 
     def fake_process(run, path, conv, **kw):
-        seen["is_series"] = kw["is_series"]
+        seen["kind"] = kw["kind"]  # the kind (2026-11-18, decision 17A) replaced the is_series flag
         return cr.ConversionOutcome(False, message="nothing to do")
 
     monkeypatch.setattr(rs.conversion_run, "process_file", fake_process)
@@ -79,7 +79,7 @@ def test_convert_step_passes_the_new_series_rule(monkeypatch, tmp_path):
     vf = VideoFile(path=path)  # content type unset, name is not an episode
     env = rs.RedactEnv(setting=lambda s, k, d="": d, background=lambda fn, *a, **k: fn(*a, **k))
     rs.ConvertStep().execute(rs.VideoCtx(vf, env))
-    assert seen["is_series"] is False  # it used to be True: everything not tagged Movie was a "series"
+    assert seen["kind"] == cp.KIND_OTHER  # not a series: everything not tagged Movie used to count as a "series"
 
 
 # --- T4: the Library safety tolerance reaches the rules engine ----------------------------------------------

@@ -9,9 +9,12 @@ Rules, in short (the numbers are settings, ConversionSettings):
   containers  MP4 and MKV are the only outputs. Legacy containers are converted; disc images are not touched
               unless the disc-image policy says otherwise.
   codecs      sane codecs are copied, never re-encoded. Only video no container can hold (RealVideo, Flash,
-              odd WMV) is re-encoded: libx265 CRF 23, AAC 160k.
-  bitrate     series episodes only (movies exempt unless apply_to_movies): too tall or too fat -> HEVC
-              scaled to 720p; 720p or less with too high a bitrate -> re-encoded without scaling. The encoder
+              odd WMV), or a video codec the app does not know in a legacy container, is re-encoded: libx265 CRF 23
+              at the x265 preset setting, AAC 160k. Subtitle streams without a codec name are never carried.
+  bitrate     series episodes only (other kinds exempt unless apply_to_movies): too tall or too fat -> HEVC
+              scaled to the kind's "highest resolution kept" (series: scale_height, 720p; movies and other kinds:
+              no limit by default, so they keep their size); 720p or less with too high a bitrate -> re-encoded
+              without scaling. Music videos have their own rule (music_video_rule). The encoder
               (setting `encoder`): hevc_nvenc when a working NVIDIA encoder is found ("auto", the default),
               else libx265 CRF 27 in software; GPU decode/scale only with `hw_decode` on.
   size        files under 400 MB are ignored; a bitrate-driven result must be under 85 percent of the source.
@@ -182,6 +185,47 @@ class ConversionSettings:
     # Language code (eng, nor, en ...) written onto audio tracks that have none (missing, und, unk, mis) during a
     # conversion or remux; "" = off, tracks are left as they are. A tag that exists is never overwritten.
     default_audio_language: str = ""
+    # The libx265 preset of both x265 uses (the legacy re-encode and the software shrink); decision 15A, 2026-11-18.
+    x265_preset: str = "medium"
+    # How many files run at once (decision 11B): remuxes are disk work, re-encodes GPU/CPU work.
+    remux_jobs: int = 4
+    encode_jobs: int = 2
+    # "Highest resolution kept" per content type (decision 17A): the height a bitrate re-encode scales DOWN to; 0 = no
+    # limit (the re-encode keeps the size). A file is only scaled when the bitrate rule fires; series use
+    # scale_height. Music videos have their own rule (below).
+    max_height_movie: int = 0
+    max_height_other: int = 0  # Clip, Misc, Porn and files with no type that are not episodes
+    # Music videos (decided 2026-11-18): 4K is kept; a 2160p-class music video is re-encoded at its own size only above
+    # these video bit rates. Below 4K they are left alone ("no forced 720p").
+    mv_4k_mbps_h264: float = 25.0  # H.264 and older codecs
+    mv_4k_mbps_hevc: float = 35.0  # HEVC, VP9, AV1
+
+
+X265_PRESETS = ("ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow")
+JOBS_RANGE = (1, 16)
+HEIGHT_CHOICES = (0, 480, 576, 720, 1080, 1440, 2160)  # 0 = no limit
+MV_4K_HEIGHT = 1440  # a music video taller than this is "4K class"
+MV_SCALE_HEIGHT = 1080  # the per-run "Scale music videos to 1080p HEVC" target
+MV_EFFICIENT_CODECS = frozenset({"hevc", "vp9", "av1"})
+
+# What kind of file the bitrate rules see (core/redact_steps.conversion_kind decides it from the Content Type and name).
+KIND_SERIES = "series"
+KIND_MOVIE = "movie"
+KIND_MUSIC_VIDEO = "music_video"
+KIND_OTHER = "other"
+KINDS = (KIND_SERIES, KIND_MOVIE, KIND_MUSIC_VIDEO, KIND_OTHER)
+
+
+@dataclass(frozen=True)
+class RunOptions:
+    """The choices made in the Convert dialog for one run (not settings): lenient mode for damaged captures (decision
+    9A) and "Scale music videos to 1080p HEVC" (decided 2026-11-18, per conversion)."""
+
+    lenient: bool = False
+    music_video_1080: bool = False
+
+
+LENIENT_MIN_FRACTION = 0.60  # a lenient result at least this share of the source's length is kept as PARTIAL
 
 
 ENCODER_AUTO = "auto"
@@ -233,6 +277,7 @@ class Plan:
     crf: int = 0  # V_X264 only: the quality (Preferences > Transcode)
     audio_bitrate: str = ""  # V_X264 only: the AAC bit rate, e.g. "128k"
     threads: int = 0  # V_X264 only: 0 = let ffmpeg decide
+    target_height: int = 0  # V_NVENC_SCALE: the height scaled down to (0 = settings.scale_height)
 
     @property
     def does_something(self) -> bool:
@@ -241,6 +286,14 @@ class Plan:
     @property
     def scales(self) -> bool:
         return self.video == V_NVENC_SCALE
+
+    @property
+    def reencodes(self) -> bool:
+        """A real re-encode (GPU/CPU work), not a stream copy: what the 're-encodes at once' limit counts."""
+        return self.video != V_COPY
+
+    def scale_to(self, settings: "ConversionSettings") -> int:
+        return self.target_height or settings.scale_height
 
 
 def audio_bitrate(stream: StreamInfo) -> int:
@@ -271,10 +324,11 @@ class BitrateRule:
     (core/bitrate_bands.py), so the table and Convert to MP4/MKV (Rules) can never disagree."""
 
     over: bool = False
-    scale: bool = False  # the re-encode scales down to scale_height (the video is tall), else it keeps the size
+    scale: bool = False  # the re-encode scales down to target_height, else it keeps the size
     limit_mbps: float | None = None  # the Mb/s limit that applies (None when the size trigger is what fired)
     reason: str = ""  # the text the plan records
     exempt: str = ""
+    target_height: int = 0  # with `scale`: the height scaled down to
 
 
 def rules_cover(ext: str, codec: str) -> bool:
@@ -286,15 +340,62 @@ def rules_cover(ext: str, codec: str) -> bool:
     return codec in VIDEO_COPY_ANY or codec in VIDEO_MKV_ONLY
 
 
+def kind_ceiling(kind: str, s: ConversionSettings) -> int:
+    """The "highest resolution kept" of a kind (0 = no limit): the height a bitrate re-encode scales down to."""
+    if kind == KIND_SERIES:
+        return s.scale_height
+    if kind == KIND_MOVIE:
+        return s.max_height_movie
+    return s.max_height_other
+
+
+def music_video_rule(
+    height: int, codec: str, size_bytes: int, mbps: float | None, s: ConversionSettings, *, scale_1080: bool = False,
+) -> BitrateRule:
+    """Music videos (decided 2026-11-18): 4K is kept; a music video above MV_4K_HEIGHT is re-encoded at its own size
+    only above mv_4k_mbps_h264 (H.264 and older) / mv_4k_mbps_hevc (HEVC, VP9, AV1). Below 4K they are left alone.
+    `scale_1080` is the per-run Convert choice "Scale music videos to 1080p HEVC": every music video taller than
+    1080p is then scaled to 1080p, whatever its size or bit rate."""
+    if scale_1080 and height > MV_SCALE_HEIGHT:
+        return BitrateRule(
+            over=True, scale=True, target_height=MV_SCALE_HEIGHT,
+            reason=f"music video {height}p: scale to {MV_SCALE_HEIGHT}p HEVC (chosen for this run)",
+        )
+    if height <= MV_4K_HEIGHT:
+        return BitrateRule(exempt="music videos below 4K are kept as they are (their own rule)")
+    if size_bytes < s.min_size_mb * 1048576:
+        return BitrateRule(exempt=f"files under {s.min_size_mb} MB are ignored by the conversion rules")
+    if mbps is None:
+        return BitrateRule(exempt="the bitrate (size and duration) is unknown")
+    limit = s.mv_4k_mbps_hevc if codec in MV_EFFICIENT_CODECS else s.mv_4k_mbps_h264
+    if mbps > limit:
+        return BitrateRule(
+            over=True, limit_mbps=limit,
+            reason=f"music video {height}p at {mbps:.1f} Mb/s (limit {limit:g}): re-encode, 4K kept",
+        )
+    return BitrateRule(limit_mbps=limit)
+
+
 def bitrate_rule(
     height: int, width: int, size_bytes: int, mbps: float | None, s: ConversionSettings, *, is_series: bool = True,
+    kind: str | None = None, codec: str = "", music_video_1080: bool = False,
 ) -> BitrateRule:
-    """The bitrate/size decision of the rules for a video that is copied otherwise: movies are exempt unless
+    """The bitrate/size decision of the rules for a video that is copied otherwise: non-series files are exempt unless
     apply_to_movies, files under min_size_mb are ignored, a tall video (above scale_height or wider than
-    scale_if_wider_than) is scaled when it is larger than scale_size_trigger_gb or above scale_video_mbps, a smaller one
-    is re-encoded above reencode_video_mbps (reencode_video_mbps_small under small_height)."""
-    if not is_series and not s.apply_to_movies:
-        return BitrateRule(exempt="movies are exempt from the conversion rules unless 'apply to movies' is on")
+    scale_if_wider_than) is re-encoded when it is larger than scale_size_trigger_gb or above scale_video_mbps, a smaller
+    one above reencode_video_mbps (reencode_video_mbps_small under small_height).
+
+    `kind` (KIND_*) wins over `is_series` when given. A tall re-encode scales down to the kind's "highest resolution
+    kept" (kind_ceiling, decision 17A) when the video is above it, else it keeps the size. Music videos follow
+    music_video_rule()."""
+    if kind is None:
+        kind = KIND_SERIES if is_series else KIND_MOVIE
+    if kind == KIND_MUSIC_VIDEO:
+        return music_video_rule(height, codec, size_bytes, mbps, s, scale_1080=music_video_1080)
+    if kind != KIND_SERIES and not s.apply_to_movies:
+        if kind == KIND_MOVIE:
+            return BitrateRule(exempt="movies are exempt from the conversion rules unless 'apply to movies' is on")
+        return BitrateRule(exempt="only series episodes follow the conversion rules unless 'apply to movies' is on")
     if size_bytes < s.min_size_mb * 1048576:
         return BitrateRule(exempt=f"files under {s.min_size_mb} MB are ignored by the conversion rules")
     if mbps is None:
@@ -302,9 +403,18 @@ def bitrate_rule(
     tall = height > s.scale_height or width > s.scale_if_wider_than
     if tall:
         if size_bytes > s.scale_size_trigger_gb * 1073741824 or mbps > s.scale_video_mbps:
+            ceiling = kind_ceiling(kind, s)
+            head = f"{height}p at {mbps:.1f} Mb/s, {size_bytes / 1073741824:.1f} GB"
+            # A series episode is scaled whenever it is tall, as before (a wide one is also tall); another kind only
+            # when it is above its own ceiling.
+            if ceiling and (height > ceiling or kind == KIND_SERIES):
+                return BitrateRule(
+                    over=True, scale=True, limit_mbps=s.scale_video_mbps, target_height=ceiling,
+                    reason=f"{head}: scale to {ceiling}p",
+                )
+            keep = "no resolution limit" if not ceiling else f"already at most {ceiling}p"
             return BitrateRule(
-                over=True, scale=True, limit_mbps=s.scale_video_mbps,
-                reason=f"{height}p at {mbps:.1f} Mb/s, {size_bytes / 1073741824:.1f} GB: scale to {s.scale_height}p",
+                over=True, limit_mbps=s.scale_video_mbps, reason=f"{head}: re-encode at its own size ({keep})",
             )
         return BitrateRule(limit_mbps=s.scale_video_mbps)
     limit = s.reencode_video_mbps_small if height < s.small_height else s.reencode_video_mbps
@@ -326,11 +436,20 @@ def _mkv_only_audio(codec: str) -> bool:
     return codec in AUDIO_MKV_ONLY or is_pcm(codec)
 
 
+def mappable_subtitles(info: MediaInfo) -> list[StreamInfo]:
+    """The subtitle streams a conversion can carry: those ffprobe names a codec for. Unnamed ones (teletext or
+    closed-caption placeholders) make ffmpeg abort, so they are left out (his conversion prompt's rule)."""
+    return [t for t in info.of("subtitle") if t.codec]
+
+
 def plan_conversion(
     info: MediaInfo, settings: ConversionSettings | None = None, *, is_series: bool = True, extra_subtitles: int = 0,
+    kind: str | None = None, options: RunOptions | None = None,
 ) -> Plan:
     """The decision for one file. `extra_subtitles` = external subtitle tracks about to be added (an MP4 then
-    becomes an MKV)."""
+    becomes an MKV). `kind` (KIND_*) wins over `is_series` when given; `options` are the Convert dialog's choices for
+    this run."""
+    options = options or RunOptions()
     s = settings or ConversionSettings()
     plan = Plan()
     ext = info.ext
@@ -359,7 +478,7 @@ def plan_conversion(
         plan.skip_reason = "no video stream"
         return plan
     audio = info.of("audio")
-    subs = info.of("subtitle")
+    subs = mappable_subtitles(info)
     plan.heavy_audio = is_heavy_audio(info, s)
 
     # --- codecs: what can be copied, which container they need ---
@@ -367,8 +486,14 @@ def plan_conversion(
         plan.video = V_X265
         plan.reasons.append(f"video {video.codec} can't be copied into MP4/MKV: re-encode to HEVC (CRF {s.fallback_crf})")
     elif video.codec not in VIDEO_COPY_ANY and video.codec not in VIDEO_MKV_ONLY:
-        plan.skip_reason = f"unknown video codec {video.codec or '?'}: left alone"
-        return plan
+        if video.codec and ext in LEGACY_EXTENSIONS:
+            # Decision 16A: old video the app has no list entry for, in a legacy container, is re-encoded like the
+            # codecs no container can hold. In an MP4/MKV it is left alone (it plays somewhere already).
+            plan.video = V_X265
+            plan.reasons.append(f"video {video.codec} is not one the app knows: re-encode to HEVC (CRF {s.fallback_crf})")
+        else:
+            plan.skip_reason = f"unknown video codec {video.codec or '?'}: left alone"
+            return plan
     why_mkv: list[str] = []  # why the container must be MKV; only a reason to ACT when the file isn't one already
     needs_mkv = video.codec in VIDEO_MKV_ONLY
     unknown_audio = [a for a in audio if a.codec not in AUDIO_MP4_OK and not _mkv_only_audio(a.codec)]
@@ -410,9 +535,13 @@ def plan_conversion(
     # --- bitrate / size rules ---
     plan.video_mbps = video_mbps(info)
     if plan.video == V_COPY:
-        rule = bitrate_rule(video.height, video.width, info.size_bytes, plan.video_mbps, s, is_series=is_series)
+        rule = bitrate_rule(
+            video.height, video.width, info.size_bytes, plan.video_mbps, s, is_series=is_series, kind=kind,
+            codec=video.codec, music_video_1080=options.music_video_1080,
+        )
         if rule.over:
             plan.video, plan.bitrate_driven = (V_NVENC_SCALE if rule.scale else V_NVENC), True
+            plan.target_height = rule.target_height if rule.scale else 0
             plan.reasons.append(rule.reason)
     return plan
 
@@ -447,9 +576,13 @@ class AddedSub:
     hearing_impaired: bool = False
 
 
+SHRINK_FALLBACK_AUDIO = "192k"  # the AAC rate of a shrink's audio fallback (his resize720.py)
+
+
 def build_ffmpeg_args(
     info: MediaInfo, plan: Plan, src: str, out: str, settings: ConversionSettings | None = None, *, cuda: bool = True,
-    added: list[AddedSub] | None = None, encoder: str | None = None,
+    added: list[AddedSub] | None = None, encoder: str | None = None, audio_fallback: bool = False,
+    lenient: bool = False,
 ) -> list[str]:
     """The ffmpeg argument LIST (never a shell string). Streams are mapped explicitly: cover art is not video,
     data/timecode tracks are dropped (-dn), audio and kept subtitles are copied. For an MP4 target text
@@ -460,16 +593,26 @@ def build_ffmpeg_args(
     "auto" with core/encoder_detect.py); None takes settings.encoder, with an unresolved "auto" meaning x265
     (the encoder that needs no particular hardware). GPU decoding and scaling (-hwaccel cuda, scale_cuda) only
     when settings.hw_decode is on, the encoder is nvenc and `cuda` is True; `cuda` False = the software scale
-    retry."""
+    retry.
+
+    `audio_fallback`: the audio is re-encoded to AAC SHRINK_FALLBACK_AUDIO instead of copied (the fallback chain of a
+    shrink whose audio would not copy, decision 10A). `lenient`: ffmpeg ignores decode errors and drops broken packets
+    (lenient mode for damaged captures, decision 9A)."""
     s = settings or ConversionSettings()
     if encoder is None:
         encoder = s.encoder if s.encoder in (ENCODER_NVENC, ENCODER_X265) else ENCODER_X265
     args = ["ffmpeg", "-v", "error", "-y"]
+    if lenient:
+        args += ["-max_error_rate", "1.0"]
     scaling = plan.scales
+    height = plan.scale_to(s)
     gpu = scaling and cuda and s.hw_decode and encoder == ENCODER_NVENC
     if gpu:
         args += ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
-    args += ["-fflags", "+genpts", "-i", src]
+    if lenient:
+        args += ["-err_detect", "ignore_err", "-fflags", "+genpts+discardcorrupt", "-i", src]
+    else:
+        args += ["-fflags", "+genpts", "-i", src]
     added = added or []
     for extra in added:
         args += ["-i", extra.path]
@@ -481,7 +624,7 @@ def build_ffmpeg_args(
         args += ["-map", f"0:{v.index}"]
     for a in info.of("audio"):
         args += ["-map", f"0:{a.index}"]
-    kept_subs = [t for t in info.of("subtitle") if not mp4 or _mp4_subtitle_ok(t.codec)]
+    kept_subs = [t for t in mappable_subtitles(info) if not mp4 or _mp4_subtitle_ok(t.codec)]
     for t in kept_subs:
         args += ["-map", f"0:{t.index}"]
     for n, _extra in enumerate(added, start=1):
@@ -495,20 +638,22 @@ def build_ffmpeg_args(
         if plan.threads:
             args += ["-threads", str(plan.threads)]
     elif plan.video == V_X265:
-        args += ["-c:v", "libx265", "-crf", str(s.fallback_crf), "-tag:v", "hvc1"]
+        args += ["-c:v", "libx265", "-preset", s.x265_preset, "-crf", str(s.fallback_crf), "-tag:v", "hvc1"]
     elif encoder == ENCODER_NVENC:
         args += ["-c:v", "hevc_nvenc", "-preset", "p6", "-tune", "hq", "-rc", "vbr", "-cq", str(s.nvenc_cq),
                  "-b:v", "0", "-spatial-aq", "1", "-rc-lookahead", "32", "-tag:v", "hvc1"]
         if scaling:
-            args += ["-vf", f"scale_cuda=-2:{s.scale_height}" if gpu else f"scale=-2:{s.scale_height}"]
+            args += ["-vf", f"scale_cuda=-2:{height}" if gpu else f"scale=-2:{height}"]
     else:  # libx265 in software: any computer
-        args += ["-c:v", "libx265", "-preset", "medium", "-crf", str(s.x265_crf), "-tag:v", "hvc1"]
+        args += ["-c:v", "libx265", "-preset", s.x265_preset, "-crf", str(s.x265_crf), "-tag:v", "hvc1"]
         if scaling:
-            args += ["-vf", f"scale=-2:{s.scale_height}"]
+            args += ["-vf", f"scale=-2:{height}"]
     if plan.video == V_X264:
         args += ["-c:a", "aac", "-b:a", plan.audio_bitrate or s.fallback_audio_bitrate]
     elif plan.audio_reencode or plan.video == V_X265:
         args += ["-c:a", "aac", "-b:a", s.fallback_audio_bitrate]
+    elif audio_fallback:
+        args += ["-c:a", "aac", "-b:a", SHRINK_FALLBACK_AUDIO]
     else:
         args += ["-c:a", "copy"]
     if mp4:
@@ -568,6 +713,17 @@ def get_conversion_settings(get=get_setting) -> ConversionSettings:
         result.disc_images = DISC_LEAVE
     if result.encoder not in ENCODERS:
         result.encoder = ENCODER_AUTO
+    if result.x265_preset not in X265_PRESETS:
+        result.x265_preset = defaults.x265_preset
+    low, high = JOBS_RANGE
+    if not low <= result.remux_jobs <= high:
+        result.remux_jobs = defaults.remux_jobs
+    if not low <= result.encode_jobs <= high:
+        result.encode_jobs = defaults.encode_jobs
+    if result.max_height_movie not in HEIGHT_CHOICES:
+        result.max_height_movie = defaults.max_height_movie
+    if result.max_height_other not in HEIGHT_CHOICES:
+        result.max_height_other = defaults.max_height_other
     if not 0 <= result.x265_crf <= 51:
         result.x265_crf = defaults.x265_crf
     result.default_audio_language = result.default_audio_language.strip().lower()

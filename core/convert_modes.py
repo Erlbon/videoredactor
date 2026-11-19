@@ -107,6 +107,8 @@ def convert_with_mode(
     *,
     keep: bool,
     is_series: bool = True,
+    kind: str | None = None,
+    options: cp.RunOptions | None = None,
     tags=None,
     cancel_event=None,
     transcode: transcode_settings.TranscodeSettings | None = None,
@@ -118,7 +120,8 @@ def convert_with_mode(
     run.keep_originals = bool(keep)
     if mode == MODE_RULES:
         return conversion_run.process_file(
-            run, source, conv, is_series=is_series, cancel_event=cancel_event, tags=tags, **convert_kwargs)
+            run, source, conv, is_series=is_series, kind=kind, options=options, cancel_event=cancel_event, tags=tags,
+            **convert_kwargs)
     info = probe(source)
     if info is None:
         return ConversionOutcome(False, message="couldn't read the file (ffprobe failed)")
@@ -129,19 +132,22 @@ def convert_with_mode(
     else:
         raise ValueError(f"unknown conversion mode {mode!r}")
     if plan.skip_reason:
-        return ConversionOutcome(False, message=plan.skip_reason)
+        return ConversionOutcome(False, message=plan.skip_reason, media=info, plan=plan)
     cover = None
     if not run.dry_run:
         cover, cover_problem = conversion_run.read_source_cover(source, info)
         if cover_problem:
-            return ConversionOutcome(False, message=f"not converted, the file is untouched: {cover_problem}")
+            return ConversionOutcome(
+                False, message=f"not converted, the file is untouched: {cover_problem}", media=info, plan=plan)
         if tags is None:
             tags = conversion_run.read_source_tags(source)
     final = output_path(source, plan, keep)
     outcome = conversion_run.convert_file(
-        run, source, plan, info, conv, cover=cover, cancel_event=cancel_event, probe=probe, final=final, **convert_kwargs)
+        run, source, plan, info, conv, cover=cover, cancel_event=cancel_event, probe=probe, final=final, options=options,
+        **convert_kwargs)
     if outcome.converted and tags is not None and not run.dry_run:
         problem = conversion_run.write_tags(outcome.final_path, tags)
         if problem:
             outcome.notes.append(f"converted, but the tags could not be rewritten onto the new file: {problem}")
+    outcome.media, outcome.plan = info, plan
     return outcome

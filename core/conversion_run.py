@@ -21,6 +21,7 @@ from __future__ import annotations
 import copy
 import os
 import tempfile
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -41,10 +42,28 @@ STALE_HEADER_EXTENSIONS = (".avi", ".ogm")
 CONVERT_TIMEOUT_SECONDS = 12 * 60 * 60
 
 
+class JobLimits:
+    """How many ffmpeg runs go at once across a batch (decision 11B): `remux` stream copies and `encode` re-encodes.
+    convert_file() holds one slot of the right kind while ffmpeg runs; the probes and checks around it run freely.
+    Thread-safe; one instance per batch."""
+
+    def __init__(self, remux: int = 4, encode: int = 2):
+        self.remux = threading.BoundedSemaphore(max(1, remux))
+        self.encode = threading.BoundedSemaphore(max(1, encode))
+
+    @classmethod
+    def from_settings(cls, settings: cp.ConversionSettings) -> "JobLimits":
+        return cls(settings.remux_jobs, settings.encode_jobs)
+
+    def slot(self, plan: cp.Plan) -> threading.BoundedSemaphore:
+        return self.encode if plan.reencodes else self.remux
+
+
 def expected_subtitle_count(info: cp.MediaInfo, plan: cp.Plan, added: int = 0) -> int:
     """Subtitle tracks the result must have: the source's kept ones + `added`. Into an MP4 only text subtitles
-    survive (bitmap ones are dropped); into an MKV all are copied."""
-    subs = info.of("subtitle")
+    survive (bitmap ones are dropped); into an MKV all are copied. Streams without a codec name are never carried
+    (conversion_plan.mappable_subtitles)."""
+    subs = cp.mappable_subtitles(info)
     if plan.container == ".mp4":
         subs = [t for t in subs if t.codec in cp.TEXT_SUBTITLES]
     return len(subs) + added
@@ -60,10 +79,12 @@ def verify_result(
     result_size: int | None = None,
     tolerance_seconds: float = DURATION_TOLERANCE,
     tolerance_fraction: float = 0.0,
+    check_duration: bool = True,
 ) -> str:
     """"" when the converted file is good, else what is wrong. Takes both probes so it needs no ffprobe.
     The duration may differ by the larger of `tolerance_seconds` and `tolerance_fraction` of the source's
-    length (the Library safety settings, passed in by convert_file from its SafeRun)."""
+    length (the Library safety settings, passed in by convert_file from its SafeRun). `check_duration` False
+    leaves the length out (the lenient PARTIAL check judges it on its own)."""
     if result is None:
         return "couldn't read the result back (ffprobe failed)"
     problems = []
@@ -76,9 +97,10 @@ def verify_result(
         problems.append(f"subtitle tracks: expected {want_subs}, got {len(result.of('subtitle'))}")
     if plan.scales:
         video = result.video
-        if video is None or not 0 < video.height <= settings.scale_height:
-            problems.append(f"height {video.height if video else '?'} is not <= {settings.scale_height}")
-    if source.duration:
+        target = plan.scale_to(settings)
+        if video is None or not 0 < video.height <= target:
+            problems.append(f"height {video.height if video else '?'} is not <= {target}")
+    if source.duration and check_duration:
         if result.duration is None:
             problems.append("no duration")
         else:
@@ -122,6 +144,72 @@ class ConversionOutcome:
     final_path: str = ""
     message: str = ""
     notes: list[str] = field(default_factory=list)  # FYIs for the report (an .srt that was left alone, ...)
+    source_bytes: int | None = None  # the original's size (a real, successful conversion only)
+    result_bytes: int | None = None  # the new file's size
+    partial_path: str = ""  # lenient mode: a PARTIAL result written beside the untouched original
+    media: cp.MediaInfo | None = None  # what ffprobe said about the source (for the dry-run table), when it was read
+    plan: cp.Plan | None = None  # the plan the file was judged by, when one was made
+
+
+GB = 1024 ** 3
+
+
+def gb_text(size: int) -> str:
+    """'1.4 GB', '0.62 GB' (two decimals under 1 GB, so a small file is not '0.0 GB')."""
+    value = size / GB
+    return f"{value:.2f} GB" if value < 1 else f"{value:.1f} GB"
+
+
+def size_text(outcome: ConversionOutcome) -> str:
+    """'1.4 GB -> 0.62 GB' for a converted file (decision 14B), "" when the sizes are not known."""
+    if outcome.source_bytes is None or outcome.result_bytes is None:
+        return ""
+    return f"{gb_text(outcome.source_bytes)} → {gb_text(outcome.result_bytes)}"
+
+
+def size_summary(outcomes: list[ConversionOutcome]) -> str:
+    """'54.2 GB -> 29.1 GB, saved 25.1 GB (46%)' over the converted files with known sizes, "" when there are none.
+    A batch that grew says 'grew by'."""
+    known = [o for o in outcomes if o.converted and o.source_bytes is not None and o.result_bytes is not None]
+    if not known:
+        return ""
+    before = sum(o.source_bytes for o in known)
+    after = sum(o.result_bytes for o in known)
+    head = f"{gb_text(before)} → {gb_text(after)}"
+    if after <= before:
+        share = f" ({(before - after) / before:.0%})" if before else ""
+        return f"{head}, saved {gb_text(before - after)}{share}"
+    return f"{head}, grew by {gb_text(after - before)}"
+
+
+def shrink_attempts(plan: cp.Plan, settings: cp.ConversionSettings, encoder: str | None) -> list[tuple[bool, bool]]:
+    """The tries of one conversion as (cuda, audio_fallback) pairs, in order. A shrink (a bitrate re-encode) follows
+    his resize720.py chain (decision 10A): GPU decode with the audio copied, GPU decode with the audio as AAC 192k,
+    CPU decode with the audio copied, CPU decode with AAC 192k. The GPU steps only with "GPU decode" on, nvenc and a
+    scale; the AAC steps only when the audio would otherwise be copied. The encoder never changes. Anything else is
+    one try."""
+    if plan.video not in (cp.V_NVENC, cp.V_NVENC_SCALE):
+        return [(False, False)]
+    gpu = plan.scales and settings.hw_decode and encoder == cp.ENCODER_NVENC
+    audio_steps = [False] if plan.audio_reencode else [False, True]
+    decode_steps = [True, False] if gpu else [False]
+    return [(cuda, aac) for cuda in decode_steps for aac in audio_steps]
+
+
+def _attempt_note(cuda: bool, audio_fallback: bool, first: tuple[bool, bool]) -> str:
+    """What a successful later try changed, for the report ("" for the first try)."""
+    parts = []
+    if first[0] and not cuda:
+        parts.append("decoded on the CPU (the GPU decode failed)")
+    if audio_fallback:
+        parts.append(f"audio re-encoded to AAC {cp.SHRINK_FALLBACK_AUDIO} (copying it failed)")
+    return "; ".join(parts)
+
+
+def partial_name(final: str) -> str:
+    """Where a lenient PARTIAL result goes: '<stem>.partial<ext>' beside the original (decision 9A)."""
+    stem, ext = os.path.splitext(final)
+    return f"{stem}.partial{ext}"
 
 
 def convert_file(
@@ -139,15 +227,22 @@ def convert_file(
     resolve_encoder: Callable[[cp.ConversionSettings], str] = encoder_detect.resolve_encoder,
     decode_check: Callable[[str], str] = decode_problem,
     final: str | None = None,
+    options: cp.RunOptions | None = None,
+    limits: JobLimits | None = None,
 ) -> ConversionOutcome:
     """Convert `source` per `plan` through `run` (dry-run, recent-file guard, verified swap, Recycle Bin /
     quarantine). `runner`/`probe`/`resolve_encoder` are injectable for tests. A bitrate re-encode uses the
     encoder settings.encoder resolves to (core/encoder_detect.py: "auto" = hevc_nvenc only when it works on
-    this computer, else libx265); the GPU decode/scale attempt (then the software-scale retry) only with
-    settings.hw_decode on and nvenc.
+    this computer, else libx265) and, when a try fails, the next one of shrink_attempts() (the fallback chain).
 
     `cover` is the source's embedded poster (read_source_cover): ffmpeg does not carry it, so it is put back into
-    the new file BEFORE the swap and read back; when that fails the conversion fails and the original is kept."""
+    the new file BEFORE the swap and read back; when that fails the conversion fails and the original is kept.
+
+    `options.lenient` (lenient mode for damaged captures): ffmpeg ignores decode errors; a result that passes every
+    check but the length, and is at least LENIENT_MIN_FRACTION of the source's length, is a PARTIAL result. It never
+    replaces the original: it is kept beside it as partial_name(final), and the outcome says so (converted=False).
+    `limits` caps how many ffmpeg runs go at once across a batch (JobLimits)."""
+    options = options or cp.RunOptions()
     added = added or []
     added_subtitles = len(added)
     if plan.skip_reason or not plan.container:
@@ -164,34 +259,57 @@ def convert_file(
     encoder = None
     if plan.video in (cp.V_NVENC, cp.V_NVENC_SCALE) and not run.dry_run:
         encoder = resolve_encoder(settings)
-    gpu = plan.scales and settings.hw_decode and encoder == cp.ENCODER_NVENC
+    attempts = shrink_attempts(plan, settings, encoder)
+    used: list[str] = []  # what the successful try changed (the fallback chain), for the report
+    partial: dict[str, str] = {}  # lenient mode: "path" and "text" of a PARTIAL result
 
     def build(src: str, temp: str) -> tuple[bool, str]:
-        attempts = [True, False] if gpu else [False]  # CUDA decode + scaling, then the software scale retry
         message = ""
-        for cuda in attempts:
-            if os.path.lexists(temp):
-                os.remove(temp)
-            args = cp.build_ffmpeg_args(info, plan, src, temp, settings, cuda=cuda, added=added, encoder=encoder)
-            code, stderr = runner(args, cancel_event=cancel_event, timeout=CONVERT_TIMEOUT_SECONDS)
-            if code == 0:
-                if cover:
-                    problem = restore_cover(temp, cover)
-                    if problem:
-                        return False, f"the embedded poster could not be carried over ({problem})"
-                return True, ""
-            message = (stderr or "").strip().splitlines()[-1] if (stderr or "").strip() else "ffmpeg failed"
-            if code is None:  # cancelled or ffmpeg missing: no point retrying
-                break
-        return False, message
+        slot = limits.slot(plan) if limits is not None else None
+        if slot is not None:
+            slot.acquire()
+        try:
+            for cuda, audio_fallback in attempts:
+                if cancel_event is not None and cancel_event.is_set():
+                    return False, "Cancelled"
+                if os.path.lexists(temp):
+                    os.remove(temp)
+                args = cp.build_ffmpeg_args(
+                    info, plan, src, temp, settings, cuda=cuda, added=added, encoder=encoder,
+                    audio_fallback=audio_fallback, lenient=options.lenient,
+                )
+                code, stderr = runner(args, cancel_event=cancel_event, timeout=CONVERT_TIMEOUT_SECONDS)
+                if code == 0:
+                    note = _attempt_note(cuda, audio_fallback, attempts[0])
+                    if note:
+                        used.append(note)
+                    if cover:
+                        problem = restore_cover(temp, cover)
+                        if problem:
+                            return False, f"the embedded poster could not be carried over ({problem})"
+                    return True, ""
+                message = (stderr or "").strip().splitlines()[-1] if (stderr or "").strip() else "ffmpeg failed"
+                if code is None:  # cancelled or ffmpeg missing: no point retrying
+                    break
+            return False, message
+        finally:
+            if slot is not None:
+                slot.release()
+
+    def check(result_info, size, *, check_duration: bool = True) -> str:
+        return verify_result(
+            info, result_info, plan, settings, added_subtitles=added_subtitles, result_size=size,
+            tolerance_seconds=run.tolerance_seconds, tolerance_fraction=run.tolerance_fraction,
+            check_duration=check_duration,
+        )
 
     def verify(src: str, temp: str) -> str:
         size = os.path.getsize(temp) if os.path.exists(temp) else None
         result_info = probe(temp)
-        problem = verify_result(
-            info, result_info, plan, settings, added_subtitles=added_subtitles, result_size=size,
-            tolerance_seconds=run.tolerance_seconds, tolerance_fraction=run.tolerance_fraction,
-        )
+        problem = check(result_info, size)
+        if problem and options.lenient and result_info is not None and _partial_ok(info, result_info):
+            if not check(result_info, size, check_duration=False):
+                return _keep_partial(temp, result_info)
         if not problem and plan.wrong_container:
             # A wrong-container fix is only done when the result really is the container its name says, and the
             # whole result decodes with zero errors (the content was intact before: it must stay so).
@@ -205,15 +323,51 @@ def convert_file(
             problem = verify_cover(temp, cover)
         return problem
 
+    def _keep_partial(temp: str, result_info: cp.MediaInfo) -> str:
+        """Moves a PARTIAL result beside the original (never over anything) and returns the problem that stops the
+        swap; the original stays untouched."""
+        target = partial_name(final)
+        lengths = f"{result_info.duration / 60:.1f} of {info.duration / 60:.1f} min ({result_info.duration / info.duration:.0%})"
+        if os.path.lexists(target):
+            return f"PARTIAL result ({lengths}) not kept: {os.path.basename(target)} already exists"
+        os.rename(temp, target)
+        if run.log:
+            run.log.created(target)
+        partial["path"] = target
+        partial["text"] = lengths
+        return f"PARTIAL result ({lengths}) kept beside the original as {os.path.basename(target)}"
+
     reason = "; ".join(plan.reasons)
+    source_bytes = info.size_bytes or (os.path.getsize(source) if os.path.exists(source) else None)
     ok = run.convert(source, final, build, kind, reason, marker=marker, verify=verify)
     if not ok:
+        if partial:
+            return ConversionOutcome(
+                False, partial_path=partial["path"],
+                message=(f"PARTIAL: {partial['text']} of the damaged file was saved as "
+                         f"{os.path.basename(partial['path'])} beside it; the original is untouched"),
+            )
         detail = run.actions[-1].detail if run.actions else "not converted"
         return ConversionOutcome(False, message=detail)
     if not run.dry_run and os.path.normcase(os.path.abspath(final)) != os.path.normcase(os.path.abspath(source)):
         # The swap succeeded and the file has a new name (extension): its Tools > History entries follow it.
         history.record_move(source, final)
-    return ConversionOutcome(True, final_path=final, message=run.actions[-1].detail)
+    outcome = ConversionOutcome(True, final_path=final, message=run.actions[-1].detail, notes=list(used))
+    if not run.dry_run:
+        outcome.source_bytes = source_bytes
+        try:
+            outcome.result_bytes = os.path.getsize(final)
+        except OSError:
+            outcome.source_bytes = None
+    return outcome
+
+
+def _partial_ok(source: cp.MediaInfo, result: cp.MediaInfo) -> bool:
+    """A lenient result long enough to keep as PARTIAL: shorter than the source (a full-length result is simply
+    good), and at least LENIENT_MIN_FRACTION of it."""
+    if not source.duration or not result.duration:
+        return False
+    return cp.LENIENT_MIN_FRACTION * source.duration <= result.duration < source.duration
 
 
 def embedded_subtitle_texts(info: cp.MediaInfo, source: str) -> list[str]:
@@ -307,15 +461,28 @@ def write_tags(final_path: str, metadata) -> str:
         return str(exc)
 
 
-def process_file(
+def process_file(run: SafeRun, source: str, settings: cp.ConversionSettings, **kwargs) -> ConversionOutcome:
+    """_process_file() (the whole job for one file), with the probe and the plan it used put on the outcome (`media`,
+    `plan`), so the dry-run table can show the route, resolution, codec and bit rate of every file."""
+    found: dict = {}
+    outcome = _process_file(run, source, settings, found=found, **kwargs)
+    outcome.media = found.get("info")
+    outcome.plan = found.get("plan")
+    return outcome
+
+
+def _process_file(
     run: SafeRun,
     source: str,
     settings: cp.ConversionSettings,
     *,
     is_series: bool = True,
+    kind: str | None = None,
+    options: cp.RunOptions | None = None,
     probe: Callable[[str], cp.MediaInfo | None] = probe_media,
     embedded_texts: Callable[[cp.MediaInfo, str], list[str]] = embedded_subtitle_texts,
     reader=None,
+    found: dict | None = None,
     carry_tags: bool = True,
     tags=None,
     **convert_kwargs,
@@ -330,7 +497,9 @@ def process_file(
     if info is None:
         return ConversionOutcome(False, message="couldn't read the file (ffprobe failed)")
     # Plan first: a file the rules won't touch (disc image, unknown codec) needs no sidecar work at all.
-    plan = cp.plan_conversion(info, settings, is_series=is_series)
+    plan = cp.plan_conversion(info, settings, is_series=is_series, kind=kind, options=options)
+    found = found if found is not None else {}
+    found["info"], found["plan"] = info, plan
     if plan.needs_review:
         return ConversionOutcome(False, message=plan.needs_review)
     if plan.skip_reason:
@@ -352,7 +521,9 @@ def process_file(
         embedded = embedded_texts(info, source)
         chosen = [s for s in chosen if not si.duplicate_of_embedded(s.text, embedded)]
     if chosen:
-        plan = cp.plan_conversion(info, settings, is_series=is_series, extra_subtitles=len(chosen))
+        plan = cp.plan_conversion(
+            info, settings, is_series=is_series, kind=kind, options=options, extra_subtitles=len(chosen))
+        found["plan"] = plan
     if not plan.does_something:
         return ConversionOutcome(False, message=plan.skip_reason or "nothing to do", notes=notes)
     cover = None
@@ -370,7 +541,8 @@ def process_file(
                 with open(path, "w", encoding="utf-8", newline="") as f:
                     f.write(s.text)
             added.append(cp.AddedSub(path, s.language, mt_registry.track_title(s.text, s.title), s.default, s.hearing_impaired))
-        outcome = convert_file(run, source, plan, info, settings, added=added, cover=cover, probe=probe, **convert_kwargs)
+        outcome = convert_file(
+            run, source, plan, info, settings, added=added, cover=cover, probe=probe, options=options, **convert_kwargs)
     outcome.notes = notes + outcome.notes
     if outcome.converted and carry_tags and tags is not None and not run.dry_run:
         problem = write_tags(outcome.final_path, tags)

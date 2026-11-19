@@ -1,5 +1,45 @@
 # Changelog
 
+## 2026-11-18#04 -- conversion: the homeserver3 gaps (decisions 9-18)
+
+The owner's answers on the conversion decision page of 2026-11-18, compared with his homeserver3 scripts.
+
+- **Several files at once.** Preferences > Conversion has "Remuxes at once" (default 4) and "Re-encodes at once"
+  (default 2). The progress dialog names the files that are running, and Cancel stops them all.
+- **The dry run is a table.** It shows each file's route (Remux, Shrink, Re-encode or Skip), resolution, codec,
+  video Mb/s and action. It can be sorted, and "Only files that would change" hides the rest. Untick the files to
+  leave out, and "Convert the ticked files" converts the rest for real, with the same choices. "Copy the report"
+  copies the old text lines.
+- **New column: Would convert** (hidden at first; switch it on from the header menu). It shows "-> 720p",
+  "re-encode", "remux" or "no" for each row, judged by the same rules, and can be filtered. It is an estimate
+  from the table's own data: a remux that one of an MP4/MKV's streams needs shows up in the dry run only.
+- **The space saved.** The end report says "X GB -> Y GB, saved Z GB (N%)", and each file's line gives its
+  sizes before and after. The Redact convert step reports the sizes too.
+- **When a shrink fails, the next try follows the fallback chain of his scripts.** First the GPU decode with the
+  audio copied, then the GPU decode with the audio as AAC 192k, then the same two with the CPU decoding. The GPU
+  steps are only used with "GPU decode" on. The encoder does not change. The report says which step worked.
+- **Lenient mode for damaged files**, a tick in Media > Convert, off by default. ffmpeg ignores decode errors and
+  drops broken packets. A result that passes every check except its length, and is at least 60% as long as the
+  original, is kept as `<name>.partial.mkv/.mp4` beside the original. It never replaces the original. The report
+  gives both lengths.
+- **"Scale music videos to 1080p HEVC"**, a tick in Media > Convert for this run only. Without it, music videos
+  follow their own rule (decided 18 Nov): 4K is kept, and a music video above 1440p is re-encoded at its own size
+  only above 25 Mb/s (H.264) or 35 Mb/s (HEVC, VP9, AV1). Both limits are in Preferences > Conversion. Below 4K,
+  music videos are left alone.
+- **Highest resolution kept, per content type** (Preferences > Conversion). Series use the "scale down to" height
+  (720p) as before. Movies, and Clip/Misc/Porn/untyped files, have "No limit" by default. A file is still only
+  re-encoded when the bitrate rule says it is too big. A file of a kind with no limit, or one already within its
+  limit, is re-encoded at its own size instead of being scaled to 720p. The rules still apply to movies only with
+  "apply to movies" on.
+- **x265 preset setting** (default medium). Both libx265 uses follow it: the legacy re-encode and the software
+  shrink.
+- **Old video the app does not know**, in a legacy container (AVI, WMV, RM, FLV...), is now re-encoded with x265
+  CRF 23 and AAC 160k, as his script does. Before, it was skipped. An unknown codec inside an MP4 or MKV is still
+  left alone.
+- **Fix: subtitle streams without a codec name** (teletext or closed-caption placeholders) are no longer mapped
+  into the result, where ffmpeg aborted on them, and the verify step no longer counts them. This is his
+  conversion prompt's own rule.
+
 ## 2026-11-18#03 -- lookups follow the Content Type; Show adult content
 
 - **The Look Up menu shows only the lookups that fit the selected files' Content Type** (the owner's decisions

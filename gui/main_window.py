@@ -18,7 +18,9 @@ import copy
 import json
 import os
 import shutil
+import logging
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
@@ -45,7 +47,7 @@ from redactor_common.core.lookups.tmdb import (
 )
 from core.tvdb_client import get_series_details, get_episode_details, download_image, TVDBError
 from redactor_common.core.lookups.release_name import parse_release_name
-from core.redact_steps import _tv_guess, conversion_is_series
+from core.redact_steps import _tv_guess, conversion_is_series, conversion_kind
 from core.sidecars import with_sidecars
 from core.lookup_sources import imdb_values, tmdb_values, tvdb_values
 from core.source_tags import ref_in, sources_summary
@@ -58,7 +60,7 @@ from core import conversion_plan, conversion_run, history, library_safety
 from core import crash_log as app_crash_log
 from redactor_common.core.save_report import SaveReport, append_save_log, files_still_dirty, nothing_to_save_reason
 from redactor_common.gui import crash_dialog
-from core import convert_modes
+from core import convert_modes, convert_preview
 from redactor_common.core import conversion_policy
 from core.ffmpeg_backend import IMPORTABLE_EXTENSIONS, kill_running_ffmpeg
 from core.settings_adapter import REFRESH_COLUMNS, REFRESH_PANEL, VideoSettingsAdapter
@@ -178,13 +180,14 @@ ALWAYS_VISIBLE_COLUMNS = ["filename", "status", "content_type"]
 # table-only, informational. Shown regardless of Content Type filter
 # (unlike Director/Cast/etc, technical info isn't content-type-specific)
 # but still user-hideable via the column context menu like anything else.
-TECHNICAL_COLUMNS = ["duration_seconds", "resolution", "size_bytes", "bitrate", "sources", "website"]
+TECHNICAL_COLUMNS = ["duration_seconds", "resolution", "size_bytes", "bitrate", "would_convert", "sources", "website"]
 TECHNICAL_LABELS = {
     PATH_KEY: PATH_LABEL,  # shared Path column (redactor_common.core.path_column): sits right after Filename
     "duration_seconds": "Duration",
     "resolution": "Resolution",
     "size_bytes": "Size",
     "bitrate": "Bitrate",
+    "would_convert": "Would convert",  # what Media > Convert (Automatic) would do; core/convert_preview.py (hidden at first)
     "sources": "Sources",  # the source ids kept in the file (read-only; hidden until you show it)
     "website": "Website",  # derived from the Studio through the Studios table (Tools > Studios); read-only
 }
@@ -194,7 +197,7 @@ TECHNICAL_LABELS = {
 # Bitrate (almost every value is distinct, so a checklist would be useless).
 FILTER_COLUMN_KINDS = {
     "filename": KIND_TEXT, "path": KIND_TEXT, "sources": KIND_TEXT, "status": KIND_VALUES, "content_type": KIND_VALUES,
-    "website": KIND_VALUES,
+    "website": KIND_VALUES, "would_convert": KIND_VALUES,
     "resolution": KIND_VALUES, "language": KIND_VALUES,
     "personal_rating": KIND_VALUES, "season_number": KIND_VALUES, "episode_number": KIND_VALUES,
     "collected_from": KIND_VALUES,
@@ -1052,6 +1055,12 @@ class MainWindow(QMainWindow):
             hidden_now.add("lyrics")
             set_setting("table", "hidden_columns", ",".join(sorted(hidden_now)))
             set_setting("table", "lyrics_column_seeded", "1")
+        # The Would convert column starts hidden too (once, decision 13A): switched on from the header menu.
+        if get_setting("table", "would_convert_column_seeded", "") != "1":
+            hidden_now = self._load_hidden_fields()
+            hidden_now.add("would_convert")
+            set_setting("table", "hidden_columns", ",".join(sorted(hidden_now)))
+            set_setting("table", "would_convert_column_seeded", "1")
         # The shared Path column moves to just after Filename and is un-hidden, once, for users whose saved column
         # order / hidden set predates it (after that their own choices win).
         if get_setting("table", PATH_SEEDED_SETTING, "") != "1":
@@ -1548,6 +1557,7 @@ class MainWindow(QMainWindow):
             self.table.setRowCount(len(self.video_files))
             band_settings = bitrate_bands.get_band_settings()  # read once per refresh, not per row
             conversion_settings = conversion_plan.get_conversion_settings()
+            self._table_conversion_settings = conversion_settings  # the Would convert column's, for this refresh
             for row, vf in enumerate(self.video_files):
                 row_colors = self._row_colors(vf)
                 for col, field_name in enumerate(self._column_order):
@@ -1653,6 +1663,18 @@ class MainWindow(QMainWindow):
             return (SAVE_FAILED_COLOR, HIGHLIGHT_TEXT_COLOR)
         return None
 
+    def _would_convert(self, vf: VideoFile) -> str:
+        """The Would convert column (decision 13A): what Media > Convert (Automatic) would do with this row, judged
+        from its technical fields (core/convert_preview.would_convert). Empty for a file that failed to load."""
+        if vf.load_error:
+            return ""
+        settings = getattr(self, "_table_conversion_settings", None) or conversion_plan.get_conversion_settings()
+        inp = bitrate_bands.input_from_file(vf, True)
+        mbps = conversion_plan.video_mbps_from(inp.size_bytes, inp.duration, inp.audio_bps)
+        kind = conversion_kind(vf.metadata.content_type, vf.path.stem)
+        return convert_preview.would_convert(
+            inp.ext, inp.codec, inp.height, inp.width, inp.size_bytes, mbps, kind, settings)
+
     def _display_value(self, vf: VideoFile, field_name: str) -> str:
         if field_name == "filename":
             return vf.path.name
@@ -1689,6 +1711,8 @@ class MainWindow(QMainWindow):
             return format_file_size(vf.size_bytes)
         if field_name == "bitrate":
             return format_bitrate(vf.metadata.bitrate)
+        if field_name == "would_convert":
+            return self._would_convert(vf)
         if field_name == "sources":
             return sources_summary(vf.metadata)
         if field_name == "website":
@@ -2997,7 +3021,7 @@ class MainWindow(QMainWindow):
         dialog = ConvertDialog(paths, self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        self._convert_paths(paths, dry_run=dialog.dry_run, mode=dialog.mode, keep=dialog.keep)
+        self._convert_paths(paths, dry_run=dialog.dry_run, mode=dialog.mode, keep=dialog.keep, options=dialog.options)
 
     @staticmethod
     def _rules_text() -> str:
@@ -3019,15 +3043,19 @@ class MainWindow(QMainWindow):
         return box
 
     def _convert_paths(self, paths: list[str], dry_run: Optional[bool] = None, mode: str = convert_modes.MODE_RULES,
-                       keep: Optional[bool] = None) -> None:
+                       keep: Optional[bool] = None, options: Optional[conversion_plan.RunOptions] = None) -> None:
         """The one conversion flow, for every mode (core/convert_modes.py): confirm (with the per-run "Dry run first"
-        checkbox, unless the caller already asked), run the conversion through a SafeRun for each path under a cancellable progress dialog
-        (Cancel kills ffmpeg), then report every file -- a dry run as explicit "DRY RUN: would ..." lines --
-        and refresh / add the affected rows. A caller that already asked (the Open Folder offer, with its own
-        dry-run checkbox) passes `dry_run` and no second confirm is shown."""
+        checkbox, unless the caller already asked), run the conversion through a SafeRun for each path under a
+        cancellable progress dialog (Cancel kills ffmpeg), then report. Several files run at once (Preferences >
+        Conversion: remuxes and re-encodes at once, decision 11B; conversion_run.JobLimits). A dry run ends in the
+        dry-run table (decision 12B), whose "Convert the ticked files" runs this flow again for real; a real run ends
+        in a report with the sizes before and after (decision 14B), and the affected rows are refreshed / added. A
+        caller that already asked (the Open Folder offer, with its own dry-run checkbox) passes `dry_run` and no
+        second confirm is shown. `options` are the Convert dialog's per-run choices (lenient mode, music videos)."""
         paths = [p for p in dict.fromkeys(os.path.abspath(p) for p in paths)]
         if not paths:
             return
+        options = options or conversion_plan.RunOptions()
         safety = library_safety.get_safety_settings()
         conv = conversion_plan.get_conversion_settings()
         if dry_run is None:
@@ -3044,25 +3072,30 @@ class MainWindow(QMainWindow):
             dry_run = dry_box.isChecked()
 
         loaded_by_path = {os.path.normcase(os.path.abspath(str(vf.path))): vf for vf in self.video_files}
-        cancel_event = threading.Event()
-        self._active_cancel = cancel_event
-        lines: list[str] = []
+        # Each file's report line goes in its own slot, so the report keeps the order of `paths` whatever order the
+        # parallel runs finish in.
+        lines: dict[str, str] = {}
+        outcomes: dict[str, conversion_run.ConversionOutcome] = {}
         converted: list[tuple[str, str]] = []  # (source, final)
-        cancelled = False
+        lock = threading.Lock()
+        limits = conversion_run.JobLimits.from_settings(conv)
+        state = {"cancelled": False}
 
-        def one(path: str, _index: int) -> None:
-            nonlocal cancelled
+        def one(path: str, cancel_event: threading.Event) -> None:
+            name = os.path.basename(path)
             if cancel_event.is_set():
-                cancelled = True
+                state["cancelled"] = True
                 return
             vf = loaded_by_path.get(os.path.normcase(path))
             if vf is not None and vf.dirty and not vf.stamp_only_dirty:
-                lines.append(f"{os.path.basename(path)}: skipped, it has unsaved edits")
+                lines[path] = f"{name}: skipped, it has unsaved edits"
                 return
-            # A series episode: tagged TV, or untagged (or not loaded) with an episode-like name.
-            is_series = conversion_is_series(
-                vf.metadata.content_type if vf is not None else None, os.path.splitext(os.path.basename(path))[0],
-            )
+            content_type = vf.metadata.content_type if vf is not None else None
+            stem = os.path.splitext(name)[0]
+            # A series episode: tagged TV, or untagged (or not loaded) with an episode-like name. The kind (series,
+            # movie, music video, other) picks the "highest resolution kept" and the music-video rule.
+            is_series = conversion_is_series(content_type, stem)
+            kind = conversion_kind(content_type, stem)
             run = make_safe_run(get_setting, safety, dry_run=dry_run, path=path)
             keep_original = safety.keep_originals if keep is None else keep
             # The app's tags travel with the file: a loaded row hands over its own (saved) tags, any other
@@ -3072,40 +3105,77 @@ class MainWindow(QMainWindow):
                 tags = copy.deepcopy(vf.metadata)
                 tags.scan_stamp = ""  # the stamp describes the old file's bytes
             try:
-                outcome = call_in_background(
-                    convert_modes.convert_with_mode, run, path, mode, conv, keep=keep_original, is_series=is_series,
-                    cancel_event=cancel_event, tags=tags,
+                outcome = convert_modes.convert_with_mode(
+                    run, path, mode, conv, keep=keep_original, is_series=is_series, kind=kind, options=options,
+                    cancel_event=cancel_event, tags=tags, limits=limits,
                 )
             except library_safety.SafetyError as exc:
-                lines.append(f"{os.path.basename(path)}: not converted, the file is untouched: {exc}")
+                lines[path] = f"{name}: not converted, the file is untouched: {exc}"
                 return
-            except BackgroundCancelled:
-                cancelled = True
-                return
+            outcomes[path] = outcome
             notes = ("; " + "; ".join(outcome.notes)) if outcome.notes else ""
             if outcome.message == "Cancelled" or any(a.detail.endswith("Cancelled)") for a in run.actions):
-                cancelled = True
-                lines.append(f"{os.path.basename(path)}: cancelled, the file is untouched")
+                state["cancelled"] = True
+                lines[path] = f"{name}: cancelled, the file is untouched"
                 return
             if not outcome.converted:
                 skipped = [a for a in run.actions if a.verb == "skip"]
-                lines.append(f"{os.path.basename(path)}: {skipped[0].detail if skipped else outcome.message}{notes}")
+                because = outcome.message if outcome.partial_path or not skipped else skipped[0].detail
+                lines[path] = f"{name}: {because}{notes}"
                 return
             if dry_run:
-                lines.append(f"{os.path.basename(path)}: {dry_run_line(run.actions)}{notes}")
+                lines[path] = f"{name}: {dry_run_line(run.actions)}{notes}"
                 return
-            converted.append((path, outcome.final_path))
+            with lock:
+                converted.append((path, outcome.final_path))
             done = "; ".join(f"{a.verb}: {os.path.basename(a.path)} -> {os.path.basename(a.detail)}" for a in run.actions if a.done)
-            lines.append(f"{os.path.basename(path)}: converted to {os.path.basename(outcome.final_path)} ({done}){notes}")
+            sizes = conversion_run.size_text(outcome)
+            lines[path] = (f"{name}: converted to {os.path.basename(outcome.final_path)} ({done})"
+                           + (f", {sizes}" if sizes else "") + notes)
+
+        def work(progress) -> None:
+            cancel_event = progress.cancelled
+            self._active_cancel = cancel_event
+            running: list[str] = []
+            finished = [0]
+
+            def show() -> None:
+                progress.set_label("Converting " + ", ".join(running) if running else "Converting...")
+
+            def task(path: str) -> None:
+                with lock:
+                    running.append(os.path.basename(path))
+                    show()
+                try:
+                    one(path, cancel_event)
+                except Exception as exc:  # noqa: BLE001 -- one bad file must not stop the others; named in the report
+                    logging.getLogger(__name__).exception("conversion of %s failed", path)
+                    lines[path] = f"{os.path.basename(path)}: not converted, unexpected error: {exc}"
+                finally:
+                    with lock:
+                        running.remove(os.path.basename(path))
+                        finished[0] += 1
+                        progress.set_value(finished[0])
+                        show()
+
+            # A worker holds a remux or a re-encode slot only while its ffmpeg runs (JobLimits), so the pool is as
+            # large as the larger of the two limits.
+            workers = max(1, conv.remux_jobs, conv.encode_jobs)
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="convert") as pool:
+                for future in [pool.submit(task, p) for p in paths]:
+                    future.result()
 
         try:
-            finished = run_with_progress(
-                self, paths, one, "Converting with the rules...", threshold=1, cancellable=True,
-                label_for=lambda p: f"Converting {os.path.basename(p)}", on_cancel=cancel_event.set,
+            _result, was_cancelled = run_work_with_progress(
+                self, len(paths), "Converting with the rules...", work, cancellable=True, show_after_ms=0,
             )
         finally:
             self._active_cancel = None
-        cancelled = cancelled or not finished
+        cancelled = state["cancelled"] or was_cancelled
+        for path in paths:  # a file the cancel stopped before it started
+            if path not in lines and cancelled:
+                lines[path] = f"{os.path.basename(path)}: not started (cancelled)"
+        report_lines = [lines[p] for p in paths if p in lines]
 
         # Loaded rows follow their converted file; converted files that were not loaded are added. Each is
         # re-read (ffprobe + tags) under a progress dialog, not on a frozen GUI thread.
@@ -3122,6 +3192,8 @@ class MainWindow(QMainWindow):
                 vf.dirty = False
             vf.load()
 
+        order = {p: n for n, p in enumerate(paths)}
+        converted.sort(key=lambda item: order.get(item[0], 0))
         run_with_progress(
             self, converted, reload, "Reading the converted files...", threshold=1, cancellable=False,
             label_for=lambda item: f"Reading {os.path.basename(item[1])}",
@@ -3134,18 +3206,37 @@ class MainWindow(QMainWindow):
         self._after_batch_edit(
             ("Dry run: nothing changed" if dry_run else f"Converted {len(converted)} file(s)") + (", cancelled" if cancelled else "")
         )
-        title = "Dry run" if dry_run else "Convert"
-        summary = (
-            f"DRY RUN of {len(paths)} file(s): nothing was changed. Each line says what a real run would do."
-            if dry_run else f"{len(converted)} of {len(paths)} file(s) converted."
-        ) + (" Cancelled before the end." if cancelled else "")
+        if dry_run:
+            summary = (f"DRY RUN of {len(paths)} file(s): nothing was changed. Each row says what a real run would do; "
+                       "untick a file to leave it out.") + (" Cancelled before the end." if cancelled else "")
+            rows = [
+                convert_preview.preview_row(p, outcomes[p], conv) if p in outcomes else convert_preview.PreviewRow(
+                    p, convert_preview.ROUTE_SKIP, "", "", None, lines.get(p, "").split(": ", 1)[-1], False)
+                for p in paths
+            ]
+            ticked = self._show_dry_run_table(rows, summary, "\n".join(report_lines))
+            if ticked:
+                self._convert_paths(ticked, dry_run=False, mode=mode, keep=keep, options=options)
+            return
+        saved = conversion_run.size_summary([outcomes[s] for s, _f in converted if s in outcomes])
+        summary = f"{len(converted)} of {len(paths)} file(s) converted" + (f": {saved}." if saved else ".")
+        summary += " Cancelled before the end." if cancelled else ""
         report = QMessageBox(self)
         report.setIcon(QMessageBox.Icon.Information)
-        report.setWindowTitle(title)
+        report.setWindowTitle("Convert")
         report.setText(summary)
-        report.setDetailedText("\n".join(lines))
+        report.setDetailedText("\n".join(report_lines))
         report.setStandardButtons(QMessageBox.StandardButton.Ok)
         report.exec()
+
+    def _show_dry_run_table(self, rows, summary: str, report: str) -> list[str]:
+        """Shows the dry-run table; returns the files ticked for "Convert the ticked files" ([] when closed)."""
+        from gui.convert_preview_dialog import ConvertPreviewDialog  # noqa: PLC0415
+
+        dialog = ConvertPreviewDialog(rows, summary, report, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return []
+        return list(dialog.ticked_paths)
 
     # --- Subtitles -------------------------------------------------------
 

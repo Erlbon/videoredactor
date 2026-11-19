@@ -97,7 +97,7 @@ def test_convert_file_end_to_end_with_cuda_fallback(tmp_path):
     def runner(args, cancel_event=None, timeout=None):
         calls.append(args)
         if "-hwaccel" in args:
-            return 1, "cuda not available"  # first attempt fails, software fallback must follow
+            return 1, "cuda not available"  # the GPU tries fail, the software decode must follow
         with open(args[-1], "w", encoding="utf-8") as f:
             f.write("B" * 500)
         return 0, ""
@@ -109,7 +109,11 @@ def test_convert_file_end_to_end_with_cuda_fallback(tmp_path):
     run = SafeRun(library_root=str(lib), quarantine_root="", dry_run=False, trash=trashed.append, probe=probe)
     out = cr.convert_file(run, src, plan, info, GPU, runner=runner, probe=probe)
     assert out.converted and out.final_path == src
-    assert len(calls) == 2 and "-hwaccel" in calls[0] and "-hwaccel" not in calls[1]
+    # The fallback chain (decision 10A): GPU + audio copy, GPU + AAC 192k, then CPU + audio copy, which works.
+    assert len(calls) == 3 and "-hwaccel" in calls[0] and "-hwaccel" in calls[1] and "-hwaccel" not in calls[2]
+    assert calls[1][calls[1].index("-c:a") + 1] == "aac" and calls[2][calls[2].index("-c:a") + 1] == "copy"
+    assert out.notes == ["decoded on the CPU (the GPU decode failed)"]
+    assert out.source_bytes == 1000 and out.result_bytes == 500
     assert open(src, encoding="utf-8").read() == "B" * 500
     assert len(trashed) == 1 and open(trashed[0], encoding="utf-8").read() == "A" * 1000
     assert not any(".redact-resize" in n for n in os.listdir(lib))

@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 
 from core import convert_modes as cm
 from core import library_safety
+from core.conversion_plan import RunOptions
 from core.library_safety import SafetySettings
 from redactor_common.gui.owned_dialog import OwnedDialog
 
@@ -34,7 +35,7 @@ def originals_sentence(safety: SafetySettings) -> str:
 
 
 class ConvertDialog(OwnedDialog):
-    """After exec(): `mode`, `dry_run` and `keep` hold the choices."""
+    """After exec(): `mode`, `dry_run`, `keep` and `options` (lenient mode, music videos to 1080p) hold the choices."""
 
     def __init__(self, paths: list[str], parent: Optional[QWidget] = None, *, mode: str = cm.MODE_RULES,
                  safety: Optional[SafetySettings] = None):
@@ -58,6 +59,18 @@ class ConvertDialog(OwnedDialog):
         self._help.setWordWrap(True)
         self._help.setStyleSheet("color: gray;")
         layout.addWidget(self._help)
+
+        # This run's choices (conversion_plan.RunOptions): both off every time the dialog opens.
+        self._mv_1080 = QCheckBox("Scale music videos to 1080p HEVC")
+        self._mv_1080.setToolTip("Every music video taller than 1080p is scaled to 1080p HEVC in this run, whatever its "
+                                 "bit rate. Off: 4K is kept (re-encoded only above the Preferences > Conversion limit).")
+        layout.addWidget(self._mv_1080)
+        self._lenient = QCheckBox("Lenient mode for damaged files (a shortened result is kept beside the original)")
+        self._lenient.setToolTip(
+            "ffmpeg ignores decode errors and drops broken packets. A result of at least 60% of the original's "
+            "length that passes every other check is kept as <name>.partial.mkv/.mp4 beside the original, which "
+            "is never replaced by it. A full-length result replaces the original as usual.")
+        layout.addWidget(self._lenient)
 
         self._keep = QCheckBox("Keep the original where it is (the new file gets its own name)")
         layout.addWidget(self._keep)
@@ -84,6 +97,7 @@ class ConvertDialog(OwnedDialog):
     def _sync(self) -> None:
         mode = self.mode
         self._help.setText(cm.MODE_HELP[mode])
+        self._mv_1080.setEnabled(mode == cm.MODE_RULES)  # the other modes do not use the bitrate rules
         if not self._keep_touched:
             # A lossy re-encode keeps the original unless told otherwise; the other modes follow the policy.
             self._keep.blockSignals(True)
@@ -105,3 +119,10 @@ class ConvertDialog(OwnedDialog):
     @property
     def keep(self) -> bool:
         return self._keep.isChecked()
+
+    @property
+    def options(self) -> RunOptions:
+        return RunOptions(
+            lenient=self._lenient.isChecked(),
+            music_video_1080=self._mv_1080.isChecked() and self.mode == cm.MODE_RULES,
+        )

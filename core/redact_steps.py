@@ -779,6 +779,19 @@ def conversion_is_series(content_type, stem: str) -> bool:
     return False
 
 
+def conversion_kind(content_type, stem: str) -> str:
+    """The kind the conversion rules judge a file as (conversion_plan.KIND_*): a series episode (conversion_is_series),
+    a movie, a music video (their own bitrate rule), or other (Clip, Misc, Porn, and untyped files that are not
+    episodes). Each kind has its own "highest resolution kept" (Preferences > Conversion)."""
+    if conversion_is_series(content_type, stem):
+        return conversion_plan.KIND_SERIES
+    if content_type == ContentType.MOVIE:
+        return conversion_plan.KIND_MOVIE
+    if content_type == ContentType.MUSIC_VIDEO:
+        return conversion_plan.KIND_MUSIC_VIDEO
+    return conversion_plan.KIND_OTHER
+
+
 class LookupStep(VideoStep):
     key = "lookup"
     dry_run_safe = True  # the local IMDb database is opened read-only; TMDB/TheTVDB are only read
@@ -1940,10 +1953,10 @@ class ConvertStep(VideoStep):
         run = make_safe_run(setting, safety, dry_run=ctx.env.convert_dry_run, trash=ctx.env.trash, path=path)
         if ctx.start_mtime is not None and os.path.normcase(path) == os.path.normcase(ctx.original):
             run.known_mtime[path] = ctx.start_mtime  # Redact's own save must not make the file look "in use"
-        is_series = conversion_is_series(ctx.video.metadata.content_type, ctx.video.path.stem)
+        kind = conversion_kind(ctx.video.metadata.content_type, ctx.video.path.stem)
         try:
             outcome = ctx.bg(
-                conversion_run.process_file, run, path, conv, is_series=is_series, cancel_event=ctx.env.cancel_event,
+                conversion_run.process_file, run, path, conv, kind=kind, cancel_event=ctx.env.cancel_event,
                 carry_tags=False,  # this step rewrites the tags itself, from its working copy, just below
             )
         except library_safety.SafetyError as exc:
@@ -1969,7 +1982,9 @@ class ConvertStep(VideoStep):
         ctx.bg(ctx.video.load)
         ctx.video.dirty = False
         done = [f"{a.verb}: {os.path.basename(a.path)}" for a in run.actions if a.done]
-        result = StepResult.applied(f"converted to {os.path.basename(outcome.final_path)} ({'; '.join(done)})")
+        sizes = conversion_run.size_text(outcome)
+        result = StepResult.applied(
+            f"converted to {os.path.basename(outcome.final_path)} ({'; '.join(done)})" + (f", {sizes}" if sizes else ""))
         return _with_note(result, f"converted, but the tags could not be rewritten: {problem}" if problem else "")
 
 

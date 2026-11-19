@@ -266,6 +266,15 @@ ENCODER_HELP = (
     "(checked once per run of the app); otherwise libx265 on the CPU, which works on any computer but is slower."
 )
 X265_CRF_HELP = "Used when the encoder is libx265. Lower means better quality and a larger file. Default: 27 (about NVENC cq 30)."
+X265_PRESET_HELP = ("Used by both libx265 re-encodes (old video and the software shrink). Slower presets give a somewhat "
+                    "smaller file at the same quality and take much longer. Default: medium.")
+JOBS_HELP = ("How many files Media > Convert works on at once. A remux is disk work, a re-encode GPU or CPU work. "
+             "Defaults: 4 remuxes and 2 re-encodes (an NVIDIA card handles two encodes well).")
+HEIGHT_HELP = ("The height a bitrate re-encode scales down to, per content type. A file is only re-encoded when it is "
+               "over the limits above; 'No limit' re-encodes it at its own size. Series episodes use the line above. "
+               "Music videos have their own rule, below.")
+MUSIC_VIDEO_HELP = ("Music videos keep 4K: one above 1440p is re-encoded at its own size only above these bit rates; "
+                    "below 4K they are left alone. 'Scale music videos to 1080p HEVC' is a choice in Media > Convert.")
 HW_DECODE_LABEL = "Use the NVIDIA GPU to decode and scale"
 HW_DECODE_HELP = "Faster, needs an NVIDIA card. Only used with the NVIDIA encoder; off by default (software scaling)."
 
@@ -296,7 +305,11 @@ class ConversionPage(QWidget):
         self.movies.setChecked(s.apply_to_movies)
         form.addRow("", self.movies)
         self.min_size = self._spin(form, "Ignore files under:", 0, 100000, s.min_size_mb, " MB")
-        self.scale_height = self._spin(form, "Scale taller video down to:", 360, 2160, s.scale_height, " p")
+        self.scale_height = self._spin(form, "Series: scale taller video down to:", 360, 2160, s.scale_height, " p")
+        self.max_height_movie = self._height_combo(form, "Movies: highest resolution kept:", s.max_height_movie)
+        self.max_height_other = self._height_combo(
+            form, "Clip, Misc, Porn, no type: highest kept:", s.max_height_other)
+        self._help(form, HEIGHT_HELP)
         self.scale_gb = self._dspin(form, "...when larger than:", s.scale_size_trigger_gb, " GB")
         self.scale_mbps = self._dspin(form, "...or video bitrate above:", s.scale_video_mbps, " Mb/s")
         self.reencode_mbps = self._dspin(form, "Re-encode (no scaling) at 720p or less above:", s.reencode_video_mbps, " Mb/s")
@@ -314,6 +327,19 @@ class ConversionPage(QWidget):
         self.encoder_help = self._help(form, ENCODER_HELP)
         self.x265_crf = self._spin(form, "libx265 quality (CRF):", 0, 51, s.x265_crf, "")
         self.x265_crf_help = self._help(form, X265_CRF_HELP)
+        self.x265_preset = QComboBox()
+        for preset in conversion_plan.X265_PRESETS:
+            self.x265_preset.addItem(preset, preset)
+        self.x265_preset.setCurrentIndex(max(0, self.x265_preset.findData(s.x265_preset)))
+        form.addRow("libx265 preset:", self.x265_preset)
+        self._help(form, X265_PRESET_HELP)
+        low, high = conversion_plan.JOBS_RANGE
+        self.remux_jobs = self._spin(form, "Remuxes at once:", low, high, s.remux_jobs, "")
+        self.encode_jobs = self._spin(form, "Re-encodes at once:", low, high, s.encode_jobs, "")
+        self._help(form, JOBS_HELP)
+        self.mv_h264 = self._dspin(form, "Music videos, 4K: re-encode H.264 above:", s.mv_4k_mbps_h264, " Mb/s")
+        self.mv_hevc = self._dspin(form, "...HEVC, VP9 or AV1 above:", s.mv_4k_mbps_hevc, " Mb/s")
+        self._help(form, MUSIC_VIDEO_HELP)
         self.hw_decode = QCheckBox(HW_DECODE_LABEL)
         self.hw_decode.setChecked(s.hw_decode)
         form.addRow("", self.hw_decode)
@@ -374,6 +400,15 @@ class ConversionPage(QWidget):
         form.addRow("", label)
         return label
 
+    @staticmethod
+    def _height_combo(form: QFormLayout, label: str, value: int) -> QComboBox:
+        box = QComboBox()
+        for height in conversion_plan.HEIGHT_CHOICES:
+            box.addItem("No limit" if height == 0 else f"{height}p", height)
+        box.setCurrentIndex(max(0, box.findData(value)))
+        form.addRow(label, box)
+        return box
+
     def _spin(self, form, label, low, high, value, suffix) -> QSpinBox:
         box = QSpinBox()
         box.setRange(low, high)
@@ -398,6 +433,13 @@ class ConversionPage(QWidget):
         current.apply_to_movies = self.movies.isChecked()
         current.min_size_mb = self.min_size.value()
         current.scale_height = self.scale_height.value()
+        current.max_height_movie = int(self.max_height_movie.currentData())
+        current.max_height_other = int(self.max_height_other.currentData())
+        current.x265_preset = self.x265_preset.currentData()
+        current.remux_jobs = self.remux_jobs.value()
+        current.encode_jobs = self.encode_jobs.value()
+        current.mv_4k_mbps_h264 = self.mv_h264.value()
+        current.mv_4k_mbps_hevc = self.mv_hevc.value()
         current.scale_size_trigger_gb = self.scale_gb.value()
         current.scale_video_mbps = self.scale_mbps.value()
         current.reencode_video_mbps = self.reencode_mbps.value()

@@ -92,10 +92,13 @@ def test_open_folder_offer_defaults_to_a_dry_run_with_no_second_dialog(window, m
     monkeypatch.setattr("gui.main_window.discover_video_files", lambda f, recursive, ignored=None: [])
     ran = []
     monkeypatch.setattr(mw.conversion_run, "process_file", lambda run, p, conv, **kw: ran.append(run.dry_run) or mw.conversion_run.ConversionOutcome(False, message="nothing to do"))
+    tables = []
+    monkeypatch.setattr(window, "_show_dry_run_table", lambda rows, summary, report: tables.append(len(rows)) or [])
     window._load_folder(folder, recursive=True)
     assert boxes[0] == ("Other Video Formats Found", True)  # dry run on by default
     assert ran == [True, True, True]
-    assert [title for title, _ in boxes] == ["Other Video Formats Found", "Dry run"]  # offer, then the report
+    assert [title for title, _ in boxes] == ["Other Video Formats Found"]  # the offer only ...
+    assert tables == [3]  # ... then the dry-run table (decision 12B) as the report
 
 
 def test_declining_converts_nothing_and_no_prompt_on_the_launch_restore(window, monkeypatch, tmp_path):
