@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-21#01 -- redactor_common 2026-11-21-02
+
+- Moved to the family's newest shared code (from 2026-11-06-01), so this app is on the same pin as its siblings. What it brings: the update framework and release tool (manifest, channel, installer contract, release gate; the update check falls back to GitHub's API when a download fails), the family's shared key store, the notes review page as a shared page, on/off switches in the column-header menu, and the shared notes and folder-cover code reading folders whose names end in a dot. No other change to the app; all its tests pass on the new pin.
+
 ## 2026-11-18#04 -- conversion: the homeserver3 gaps (decisions 9-18)
 
 The owner's answers on the conversion decision page of 2026-11-18, compared with his homeserver3 scripts.
