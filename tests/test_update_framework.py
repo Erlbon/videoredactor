@@ -130,8 +130,10 @@ def test_no_build_is_packed_with_upx():
 def test_build_exe_builds_both_programs_and_the_installer_with_this_repos_venv():
     bat = read("build_exe.bat")
     commands = [line for line in bat.splitlines() if not line.lstrip().upper().startswith(("REM", "ECHO"))]
-    assert "venv_sync.py" in bat and not any("pip install" in line for line in commands)
-    assert bat.count(".venv\\Scripts\\python -m PyInstaller videoredactor.spec --noconfirm") == 2
+    assert "venv_sync.py --build ." in bat and not any("pip install" in line for line in commands)
+    # the clean build venv (no shared packages): the test .venv let PyInstaller bundle what was installed on the PC
+    assert bat.count(".venv-build\\Scripts\\python -m PyInstaller videoredactor.spec --noconfirm") == 2
+    assert not any(".venv\\Scripts" in line for line in commands)
     assert bat.index('set "VIDEOREDACTOR_BUILD="') < bat.index('set "VIDEOREDACTOR_BUILD=folder"')
     assert "installer\\videoredactor.iss" in bat and "--no-pause" in bat
     for built in ("dist\\videoredactor.exe", "dist\\videoredactor\\videoredactor.exe", "dist\\videoredactor-setup.exe"):

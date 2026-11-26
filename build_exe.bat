@@ -1,5 +1,5 @@
 @echo off
-REM Builds everything a release publishes, with this repo's own .venv:
+REM Builds everything a release publishes, in this repo's clean build venv (.venv-build: no shared packages):
 REM   dist\videoredactor.exe        the one-file program (the portable download; update channel windows-exe)
 REM   dist\videoredactor-setup.exe  the per-user installer around the one-folder build (channel windows-installer)
 REM Run this from a Windows machine with Python 3.11+ and Inno Setup 6 (https://jrsoftware.org/isdl.php; a per-user
@@ -43,9 +43,9 @@ if not defined ISCC (
     exit /b 1
 )
 
-echo Making this repo's own .venv at the redactor_common pin ^(a minute the first time^)...
+echo Making this repo's clean build venv .venv-build at the redactor_common pin ^(it downloads everything the first time^)...
 REM Never "pip install -r requirements.txt" into the shared Python: one repo's pin then breaks the others (2026-11-04).
-python ..\redactor-build-tools\devenv\venv_sync.py .
+python ..\redactor-build-tools\devenv\venv_sync.py --build .
 if errorlevel 1 (
     echo.
     echo ERROR: venv_sync failed. It lives in ..\redactor-build-tools\devenv\ next to this repo;
@@ -55,11 +55,12 @@ if errorlevel 1 (
 )
 echo.
 
-REM "python -m PyInstaller" with the .venv's python: the pyinstaller console script is often not on PATH.
+REM "python -m PyInstaller" with .venv-build's python, which sees only the requirements: with the test .venv
+REM (--system-site-packages) PyInstaller also bundled optional packages installed on the PC (+20 MB, 2026-11-26).
 REM No UPX: the spec has upx=False (Defender flagged a UPX-packed sibling exe, a false positive).
 echo Building dist\videoredactor.exe ...
 set "VIDEOREDACTOR_BUILD="
-.venv\Scripts\python -m PyInstaller videoredactor.spec --noconfirm
+.venv-build\Scripts\python -m PyInstaller videoredactor.spec --noconfirm
 if errorlevel 1 (
     echo.
     echo ERROR: PyInstaller failed. See the error output above for details.
@@ -76,7 +77,7 @@ echo.
 
 echo Building the one-folder program dist\videoredactor\ for the installer ...
 set "VIDEOREDACTOR_BUILD=folder"
-.venv\Scripts\python -m PyInstaller videoredactor.spec --noconfirm
+.venv-build\Scripts\python -m PyInstaller videoredactor.spec --noconfirm
 if errorlevel 1 (
     echo.
     echo ERROR: PyInstaller failed on the one-folder build. See above.
@@ -94,14 +95,14 @@ echo.
 
 REM The family's installer contract (relaunch, update-channel, waiting for the program to stop) ships with redactor_common.
 set "CONTRACT="
-for /f "delims=" %%p in ('.venv\Scripts\python -m redactor_common.release contract-path') do set "CONTRACT=%%p"
+for /f "delims=" %%p in ('.venv-build\Scripts\python -m redactor_common.release contract-path') do set "CONTRACT=%%p"
 if not defined CONTRACT (
     echo ERROR: redactor_common's installer contract was not found ^(python -m redactor_common.release contract-path^).
     %PAUSE%
     exit /b 1
 )
 set "APPBUILD="
-for /f "usebackq delims=" %%L in (`.venv\Scripts\python -c "from core.version import APP_VERSION; print(APP_VERSION)"`) do set "APPBUILD=%%L"
+for /f "usebackq delims=" %%L in (`.venv-build\Scripts\python -c "from core.version import APP_VERSION; print(APP_VERSION)"`) do set "APPBUILD=%%L"
 if not defined APPBUILD (
     echo ERROR: could not read APP_VERSION from core\version.py.
     %PAUSE%
@@ -131,7 +132,7 @@ if exist "tools\" (
 
 echo.
 echo ================================================================
-echo  SUCCESS. Built with this repo's .venv:
+echo  SUCCESS. Built in this repo's clean .venv-build:
 echo    %cd%\dist\videoredactor.exe        ^(one file, can be copied anywhere and run^)
 echo    %cd%\dist\videoredactor-setup.exe  ^(per-user installer^)
 echo ================================================================
