@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-26#02 -- Delete Files (Recycle Bin) and the Delete key asks what you mean
+
+- **New: File > Delete Files (Recycle Bin)** (Shift+Delete). It sends the selected video files to the Recycle Bin (recoverable) after a Yes/No question, takes them off the list, and says how many went in the status bar. Only the video file is deleted: subtitles, posters and .nfo files next to it stay. A video with unsaved changes is refused (nothing is deleted until you save or deselect it). If the player has the file open, the player is closed first. On a drive without a Recycle Bin (network share, USB disk) the file goes to the Library safety backup folder; with none set, the file is kept and the reason is shown. It is also in the right-click menu of the list.
+- **The Delete key asks: Remove from List, Delete Files (Recycle Bin) or Cancel.** Before, Delete only took the video off the list and left the file on disk, which is not what most people expect. Remove from List is the default button, so Delete then Enter never deletes a file. Choosing Delete Files sends the files to the Recycle Bin at once (no second question). The File menu items Remove from List and Delete Files still act at once.
+- The shared code pin is redactor_common 2026-11-26-02 (moved from 2026-11-21-02 in the entry below), which has this question.
+
 ## 2026-11-26#01 -- Check for Updates installs the new version itself; a Windows installer -- redactor_common 2026-11-26-02
 
 - **Help > Check for Updates installs the update** instead of only opening the download page. The app is on the

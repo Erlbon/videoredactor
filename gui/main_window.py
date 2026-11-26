@@ -76,7 +76,7 @@ from redactor_common.gui.menu_builder import MenuAction, MenuItems, Separator, S
 from redactor_common.gui.settings_bundle_dialogs import export_settings, import_settings
 from redactor_common.gui.standard_menus import (
     AppMenu, StandardMenuSpec, build_standard_menu_bar, get_action_registry, look_up_submenu,
-    set_apply_count, standard_edit_items, standard_file_items, standard_help_items,
+    remove_or_delete_action, set_apply_count, standard_edit_items, standard_file_items, standard_help_items,
     standard_tools_items, standard_view_items, with_aliases,
 )
 from redactor_common.gui.async_preview import AsyncPreviewLoader
@@ -119,7 +119,8 @@ from redactor_common.core.path_column import (
 )
 from redactor_common.gui import standard_shortcuts as shortcuts
 from redactor_common.core.error_summary import summarize_errors
-from redactor_common.core.trash import TrashError, move_to_trash
+from redactor_common.core.trash import TrashError, move_to_trash, trash_with_fallback
+from redactor_common.gui.remove_or_delete import DELETE, REMOVE, ask_remove_or_delete
 from redactor_common.core.os_utils import rename_no_clobber
 from redactor_common.core.undo import UndoManager
 from redactor_common.core.folder_refresh import find_new_files_in_loaded_folders
@@ -517,6 +518,7 @@ class MainWindow(QMainWindow):
                 import_settings=self._on_import_settings,
                 remove_from_list=self._on_remove_from_list,
                 clear_list=self._on_clear_list,
+                delete_files=self.delete_files,
                 exit_slot=self.close,
             ), {"save"})),
             edit=standard_edit_items(
@@ -601,10 +603,18 @@ class MainWindow(QMainWindow):
                 APP_NAME, self._on_show_changelog, self._on_show_credits, self._on_show_about,
                 updates_slot=self.updates.check_now,
             ),
+            # The Delete key asks Remove from List or Delete Files (Erlend, 2026-11-26): Remove from List
+            # alone left the file on disk, which is not what most people expect from Delete.
+            hidden=[remove_or_delete_action(self.on_delete_key)],
         )
         build_standard_menu_bar(self, spec)
         registry = get_action_registry(self)
         self.actions_by_key = registry
+        registry["delete_files"].setText("&Delete Files (Recycle Bin)…")
+        registry["delete_files"].setToolTip(
+            "Send the selected video files to the Recycle Bin (recoverable) and remove them from the list"
+        )
+        self.delete_files_act = registry["delete_files"]
         # Get Lyrics shows only for one selected Music Video: refreshed whenever its menus are about to open.
         for menu_action in self.menuBar().actions():
             menu = menu_action.menu()
@@ -1310,8 +1320,116 @@ class MainWindow(QMainWindow):
             msg += f", {failed} failed to read"
         self.status_bar.showMessage(msg)
 
+    def on_delete_key(self) -> None:
+        """The Delete key: asks whether the selected videos are to be removed from the list (the files stay) or
+        sent to the Recycle Bin. Remove from List is the default button, so Delete then Enter never deletes a
+        file. The menu items act at once; this question is only for the key."""
+        selected = self._selected_video_files()
+        if not selected:
+            self.status_bar.showMessage("Delete: select the videos first.", 6000)
+            return
+        choice = ask_remove_or_delete(
+            self, len(selected), names=[vf.path.name for vf in selected], noun="video",
+        )
+        if choice == REMOVE:
+            self._on_remove_from_list()
+        elif choice == DELETE:
+            self.delete_files(confirm=False)  # the question above already asked
+
+    @staticmethod
+    def _release_players(paths: list[Path]) -> None:
+        """Closes the player window if it has one of `paths` open: Windows will not move a file that a player
+        still holds."""
+        try:
+            import redactor_common.gui.media_preview as media_preview  # noqa: PLC0415
+        except Exception:  # noqa: BLE001 -- no QtMultimedia: there is no player to release
+            return
+        wanted = {os.path.normcase(os.path.abspath(p)) for p in paths}
+        for window in list(getattr(media_preview, "_open_windows", [])):
+            held = getattr(window, "_path", None)
+            if held is not None and os.path.normcase(os.path.abspath(held)) in wanted:
+                window.close()
+
+    def delete_files(self, confirm: bool = True) -> None:
+        """File > Delete Files (Recycle Bin): sends the selected videos' files to the Recycle Bin (recoverable,
+        not a permanent delete) and removes them from the list. ONLY the video file goes: sidecar files next to
+        it (subtitles, .nfo, posters) stay where they are. A video with unsaved changes is refused. On a drive
+        without a Recycle Bin the file goes to the Library safety backup folder, or is kept (with the reason)
+        when none is set. `confirm=False` skips the Yes/No question (the Delete key already asked)."""
+        selected = self._selected_video_files()
+        if not selected:
+            QMessageBox.information(self, "No videos selected", "Select at least one video to delete.")
+            return
+        dirty = [vf for vf in selected if vf.dirty]
+        if dirty:
+            names = "\n".join(f"- {vf.path.name}" for vf in dirty[:10])
+            QMessageBox.warning(
+                self, "Unsaved changes",
+                f"{len(dirty)} of the selected video(s) have unsaved changes, so nothing was deleted.\n\n{names}\n\n"
+                "Save them (File > Save All) or take them off the selection first.",
+            )
+            return
+        to_delete = selected
+        if confirm:
+            preview = "\n".join(f"- {vf.path.name}" for vf in to_delete[:10])
+            if len(to_delete) > 10:
+                preview += f"\n...and {len(to_delete) - 10} more"
+            reply = QMessageBox.question(
+                self,
+                "Delete Files (Recycle Bin)?",
+                f"Send {len(to_delete)} video file(s) to the Recycle Bin?\n\n{preview}\n\n"
+                "This removes them from disk (recoverable from the Recycle Bin) and from this list. "
+                "Subtitles, posters and other files next to them are not touched.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        # Nothing may hold the files open: the preview's frame grab and the player window.
+        self._preview_loader.cancel()
+        self._release_players([vf.path for vf in to_delete])
+
+        trash = trash_with_fallback(history.quarantine_folder)  # retries; a drive with no bin -> backup folder
+        deleted: list[VideoFile] = []
+        errors: list[tuple[str, str]] = []
+
+        def _trash(vf: VideoFile, _i: int) -> None:
+            try:
+                trash(str(vf.path))
+                deleted.append(vf)
+            except TrashError as exc:
+                errors.append((str(vf.path), str(exc)))
+
+        # Cancellable: each file is trashed on its own, so stopping partway leaves the rest in the list.
+        run_with_progress(
+            self, to_delete, _trash, "Deleting files…", threshold=3,
+            label_for=lambda vf: f"Deleting: {vf.path.name}",
+        )
+
+        self._drop_trashed(deleted)
+
+        if errors:
+            details = "\n".join(f"- {os.path.basename(p)}: {err}" for p, err in errors)
+            QMessageBox.warning(
+                self, "Some files failed to delete",
+                f"{len(deleted)} of {len(to_delete)} sent to the Recycle Bin.\n\nFailed:\n{details}",
+            )
+        else:
+            # Success needs no extra click: the rows are already gone from the list.
+            self.status_bar.showMessage(f"Sent {len(deleted)} file(s) to the Recycle Bin.", 8000)
+
+    def _drop_trashed(self, trashed: list[VideoFile]) -> None:
+        """Takes videos whose files were just trashed off the list. The Undo stack is cleared (it may point at them)."""
+        if not trashed:
+            return
+        gone = {id(vf) for vf in trashed}
+        self.video_files = [vf for vf in self.video_files if id(vf) not in gone]
+        self._clear_undo()
+        self._refresh_table_rows()
+
     def _on_remove_from_list(self) -> None:
-        """File > Remove from List (Delete): drops the selected files from
+        """File > Remove from List (the Delete key asks which): drops the selected files from
         the list. Nothing on disk is touched; unsaved edits on them are lost,
         so that is confirmed first. The Undo stack is cleared (it may point at
         the removed files), like any other replacement of the list."""
@@ -1793,7 +1911,8 @@ class MainWindow(QMainWindow):
             MenuAction("ctx_create_notes", "Create Notes for This Folder…", self._on_create_notes_for_selection),
         ])
         items.extend(save_selected_items(files, self._on_save_selected, lambda vf: vf.dirty and not vf.load_error))
-        return items  # no Remove from List here: it lives in the File menu (Delete key) with Clear List
+        items.extend([Separator(), self.delete_files_act])
+        return items  # no Remove from List here: it lives in the File menu with Clear List (the Delete key asks which)
 
     def _show_table_context_menu(self, pos) -> None:
         """New: this project never had a row right-click menu before --

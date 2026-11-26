@@ -35,7 +35,7 @@ def test_file_menu_group_order(window):
         "Save All", "-",
         "Rename File…", "Undo Last Rename", "Rename / Export / Move…", "-",
         "Export Settings…", "Import Settings…", "-",
-        "Remove from List", "Clear List", "-",
+        "Remove from List", "Clear List", "Delete Files (Recycle Bin)…", "-",
         "Exit",
     ]
 
@@ -227,7 +227,9 @@ def test_remove_from_list_drops_only_the_selected_files(window, tmp_path):
     assert window.table.rowCount() == 1 and len(window.video_files) == 1
     assert window.video_files[0] is not selected[0]
     assert (tmp_path / "The Office S01E01.mkv").exists() and (tmp_path / "The Office S01E02.mkv").exists()
-    assert window.actions_by_key["remove_from_list"].shortcut() == QKeySequence("Delete")
+    # No key of its own: the Delete key asks Remove from List or Delete Files (remove_or_delete).
+    assert window.actions_by_key["remove_from_list"].shortcut().isEmpty()
+    assert window.actions_by_key["remove_or_delete"].shortcut() == QKeySequence("Delete")
 
 
 def test_remove_with_nothing_selected_says_so(window):
@@ -322,7 +324,7 @@ def test_context_menu_follows_the_skeleton(window, monkeypatch):
         return out
 
     tail = ["Clear Fields…", "Set Track Language…", "-", "Check Files…", "Fix and Convert", "-", "Organize", "Subtitles",
-            "Create Notes for This Folder…", "-", "Save Selected (0)"]
+            "Create Notes for This Folder…", "-", "Save Selected (0)", "-", "Delete Files (Recycle Bin)…"]
     assert shape(seen["single"]) == ["-", "Play", "-", "Redact", "Look Up", "Get Poster…", "Rename File…"] + tail
     assert shape(seen["multi"]) == ["-", "Redact", "Look Up", "Get Poster…"] + tail
     fix = next(i for i in seen["single"] if isinstance(i, mw.Submenu) and i.text == "Fix and Convert")
