@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-11-26#01 -- Check for Updates installs the new version itself; a Windows installer -- redactor_common 2026-11-26-02
+
+- **Help > Check for Updates installs the update** instead of only opening the download page. The app is on the
+  Redactor family's update framework (redactor_common docs/update-framework.md): every release carries an
+  `update-manifest.json` naming each download with its size and checksum, and every copy says how it was put on the
+  PC. The portable `videoredactor.exe` replaces itself (the old one is kept as `videoredactor.exe.old` until the next
+  start) and starts again; an installed copy runs the new installer silently and starts again. When it cannot update,
+  it says why, with a Copy details button, and still offers the download page.
+- **A Windows installer**, `videoredactor-setup.exe`: per user, no administrator rights, into
+  `%LOCALAPPDATA%\Programs\The Video Redactor`, with a Start menu entry. The one-file `videoredactor.exe` stays the
+  portable download. Neither bundles ffmpeg or MKVToolNix (put them in `tools\` beside the exe, on PATH, or name
+  them in Preferences).
+- **A copy on an older version must be updated by hand once**: download this release from the release page. Its
+  Check for Updates cannot read the new releases' manifest (decided for the whole family: no bridge for old copies).
+- The command line has `videoredactor --check-update [--release-tag vX]` (prints what this copy would do, as JSON;
+  changes nothing) and `--update` (does it without a window), for the release gate. `videoredactor notes PATH
+  --update` is still the notes command's own option.
+- Releases are now made with redactor_common's release tool (`pyproject.toml`), which builds the exe, the installer
+  and the manifest, publishes a pre-release, checks the update from the previous release, and only then makes it
+  Latest. The GitHub workflow no longer builds the Windows exe (its upload would replace the file the manifest
+  pins); it adds only the Linux download, when the release is published. The Linux build cannot replace itself: it
+  says so and opens the release page.
+- Shared code moved from redactor_common 2026-11-21-02 to 2026-11-26-02. For this app: `%dummy%` in an Import
+  Metadata from Filename pattern skips a piece of text (and may be used more than once). The rest is MusicBrainz and
+  Discogs lookups, which this app does not use, and the Delete key's new question, which applies only to apps with
+  Delete Files.
+
 ## 2026-11-21#01 -- redactor_common 2026-11-21-02
 
 - Moved to the family's newest shared code (from 2026-11-06-01), so this app is on the same pin as its siblings. What it brings: the update framework and release tool (manifest, channel, installer contract, release gate; the update check falls back to GitHub's API when a download fails), the family's shared key store, the notes review page as a shared page, on/off switches in the column-header menu, and the shared notes and folder-cover code reading folders whose names end in a dot. No other change to the app; all its tests pass on the new pin.

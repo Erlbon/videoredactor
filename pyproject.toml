@@ -1,0 +1,21 @@
+# Only the release tool's configuration: the program is not installed as a package (requirements.txt and venv_sync.py make
+# the .venv, and venv_sync.py prefers requirements.txt, so it never installs this folder).
+
+# python -m redactor_common.release publish: build, manifest, pre-release, the update gate, then Latest
+# (redactor_common docs/update-framework.md). The first release on the framework needs --first-framework-release.
+# The Linux tarball is not built here: .github/workflows/release.yml builds it when the release is published (as a
+# pre-release, by this tool) and adds it to the release. It cannot replace itself, so the manifest does not list it.
+[tool.redactor-release]
+app = "videoredactor"
+name = "The Ʌideo Redactor"
+repo = "Erlbon/videoredactor"
+version_file = "core/version.py"
+build = ["build_exe.bat", "--no-pause"]                           # called by its full path, stdin closed
+exe = "videoredactor.exe"
+installer_app_id = "{F93BCAEB-5D48-41F2-B05D-EB6AE2EC81AB}"     # installer\videoredactor.iss AppId (a test keeps them equal)
+title = "{name} v{build}"                                         # as before: "The Ʌideo Redactor v2026-10-30-01"
+notes = "docs/releases/v{build}.md"                               # written for each release (it must exist)
+
+[tool.redactor-release.packages]
+windows-installer = "dist/videoredactor-setup.exe"
+windows-exe = "dist/videoredactor.exe"

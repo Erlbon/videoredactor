@@ -70,7 +70,10 @@ def test_logo_is_listed_in_the_pyinstaller_spec_datas():
     datas = []
     for node in ast.walk(tree):
         if isinstance(node, ast.keyword) and node.arg == "datas":
-            datas = ast.literal_eval(node.value)
+            value = node.value
+            if isinstance(value, ast.BinOp):  # [...] + ([] if FOLDER else [(CHANNEL, ".")]): the update channel
+                value = value.left
+            datas = ast.literal_eval(value)
     assert ("assets/tmdb-logo.svg", "assets") in datas
     # Every bundled source file really exists (a typo would fail the build).
     for src, _dest in datas:

@@ -55,11 +55,13 @@ the others. `.venv\Scripts\python -m PyInstaller` rather than the bare
 `pyinstaller` command, which is often not on PATH.)
 
 The built exe lands at `dist/videoredactor.exe` -- a single
-portable file, not a folder. (The spec's `EXE()` call includes
-`a.binaries`/`a.zipfiles`/`a.datas` directly with no separate
-`COLLECT()` step, which is PyInstaller's onefile pattern; this was
-previously mis-documented here as a one-folder build, which was never
-true of the spec as written -- see the changelog.)
+portable file, not a folder (update channel `windows-exe`, bundled
+inside it). Since 2026-11-26 `build_exe.bat` also builds the one-folder
+program (`VIDEOREDACTOR_BUILD=folder`: the spec's `COLLECT()` branch,
+`dist/videoredactor/`) and wraps it in the per-user installer
+`dist/videoredactor-setup.exe` (`installer/videoredactor.iss`, Inno
+Setup 6). Releases are published with redactor_common's release tool
+(`pyproject.toml`; redactor_common `docs/update-framework.md`).
 
 ## Status as of the last real Windows run
 

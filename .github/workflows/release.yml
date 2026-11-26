@@ -1,108 +1,40 @@
 name: Release
 
-# Push a tag like v2026-09-24-01 (APP_VERSION 2026-09-24#01 with the #
-# turned into -) to build videoredactor.exe on Windows and publish it as a GitHub
-# Release, with that version's CHANGELOG.md section as the notes. Bumping
-# APP_VERSION and writing the CHANGELOG entry stay manual, as before.
-# Re-running on an existing tag (Actions tab > Release > Run workflow)
-# re-uploads the exe to that tag's release instead of failing.
+# The Linux download. The Windows files (videoredactor.exe, videoredactor-setup.exe) and update-manifest.json are built and
+# published on the owner's PC by redactor_common's release tool (pyproject.toml; redactor_common
+# docs/update-framework.md). It creates the release as a pre-release, which counts as "published": this workflow then
+# builds that tag in the same Docker toolchain as a local Linux build (github.com/Erlbon/redactor-build-tools: Ubuntu
+# 22.04, Python 3.12, tests run inside it first) and adds the tarball to the release. The Linux build cannot replace
+# itself (it says so and opens the release page), so the manifest does not list it.
+#
+# This workflow never builds or uploads the Windows exe: an upload with --clobber would replace the file the manifest
+# pins, and every copy's update would fail its checksum (as Dossier's build.yml, 2026-11-23).
+#
+# By hand, for a release already out:  gh workflow run release.yml -f tag=v2026-11-26-02
 
 on:
-  push:
-    tags: ["v*"]
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to (re)build and publish, e.g. v2026-09-24-01"
+        description: "Existing release tag to build the Linux tarball for and add it to, e.g. v2026-11-26-02"
         required: true
 
 permissions:
-  contents: write
+  contents: write     # gh release upload
 
 jobs:
-  release:
-    runs-on: windows-latest
-    timeout-minutes: 45
-    env:
-      QT_QPA_PLATFORM: offscreen
-      TAG: ${{ github.event.inputs.tag || github.ref_name }}
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-          cache: pip
-
-      - name: Install ffmpeg
-        run: choco install ffmpeg -y --no-progress
-
-      # The .spec builds with upx=True; without UPX on PATH PyInstaller
-      # silently skips compression and the exe comes out larger.
-      - name: Install UPX
-        run: choco install upx -y --no-progress
-
-      - name: Install dependencies
-        run: python -m pip install -r requirements.txt pytest
-
-      - name: Check the tag against APP_VERSION
-        shell: python
-        run: |
-          import os, sys
-          sys.path.insert(0, ".")
-          from core.version import APP_NAME, APP_VERSION
-          tag = os.environ["TAG"]
-          expected = "v" + APP_VERSION.replace("#", "-")
-          if tag != expected:
-              sys.exit(f"Tag {tag} does not match APP_VERSION {APP_VERSION} (expected {expected})")
-          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
-              f.write(f"RELEASE_TITLE={APP_NAME} {tag}\n")
-
-      # Every CHANGELOG.md section since the previous published release
-      # (redactor_common's core/release_notes.py; fails if the tagged version has no section) --
-      # not just the tagged version's own, which left check-ins between
-      # two releases unannounced.
-      - name: Build the release notes
-        shell: bash
-        run: |
-          gh release list --limit 100 --exclude-drafts --json tagName --jq '.[].tagName' > published_tags.txt
-          python -m redactor_common.core.release_notes "$TAG" published_tags.txt release_notes.md
-          cat release_notes.md
-
-      - name: Run tests
-        run: python -m pytest -q
-
-      - name: Build exe
-        run: python -m PyInstaller videoredactor.spec --noconfirm
-
-      - name: Publish GitHub Release
-        shell: bash
-        run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/videoredactor.exe --clobber
-          else
-            gh release create "$TAG" dist/videoredactor.exe --title "$RELEASE_TITLE" --notes-file release_notes.md
-          fi
-
-  # The Linux download, built after the Windows job has created the
-  # release: the same Docker toolchain as a local Linux build
-  # (github.com/Erlbon/redactor-build-tools -- Ubuntu 22.04, Python 3.12,
-  # tests run inside it first), packaged as a tarball with a short
-  # README and uploaded to the same release.
   linux:
-    needs: release
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ github.event.release.tag_name || github.event.inputs.tag }}
 
       - uses: actions/checkout@v7
         with:
