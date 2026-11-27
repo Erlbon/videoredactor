@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-27#02 -- the Play window lets go of files, safer filename Search & Replace and Recycle Bin
+
+- **The Play window no longer blocks Save, Rename, Move into Folders, Convert and Redact.** An open player holds its file and Windows then refuses to rename or replace it. The file is now released first; the window stays open.
+- **Search & Replace on the Filename column checks the new name first.** A name like `sub/x`, `CON` or one ending in a dot is reported as a problem and that file is left unchanged, instead of failing half-way.
+- **Deleting to the Recycle Bin on Windows** no longer risks removing a file for good when it is too big for the bin; it refuses instead. The exe now bundles the Windows Recycle Bin support this needs, and `pywin32` is listed in the requirements.
+- **A lookup (scene, TMDB and the like) on a file with no Content Type set no longer opens the overwrite review for nothing.** The blank Content Type looked like an existing value after the shared-code update.
+- The History journal now reports in the status bar when its line cannot be written.
+- Shared-code update: redactor_common 2026-11-27-06.
+
 ## 2026-11-27#01 -- Auto-Number opens on Episode Number
 
 - **Auto-Number** now opens with **Episode Number** chosen as the field, instead of Season Number. The other fields are still in the list.

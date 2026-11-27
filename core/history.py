@@ -193,7 +193,12 @@ def journal_begin(
         changes = diff_fields(old, new)
         if not changes:
             return None
-        return get_journal().begin(os.fspath(path), kind, changes, note=note)
+        entry_id = get_journal().begin(os.fspath(path), kind, changes, note=note)
+        if entry_id is None:
+            # redactor_common 2026-11-27 swallows the append error and returns None for a non-empty change
+            # (history is on and there are changes here, so None means the line could not be written).
+            _report(OSError(get_journal().path))
+        return entry_id
     except Exception as exc:  # noqa: BLE001 -- never block a save over the history
         _report(exc)
         return None

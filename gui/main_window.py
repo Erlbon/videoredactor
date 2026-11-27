@@ -122,6 +122,7 @@ from redactor_common.core.error_summary import summarize_errors
 from redactor_common.core.trash import TrashError, move_to_trash, trash_with_fallback
 from redactor_common.gui.remove_or_delete import DELETE, REMOVE, ask_remove_or_delete
 from redactor_common.core.os_utils import rename_no_clobber
+from redactor_common.core.rename_pattern import validate_filename_stem
 from redactor_common.core.undo import UndoManager
 from redactor_common.core.folder_refresh import find_new_files_in_loaded_folders
 from redactor_common.core.version import REDACTOR_COMMON_REPO_URL, REDACTOR_COMMON_VERSION
@@ -1337,6 +1338,15 @@ class MainWindow(QMainWindow):
             self.delete_files(confirm=False)  # the question above already asked
 
     @staticmethod
+    def _release_previews(paths) -> None:
+        """Lets the Play window (Ctrl+P) let go of any of `paths` before they are renamed, moved, converted or
+        saved: an open player holds its file, and Windows refuses the rename or the save's replace
+        (redactor_common card 65). The window stays open."""
+        from redactor_common.gui import media_preview  # noqa: PLC0415
+
+        media_preview.release_previews_of([str(p) for p in paths])
+
+    @staticmethod
     def _release_players(paths: list[Path]) -> None:
         """Closes the player window if it has one of `paths` open: Windows will not move a file that a player
         still holds."""
@@ -1974,6 +1984,7 @@ class MainWindow(QMainWindow):
         redactor_common.gui.rename_single_file (imported above as
         prompt_rename_single_file to avoid shadowing this method's own
         name)."""
+        self._release_previews([vf.path])
         if prompt_rename_single_file(self, str(vf.path), lambda p: setattr(vf, "path", Path(p)), log=_rename_log()):
             self._refresh_table_rows()
 
@@ -2188,6 +2199,7 @@ class MainWindow(QMainWindow):
         if names is None or len(names) != skipped_error_count:
             names = [f"file {i + 1}" for i in range(skipped_error_count)]
         report = SaveReport(skipped_load_errors=list(names))
+        self._release_previews([vf.path for vf in files])
 
         def _step(vf: VideoFile, _index: int) -> None:
             vf.save()
@@ -3047,6 +3059,7 @@ class MainWindow(QMainWindow):
         ) != QMessageBox.StandardButton.Yes:
             return
 
+        self._release_previews([str(vf.path) for vf in targets])
         cancel_event = threading.Event()  # Cancel (and closing the app) stops a running ffmpeg encode
         self._active_cancel = cancel_event
         # No `background` hook here: redactor_common's run_redact runs every file on a worker thread now, and
@@ -3199,6 +3212,8 @@ class MainWindow(QMainWindow):
         lock = threading.Lock()
         limits = conversion_run.JobLimits.from_settings(conv)
         state = {"cancelled": False}
+        if not dry_run:
+            self._release_previews(paths)
 
         def one(path: str, cancel_event: threading.Event) -> None:
             name = os.path.basename(path)
@@ -3618,6 +3633,8 @@ class MainWindow(QMainWindow):
             (vf, old_path, new_path) for vf, old_path, new_path in dialog.planned_renames()
             if os.path.normcase(os.path.abspath(old_path)) != os.path.normcase(os.path.abspath(new_path))
         ]
+        if not export_mode:
+            self._release_previews([old for _vf, old, _new in planned])
 
         def one(item, _index: int) -> None:
             nonlocal done
@@ -3656,6 +3673,7 @@ class MainWindow(QMainWindow):
         are planned right after it, so they travel with it. Like a rename it
         isn't on the Undo stack; the rows just take on their new paths."""
         videos = len(planned)
+        self._release_previews([move.old_path for move in planned])
         summary = run_planned_moves(
             self, with_sidecars(planned), copy=False, rename_log=_rename_log(), label="Move into Folders",
             trash=move_to_trash,
@@ -3763,11 +3781,17 @@ class MainWindow(QMainWindow):
         errors: list[str] = []
         renamed = 0
         logged: list[tuple[str, str]] = []
+        self._release_previews([targets[index].path for index in changes])
 
         def one(item: tuple[int, str], _index: int) -> None:
             nonlocal renamed
             index, new_stem = item
             vf = targets[index]
+            # The dialog's value is a bare stem (the extension is added below), so a trailing dot is part of it.
+            problem = validate_filename_stem(new_stem)
+            if problem:
+                errors.append(f"{vf.path.name}: {problem}")
+                return
             new_path = vf.path.with_name(new_stem + vf.path.suffix)
             try:
                 if new_path.exists() and new_path != vf.path:

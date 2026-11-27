@@ -10,6 +10,7 @@
 PyQt6>=6.6
 mutagen>=1.47
 send2trash>=1.8
+pywin32>=306; sys_platform == "win32"
 
 # API keys live in the OS credential store via redactor_common's secret
 # store (core/api_keys.py); without keyring, saving one needs the opt-in
@@ -26,7 +27,7 @@ keyring>=24
 # repo's README ("Releasing a new version") for how to bump this pin
 # deliberately when it changes, rather than floating and having one bad
 # push there break this project's next install.
-redactor_common @ git+https://github.com/Erlbon/redactor_common.git@2026-11-26-02
+redactor_common @ git+https://github.com/Erlbon/redactor_common.git@2026-11-27-06
 
 # For building the .exe:
 pyinstaller>=6.3
