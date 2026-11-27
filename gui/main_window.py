@@ -3838,9 +3838,12 @@ class MainWindow(QMainWindow):
         targets = self._batch_targets("number")
         if not targets:
             return
+        # Episode Number is the field that wants numbering, so it comes first
+        # and the dialog opens on it (2026-11-27; Season first was the wrong default).
+        order = ["episode_number", *(f for f in NUMERIC_FIELDS + TEXT_FIELDS if f != "episode_number")]
         fields = [
             (field, FIELD_LABELS.get(field, field), field in NUMERIC_FIELDS)
-            for field in NUMERIC_FIELDS + TEXT_FIELDS
+            for field in order
         ]
         dialog = AutoNumberingDialog(
             targets, fields, _field_text, lambda vf: vf.path.name, item_noun="file",

@@ -131,6 +131,24 @@ def test_auto_numbering_into_an_int_field(window, monkeypatch):
     assert [vf.metadata.episode_number for vf in window.video_files] == [7, 8]
 
 
+def test_auto_numbering_opens_on_episode_number(window, monkeypatch):
+    """2026-11-27: the dialog opens on the field that wants numbering."""
+    import gui.main_window as mw
+
+    seen = {}
+
+    def fake_exec(dialog):
+        seen["field"] = dialog.field_combo.currentData()
+        seen["keys"] = [dialog.field_combo.itemData(i) for i in range(dialog.field_combo.count())]
+        return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(mw.AutoNumberingDialog, "exec", fake_exec)
+    window._on_auto_numbering()
+    assert seen["field"] == "episode_number"
+    assert seen["keys"].count("episode_number") == 1
+    assert "season_number" in seen["keys"] and "title" in seen["keys"]
+
+
 def test_rename_by_pattern_renames_on_disk(window, monkeypatch):
     import gui.main_window as mw
 
