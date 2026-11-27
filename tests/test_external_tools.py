@@ -157,6 +157,7 @@ class TestBundledToolsDir(unittest.TestCase):
         self.tools_dir.mkdir()
         self.bundled_exe = self.tools_dir / "mkvpropedit.exe"
         self.bundled_exe.write_bytes(b"")
+        self.bundled_exe.chmod(0o755)  # redactor_common's find_tool skips a non-executable file on POSIX
         self._original_bundled_dir_fn = external_tools._bundled_tools_dir
         external_tools._bundled_tools_dir = lambda: self.tools_dir
 
