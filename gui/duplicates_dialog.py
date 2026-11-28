@@ -32,6 +32,7 @@ from redactor_common.core.duplicates import (
     DuplicateMember,
     JsonDismissStore,
 )
+from redactor_common.core.move_plan import MoveCancelled, files_identical
 from redactor_common.core.scan_stamp import content_fingerprint
 from redactor_common.gui.duplicates_dialog import run_find_duplicates
 
@@ -139,6 +140,17 @@ def find_groups(
             members.append(_member(vf, video_fingerprint(str(vf.path))))
             contents.add(content_fingerprint(str(vf.path)))
         identical = len(contents) == 1 and "" not in contents
+        if identical:
+            # The fingerprint is size plus three samples, a change detector and not a checksum: "Identical" (and the
+            # dialog's "The contents are exactly the same") is only claimed after a full read of every member.
+            first = str(group[0].key.path)  # type: ignore[attr-defined]
+            try:
+                identical = all(files_identical(first, str(c.key.path), cancelled)  # type: ignore[attr-defined]
+                                for c in group[1:])
+            except MoveCancelled:
+                return []
+            except OSError:
+                identical = False
         tier, reason = tier_for(group, identical)
         groups.append(DuplicateGroup(f"frame:{members[0].path}", tier, reason, members))
     return groups

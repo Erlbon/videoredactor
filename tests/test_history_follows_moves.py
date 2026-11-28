@@ -130,9 +130,12 @@ def _fake_commit(monkeypatch):
     monkeypatch.setattr(VideoFile, "save", lambda self, journal=True: None)
     monkeypatch.setattr(VideoFile, "load", lambda self: None)
 
-    def commit(original, scratch, trash, verify):
-        os.replace(scratch, original)
-        return types.SimpleNamespace(backup_kept=False, backup="", warning="")
+    def commit(original, scratch, trash, verify, *, new_path=None):
+        target = new_path or original
+        os.replace(scratch, target)
+        if target != original:
+            os.remove(original)  # a container change: the new file takes the new name directly
+        return types.SimpleNamespace(backup_kept=False, backup="", warning="", final_path=target)
 
     monkeypatch.setattr(rs, "commit_in_place", commit)
 
@@ -150,19 +153,23 @@ def test_redact_save_with_a_new_extension_is_recorded_where_saved_and_follows_th
     assert entry.path == str(original.with_suffix(".mkv"))  # followed by the successful rename
 
 
-def test_redact_save_whose_rename_fails_keeps_the_entry_at_the_saved_path(tmp_path, journal, monkeypatch, on):
-    _fake_commit(monkeypatch)
+def test_redact_container_change_goes_to_the_new_name_in_one_commit(tmp_path, journal, monkeypatch, on):
+    """Review card 19: the MP4 bytes never take the old .mkv name; commit_in_place is given the new path, so a
+    failing rename cannot leave MP4 content under the old name."""
+    seen = {}
+    import redactor_common.core.pipeline as pipeline
 
-    def refuse(old, new):
-        raise OSError("in use")
+    def spy(original, scratch, trash, verify, *, new_path=None):
+        seen["new_path"] = new_path
+        raise pipeline.CommitError("in use")
 
-    monkeypatch.setattr(rs, "rename_no_clobber", refuse)
+    monkeypatch.setattr(VideoFile, "save", lambda self, journal=True: None)
+    monkeypatch.setattr(rs, "commit_in_place", spy)
     ctx, original = _redact_ctx(tmp_path, rs.RedactEnv(trash=lambda p: None, setting=lambda s, k, d="": d))
     ctx.save()
-    assert ctx.saved
-    [entry] = journal.entries()
-    assert entry.path == str(original) == entry.original_path  # NOT the planned .mkv name
-    assert original.exists() and not original.with_suffix(".mkv").exists()
+    assert not ctx.saved
+    assert seen["new_path"] == str(original.with_suffix(".mkv"))
+    assert original.read_bytes() == b"MP4" and not original.with_suffix(".mkv").exists()
 
 
 def test_redact_rename_step_without_a_rename_log_follows_in_the_history(tmp_path, journal, monkeypatch, on):

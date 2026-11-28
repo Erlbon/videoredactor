@@ -42,7 +42,9 @@ def _seed():
     config.set_setting("vocabulary", "genres", SEP.join(["Noir", "Comedy"]))
     config.set_setting("transcode", "crf", "19")
     config.set_setting("duplicates", "threshold", "9")
-    config.set_setting("tools", "ffmpeg", "C:/tools/ffmpeg.exe")
+    tool = config.CONFIG_PATH.parent / "ffmpeg.exe"  # an imported tool path counts only when the file exists
+    tool.write_bytes(b"")
+    config.set_setting("tools", "ffmpeg", str(tool))
     config.set_setting("general", "last_folder", "D:/Videos")
 
 
@@ -124,7 +126,8 @@ def test_no_api_key_or_consent_flag_is_ever_in_a_bundle(ini, fake_keyring):
     config.set_setting("tmdb", "api_key", "SECRET-LEGACY-000")
     _seed()
     adapter = VideoSettingsAdapter()
-    everything = {s.key for s in adapter.sections()}
+    # without the tool paths: _seed's tool file lives under a tmp folder named after this test ("..._api_key_...")
+    everything = {s.key for s in adapter.sections()} - {"tools"}
     text = sb.dump_bundle(sb.build_bundle(adapter, everything))
     for needle in ("SECRET", "api_key", "allow_unencrypted_fallback", "secrets"):
         assert needle not in text

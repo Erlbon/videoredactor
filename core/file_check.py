@@ -392,7 +392,10 @@ def quick_check(
 
     read = run(["ffmpeg", "-v", "error", "-stats", "-i", path, "-map", "0", "-c", "copy", "-f", "null", "-"],
                timeout=REMUX_TIMEOUT_SECONDS)
-    if read is not None:
+    if read is None:
+        # ffmpeg is missing or timed out: the file was only probed, so it must not be stamped CHECKED OK.
+        result.findings.append(Finding("no_tool", NOTE, "Not fully checked: ffmpeg isn't available or took too long"))
+    else:
         result.readable_seconds = _last_time(read.stderr)
         errors = _error_lines(read.stderr)
         if errors:

@@ -19,6 +19,7 @@ wrote last.
 
 from __future__ import annotations
 import configparser
+import logging
 import os
 import time
 from pathlib import Path
@@ -26,6 +27,9 @@ from pathlib import Path
 from core.app_paths import settings_ini_path
 
 CONFIG_PATH: Path = settings_ini_path()
+
+# Set by load_config() when a damaged settings file was set aside; the main window shows it once in its status bar.
+SETTINGS_RESET_MESSAGE: str = ""
 
 
 def load_config() -> configparser.ConfigParser:
@@ -39,7 +43,22 @@ def load_config() -> configparser.ConfigParser:
     # feature's own development (see CHANGELOG.md), not a hypothetical.
     parser = configparser.ConfigParser(interpolation=None)
     if CONFIG_PATH.exists():
-        parser.read(CONFIG_PATH, encoding="utf-8")
+        try:
+            parser.read(CONFIG_PATH, encoding="utf-8")
+        except (configparser.Error, UnicodeDecodeError):
+            # A hand edit left the file unreadable (a duplicate key, a line without "=", bad UTF-8). Keep it as
+            # .bad, start with the defaults, and say so once (the file is gone from its place, so no second time).
+            parser = configparser.ConfigParser(interpolation=None)
+            bad = CONFIG_PATH.with_name(CONFIG_PATH.name + ".bad")
+            global SETTINGS_RESET_MESSAGE
+            try:
+                os.replace(CONFIG_PATH, bad)
+                SETTINGS_RESET_MESSAGE = (f"The settings file could not be read; it was renamed to {bad.name} and "
+                                          "the default settings are used.")
+            except OSError:
+                SETTINGS_RESET_MESSAGE = ("The settings file could not be read (and could not be renamed); the "
+                                          "default settings are used.")
+            logging.getLogger(__name__).warning("%s (%s)", SETTINGS_RESET_MESSAGE, CONFIG_PATH)
     return parser
 
 

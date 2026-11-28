@@ -85,6 +85,13 @@ def embed_offer(offer: PosterOffer, trash: Optional[Callable[[str], None]] = Non
     embedded only because the user ticked it (the caller passes only ticked offers)."""
     trash = trash or move_to_trash
     name = os.path.basename(offer.poster_path)
+    meta = offer.video.metadata
+    if getattr(meta, "cover_pending", None) or getattr(meta, "cover_remove", False):
+        # A staged poster (or a staged removal) would be written over this one by the next Save, and the sidecar
+        # would already be in the bin: leave both alone and let the user decide.
+        return EmbedOutcome(offer, False, False,
+                            f"{name}: not embedded, the video has an unsaved poster change; save or undo it first. "
+                            "The poster file is kept")
     try:
         if os.path.getsize(offer.poster_path) > MAX_FILE_BYTES:
             return EmbedOutcome(offer, False, False, f"{name}: the file is far too large")

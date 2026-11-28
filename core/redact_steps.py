@@ -311,7 +311,12 @@ class VideoCtx:
             self.original, KIND_REDACT, self.baseline, history.fields_text(work.metadata),
         )
         try:
-            result = self.bg(commit_in_place, self.original, scratch, self.env.trash or move_to_trash, verify)
+            # A container change (MKV -> MP4) goes straight to its new name: committing the MP4 bytes under the old
+            # .mkv name first and renaming afterwards could strand an MP4 in a .mkv file when the rename failed.
+            result = self.bg(
+                commit_in_place, self.original, scratch, self.env.trash or move_to_trash, verify,
+                new_path=final if final != self.original else None,
+            )
         except CommitError as exc:
             self.save_failed = True
             detail = f"{exc}" + (f" ({self.verify_problem})" if self.verify_problem else "")
@@ -319,18 +324,10 @@ class VideoCtx:
             return StepResult.failed(f"NOT SAVED, the original is untouched: {detail}")
         self.saved = True
 
-        final_path = self.original
+        final_path = result.final_path
         rename_problem = ""
-        if final != self.original:
-            try:
-                rename_no_clobber(self.original, final)
-                final_path = final
-                history.record_move(self.original, final)
-            except OSError as exc:
-                rename_problem = (
-                    f"saved, but couldn't rename it to {os.path.basename(final)} ({exc}); "
-                    f"it is an {ext.lstrip('.').upper()} file still named {os.path.basename(self.original)}"
-                )
+        if final_path != self.original:
+            history.record_move(self.original, final_path)
         history.journal_finish(entry, True, rename_problem)
         if final_path != self.original:
             live.path = Path(final_path)
@@ -755,6 +752,11 @@ class LocalFound:
     reason: str
 
 
+def _first_number(*values):
+    """The first value that is not None: season 0 (specials) and episode 0 are real numbers, not "missing"."""
+    return next((v for v in values if v is not None), None)
+
+
 def _tv_guess(stem: str):
     """(title, season, episode, year) read from a filename: the year is
     split off the title ("Show (2019) S01E02")."""
@@ -887,9 +889,9 @@ class LookupStep(VideoStep):
         if isinstance(found, imdb_local.ImdbTVCandidate):
             series, episode = found, None
             guess, _t, _y = _tv_guess(stem)
-            season = ctx.work.metadata.season_number or guess.season
-            number = ctx.work.metadata.episode_number or guess.episode
-            if season and number:
+            season = _first_number(ctx.work.metadata.season_number, guess.season)
+            number = _first_number(ctx.work.metadata.episode_number, guess.episode)
+            if season is not None and number is not None:
                 episode = imdb_local.find_episode(db, found.tconst, season, number)
         else:  # an episode id: its series and numbers come with it
             series, episode = imdb_local.series_by_id(db, found.series), found
@@ -974,7 +976,7 @@ class LookupStep(VideoStep):
         else:
             pick, confidence, reason = candidates[0], LOOKUP_CLOSEST, "closest search result; the title differs"
         found_episode = None
-        if season and episode:
+        if season is not None and episode is not None:
             try:
                 found_episode = imdb_local.find_episode(db, pick.tconst, season, episode)
             except imdb_import.ImdbDatabaseError:
@@ -1087,8 +1089,8 @@ class LookupStep(VideoStep):
     def _tv(self, ctx: VideoCtx, stem: str, db=None, notes: list[str] | None = None) -> StepResult:
         notes = notes if notes is not None else []
         guess, title, year = _tv_guess(stem)
-        season = ctx.work.metadata.season_number or guess.season
-        episode = ctx.work.metadata.episode_number or guess.episode
+        season = _first_number(ctx.work.metadata.season_number, guess.season)
+        episode = _first_number(ctx.work.metadata.episode_number, guess.episode)
         local = self._tv_local(ctx, db, title, year, season, episode, notes) if db is not None else None
         return self._tv_with_local(ctx, local, title, year, season, episode, notes)
 
@@ -1153,7 +1155,7 @@ class LookupStep(VideoStep):
             notes.append(f"{source} details unavailable: {exc}")
             return None
         episode_details: dict = {}
-        if season and episode:
+        if season is not None and episode is not None:
             try:
                 episode_details = ctx.bg(
                     tmdb_client.get_tv_episode_details if tmdb else tvdb_client.get_episode_details,
@@ -1186,7 +1188,7 @@ class LookupStep(VideoStep):
             notes.append(f"{source} details unavailable: {exc}")
             return None
         episode_details: dict = {}
-        if season and episode:
+        if season is not None and episode is not None:
             try:
                 episode_details = ctx.bg(
                     tmdb_client.get_tv_episode_details if tmdb else tvdb_client.get_episode_details, ident, season, episode,
@@ -1541,7 +1543,7 @@ class SubtitlesStep(VideoStep):
             if not found:
                 guess = parse_release_name(ctx.video.path.stem)
                 query = guess.title
-                if guess.kind == "tv" and guess.season and guess.episode:
+                if guess.kind == "tv" and guess.season is not None and guess.episode is not None:
                     query += f" S{guess.season:02d}E{guess.episode:02d}"
                 elif guess.year:
                     query += f" {guess.year}"
@@ -1568,7 +1570,7 @@ class SubtitlesStep(VideoStep):
                 return f"kept the existing {os.path.basename(exc.filename or 'subtitle file')}"
             return f"saved {path.name} (LRCLIB lyrics)"
         candidate = result.value.candidate
-        text = ctx.bg(opensubtitles_client.download_subtitle_text, candidate.file_id)
+        text = ctx.bg(opensubtitles_client.download_subtitle_text, candidate.file_id, candidate.language)
         try:
             path = ctx.video.save_subtitle_sidecar(text, language=candidate.language, overwrite=False)
         except FileExistsError as exc:

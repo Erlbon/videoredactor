@@ -455,11 +455,12 @@ quarantine and reported. Undoing twice does nothing. Exit code 1 when something 
 
 ### join-files
 
-`videoredactor join-files PATH... [--apply] [--chapters] [--log FILE]`
+`videoredactor join-files PATH... [--apply] [--chapters] [--join-unmarked] [--log FILE]`
 
 Joins the parts of a movie that is split over several files (`Title cd1.mp4`, `Title cd2.mp4`; also `disc1`, `part 2`,
 `pt1`) into one file, **without re-encoding**: the same as Media > Join Files. The files are grouped by folder and name
-and ordered by part number; a hand-picked set of files with no part markers is one group in name order. A group is
+and ordered by part number. Files with no part marker in their name are left out (so a folder of episodes is never
+joined into one "movie"); with `--join-unmarked` the unmarked files of a folder are one group in name order. A group is
 joined only when its parts match (same container, video codec, size, pixel format and frame rate, the same audio tracks
 and subtitle codecs); a group that differs, has a missing or repeated part number, or whose target name exists is
 reported with the reason and left alone. It is a **dry run unless you add `--apply`**. A real run joins to a temp name,
@@ -474,6 +475,7 @@ directly in a folder.
 | --- | --- |
 | `--apply` | Really join. Without it nothing is changed or written. |
 | `--chapters` | Add one chapter per part (Part 1, Part 2, ...) at the joins. |
+| `--join-unmarked` | Also join files with no part marker in their name, one movie per folder, in name order. For a hand-picked set only; never on a folder of episodes. |
 | `--log FILE` | With `--apply`: the TSV undo log to write (default: beside the quarantine folder). |
 
 ### undo-join

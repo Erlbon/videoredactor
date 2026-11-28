@@ -26,6 +26,7 @@ reachable, says nothing about either). This client keeps at least one second bet
 
 from __future__ import annotations
 
+import math
 import time
 import urllib.parse
 from typing import Any, Optional
@@ -233,7 +234,7 @@ def parse_scene(scene: Any, match_kind: str = MATCH_TITLE, endpoint: str = "") -
         landscape_urls=_landscape_images(scene.get("images")),
         id_trusted=urllib.parse.urlsplit(base).netloc.lower() in ("stashdb.org", "www.stashdb.org"),
         code=clean_text(scene.get("code"), 100, single_line=True),
-        duration=int(duration) if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration > 0 else None,
+        duration=int(duration) if isinstance(duration, (int, float)) and not isinstance(duration, bool) and math.isfinite(duration) and duration > 0 else None,
         match_kind=match_kind,
     )
 

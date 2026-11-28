@@ -48,7 +48,7 @@ import shutil
 import tempfile
 from typing import Optional
 
-from redactor_common.core.os_utils import replace_with_retry, retry_on_lock
+from redactor_common.core.os_utils import apply_file_attributes, file_attributes, replace_with_retry, retry_on_lock
 
 from core.file_access import make_scratch_writable, remove_scratch, require_writable
 from core.poster import describe_cover
@@ -123,6 +123,26 @@ def _custom_key(field_name: str) -> str:
     return f"{CUSTOM_ATOM_PREFIX}{CUSTOM_ATOM_NAMES.get(field_name, field_name)}"
 
 
+MULTI_SEPARATOR = "; "
+
+
+def _text_values(values: list) -> list[str]:
+    return [v.decode("utf-8", "replace") if isinstance(v, bytes) else str(v) for v in values]
+
+
+def _text_atom_value(existing, text: str) -> Optional[list]:
+    """What to store in a text atom for the panel's `text`, given the atom's current value in the file. read joins
+    several values with "; ". Text that still equals that join is the file's own: None (leave the atom untouched,
+    every value stays). Changed text becomes one value per "; " part when the file held several, else one value."""
+    current = _text_values(existing) if isinstance(existing, list) else []
+    if len(current) > 1:
+        if text == MULTI_SEPARATOR.join(current):
+            return None
+        parts = [part for part in text.split(MULTI_SEPARATOR) if part.strip()]
+        return parts or [text]
+    return [text]
+
+
 def read_mp4_metadata(path: str) -> VideoMetadata:
     """Read an MP4 file's tags into a VideoMetadata instance.
 
@@ -143,7 +163,9 @@ def read_mp4_metadata(path: str) -> VideoMetadata:
                 continue
             value = mp4.tags[atom]
             if isinstance(value, list) and value:
-                value = value[0]
+                # A text atom can hold several values (genre, artist...): all of them, joined, so a save that
+                # does not touch the field can write them back (see _text_atom_value).
+                value = value[0] if atom in INTEGER_ATOMS else MULTI_SEPARATOR.join(_text_values(value))
             if atom in INTEGER_ATOMS:
                 # season_number/episode_number are Optional[int] in
                 # VideoMetadata -- stringifying them here (like every
@@ -163,14 +185,14 @@ def read_mp4_metadata(path: str) -> VideoMetadata:
             raw = mp4.tags[key]
             if isinstance(raw, list) and raw:
                 raw = raw[0]
-            text = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
+            text = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw)
             if field_name == "content_type":
                 try:
                     meta.content_type = ContentType(text)
                 except ValueError:
                     meta.content_type = ContentType.UNSET
             elif field_name in ("season_number", "episode_number", "personal_rating"):
-                setattr(meta, field_name, int(text) if text.isdigit() else None)
+                setattr(meta, field_name, int(text) if text.isascii() and text.isdigit() else None)
             else:
                 setattr(meta, field_name, text)
         legacy = mp4.tags.get(LEGACY_TRACK_TITLE_KEY)
@@ -225,6 +247,7 @@ def _edit_via_scratch(path: str, apply) -> None:
     """Runs `apply(scratch_path)` on a copy of the video and swaps the copy in only when it still parses."""
     target = os.path.realpath(path)
     require_writable(target)  # a read-only video is refused up front, not half-way through
+    original = file_attributes(target)  # the creation date and permissions: the scratch copy has neither
     fd, scratch = tempfile.mkstemp(prefix=".videoredactor-", suffix=".tmp", dir=os.path.dirname(target))
     os.close(fd)
     try:
@@ -235,6 +258,7 @@ def _edit_via_scratch(path: str, apply) -> None:
 
         MP4(scratch)  # the edited copy must still parse before it replaces anything
         replace_with_retry(scratch, target)
+        apply_file_attributes(target, original)  # best effort: the swap has happened, never fails the save
     except BaseException:
         remove_scratch(scratch)
         raise
@@ -263,7 +287,9 @@ def _apply_mp4_tags(path: str, meta: VideoMetadata) -> None:
                     # reject or mishandle, or crash the whole save.
                     pass
             else:
-                mp4.tags[atom] = [str(value)]
+                kept = _text_atom_value(mp4.tags.get(atom), str(value))
+                if kept is not None:
+                    mp4.tags[atom] = kept
         elif atom in mp4.tags:
             del mp4.tags[atom]
 

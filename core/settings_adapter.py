@@ -228,6 +228,8 @@ def _stash_endpoint_codec():
             normal = normalize_endpoint(_single_line(value))
         except ValueError as exc:
             raise ValueError(str(exc)) from None
+        if not normal.startswith("https://"):
+            raise ValueError("an imported StashDB address must start with https://")
         return "" if normal == DEFAULT_STASH_ENDPOINT else normal
 
     return read, coerce
@@ -250,7 +252,25 @@ def _key(name: str, ini_section: str, ini_key: str, codec) -> Key:
     return Key(name, ini_section, ini_key, *codec)
 
 
-_TOOL_KEYS = [_key(exe, "tools", exe, _str_codec()) for exe in sorted(KNOWN_EXECUTABLES)]
+def _tool_path_codec(exe: str):
+    """A program path for `exe`: the app runs it, so an imported path counts only when its file name is the tool's
+    own (ffmpeg, ffmpeg.exe) and the file is on THIS computer; otherwise the current value is kept."""
+    def read(raw: str) -> str:
+        return raw
+
+    def coerce(value: Any) -> str | None:
+        value = _single_line(value)
+        if not value:
+            return ""
+        stem = os.path.splitext(value.replace("\\", "/").rsplit("/", 1)[-1])[0].lower()
+        if stem != exe.lower():
+            raise ValueError(f"the file is not named {exe}")
+        return value if os.path.isfile(value) else None
+
+    return read, coerce
+
+
+_TOOL_KEYS = [_key(exe, "tools", exe, _tool_path_codec(exe)) for exe in sorted(KNOWN_EXECUTABLES)]
 
 # section key -> (label, portable, keys)
 SECTIONS: dict[str, tuple[str, bool, list[Key]]] = {
@@ -300,9 +320,13 @@ SECTIONS: dict[str, tuple[str, bool, list[Key]]] = {
         _key("wikipedia", "notes", "wikipedia", _bool_codec(True)),
         _key("kinds", "notes", "kinds", _str_codec()),
     ]),
-    # The StashDB address and the MD5 option only: the ThePornDB / StashDB KEYS are in the credential store and never here.
-    "scene_lookup": ("ThePornDB / StashDB lookups: the StashDB address and the MD5 option", True, [
+    # The StashDB address is its own section, NOT ticked by default: the next lookup sends the user's StashDB key to
+    # that host, so a shared settings file must not change it unasked (https only).
+    "stashdb_address": ("StashDB server address (your StashDB key is sent to this server)", False, [
         _key("stashdb_endpoint", "scene_lookup", "stashdb_endpoint", _stash_endpoint_codec()),
+    ]),
+    # The MD5 option only: the ThePornDB / StashDB KEYS are in the credential store and never here.
+    "scene_lookup": ("ThePornDB / StashDB lookups: the MD5 option and adult content", True, [
         _key("md5", "scene_lookup", "md5", _bool_codec(False)),
         # Show adult content (core/lookup_types.py). A string, so "never set" stays never set on import.
         _key("show_adult", "adult", "show", _str_codec()),

@@ -25,11 +25,11 @@ from core import history
 from core.video_metadata import VideoMetadata, EDITABLE_FIELDS, SOURCE_FIELDS, ContentType
 from core.file_access import ReadOnlyFileError, require_writable
 from core.mp4_backend import read_mp4_cover, read_mp4_metadata, write_mp4_cover, write_mp4_metadata
-from core.mkv_backend import read_mkv_cover, read_mkv_metadata, write_mkv_cover, write_mkv_metadata
+from core.mkv_backend import clean_tag_text, read_mkv_cover, read_mkv_metadata, write_mkv_cover, write_mkv_metadata
 from core.ffmpeg_backend import IMPORTABLE_EXTENSIONS, extract_thumbnail, probe_technical_info
 from core.external_tools import is_tool_available, MKVTOOLNIX, FFMPEG
 from core.opensubtitles_client import clean_language_code
-from core.video_fingerprint import video_fingerprint
+from core.video_fingerprint import FINGERPRINT_VERSION, video_fingerprint
 from redactor_common.core.temp_names import is_app_temp_name
 from core.thumb_cache import CACHE_DIR_NAME, is_valid_thumbnail, prune_once_per_session, write_thumbnail_atomically
 
@@ -192,6 +192,8 @@ class VideoFile:
         self.stamp_stale = None
         if stamp is None or not stamp.fingerprint or not is_tool_available(FFMPEG):
             return
+        if not stamp.fingerprint.startswith(FINGERPRINT_VERSION + "-"):
+            return  # made by an older fingerprint: can't be compared, so "unverified", not "changed since"
         self.stamp_stale = video_fingerprint(str(self.path)) != stamp.fingerprint
 
     def stamp_text(self) -> str:
@@ -274,6 +276,13 @@ class VideoFile:
         history.journal_finish(entry, not self.save_error, self.save_error)
         if not self.save_error:
             self.baseline = new_text
+        elif self.is_mkv and self.baseline is not None:
+            # An MKV save is several mkvpropedit calls (cover, title, tags): a later one failing leaves the earlier
+            # ones written. The baseline is "as on disk", so take it from the file again, not the old state.
+            try:
+                self.baseline = history.fields_text(read_mkv_metadata(str(self.path)))
+            except Exception:  # noqa: BLE001 -- keep the old baseline when the file can't be read
+                pass
 
     def _write_and_verify(self) -> None:
         """save()'s write + read-back verification; sets save_error / dirty."""
@@ -437,6 +446,8 @@ class VideoFile:
                 mismatches.append("'cover' (cleared, the poster is still in the file)")
         for field_name in EDITABLE_FIELDS:
             expected = getattr(self.metadata, field_name, None)
+            if self.is_mkv:
+                expected = clean_tag_text(expected)  # CR/CRLF and control characters are not kept by Matroska tags
             actual = getattr(reread, field_name, None)
             if (field_name == "content_type" and expected in (None, "", ContentType.UNSET)
                     and getattr(reread, "content_type_from_media_type", False)):

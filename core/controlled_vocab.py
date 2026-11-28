@@ -72,8 +72,8 @@ def _get_option_list(key: str, defaults: list[str]) -> list[str]:
     from settings.ini afterward -- the defaults are a one-time seed, not
     something re-applied on every call.
     """
-    raw = get_setting(VOCAB_SECTION, key, "")
-    if not raw:
+    raw = get_setting(VOCAB_SECTION, key, None)  # None: the key was never written. "" is a list the user emptied.
+    if raw is None:
         set_setting(VOCAB_SECTION, key, _DELIMITER.join(defaults))
         return list(defaults)
     return [v for v in raw.split(_DELIMITER) if v]

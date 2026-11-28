@@ -114,17 +114,23 @@ def known_studio_equal(text: str, studios) -> str:
 _NOISE_WORDS = {
     "xxx", "web", "webdl", "web-dl", "webrip", "web-rip", "bluray", "blu-ray", "bdrip", "brrip", "dvdrip", "hdrip", "hdtv",
     "hevc", "x264", "x265", "h264", "h265", "h.264", "h.265", "avc", "av1", "xvid", "divx", "aac", "aac2", "ac3", "mp3",
-    "repack", "proper", "rerip", "internal", "uncut", "unrated", "uncensored", "remastered", "complete", "scenes",
+    "repack", "rerip", "uncut", "unrated", "uncensored", "remastered",
     "4k", "8k", "uhd", "fhd", "hd", "sd", "hq", "60fps", "30fps", "10bit", "8bit", "vr", "mkv", "mp4", "wmv", "avi",
-    "split", "web-dl-rip",
+    "web-dl-rip",
 }
+# Ordinary words that are release noise only in the tail after the title ("Internal Affairs", "Behind the Scenes").
+_AMBIGUOUS_NOISE_WORDS = {"proper", "internal", "complete", "scenes", "split"}
 _NOISE_RE = re.compile(r"(?:\d{3,4}[pi]|aac\d(?:\.\d)?|ddp?\d(?:\.\d)?)", re.IGNORECASE)
 _SPLIT_SCENES = re.compile(r"(?<![A-Za-z0-9])split[\s._-]*scenes?(?![A-Za-z])", re.IGNORECASE)
 _GROUP_TAIL = re.compile(r"^(.+?)-([A-Za-z0-9]{2,12})$")
 
 
-def is_noise(token: str) -> bool:
+def is_noise(token: str, tail: bool = True) -> bool:
+    """A release-tag word. The ambiguous ones (proper, internal, complete, scenes, split) count only when `tail` is
+    true, i.e. after the title has ended."""
     low = (token or "").strip().lower().strip(",;")
+    if low in _AMBIGUOUS_NOISE_WORDS:
+        return tail
     return low in _NOISE_WORDS or bool(_NOISE_RE.fullmatch(low))
 
 
@@ -353,6 +359,7 @@ def parse_scene_name(name: str, studios=(), episodes: bool = False) -> ParsedNam
     words: list[str] = []
     after_words: list[str] = []
     scene_seen = False
+    tail_seen = False
     i = 0
     while i < len(tokens):
         token = tokens[i]
@@ -365,7 +372,8 @@ def parse_scene_name(name: str, studios=(), episodes: bool = False) -> ParsedNam
         if marker:  # a second marker: dropped
             i += marker[0]
             continue
-        if is_noise(token) or (token == "NEW" and (words or scene_seen)):
+        if is_noise(token, tail=scene_seen or tail_seen) or (token == "NEW" and (words or scene_seen)):
+            tail_seen = tail_seen or is_noise(token, tail=False)  # a real release tag: the title is over
             i += 1
             continue
         (after_words if scene_seen else words).append(token)

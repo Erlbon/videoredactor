@@ -113,8 +113,27 @@ REVERSE_FIELD_MAP = {v: k for k, v in FIELD_TO_MKV_TAG.items()}
 # (Matroska has no equivalent of the MP4 media type: Music Video is the custom content-type tag only.)
 LEGACY_TRACK_TITLE_TAG = "TRACK_TITLE"
 
+# Matroska holds a cast or several genres as the same tag repeated (ACTOR, ACTOR). Read joins the repeats with
+# MULTI_SEPARATOR into the one text the panel shows; for these names a text with that separator is written back as
+# repeated tags. (Any other name that was repeated in the file is also written back as it was while its text is
+# unchanged: see plan_global_tags.)
+MULTI_SEPARATOR = "; "
+MULTI_VALUE_TAGS = frozenset({"GENRE", "ACTOR", "DIRECTOR", "WRITTEN_BY", "ARTIST", "COMPOSER", "PRODUCTION_STUDIO"})
 
-def build_tags_xml(field_values: dict[str, str]) -> str:
+# Characters XML 1.0 cannot hold (mkvpropedit refuses the file) and the line-end forms an XML reader folds into LF.
+_XML_ILLEGAL = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f￾￿]")
+
+
+def clean_tag_text(value):
+    """`value` as a Matroska tag keeps it: line ends as LF (an XML reader folds CR and CRLF into LF, so a raw CR
+    would read back different and fail the save's check) and no XML-illegal control characters. Non-text is
+    returned unchanged."""
+    if not isinstance(value, str):
+        return value
+    return _XML_ILLEGAL.sub("", value.replace("\r\n", "\n").replace("\r", "\n"))
+
+
+def build_tags_xml(field_values: dict) -> str:
     """Build a Matroska Tags XML document from {mkv_tag_key: value}.
 
     Uses ElementTree rather than string formatting specifically so
@@ -132,9 +151,16 @@ def build_tags_xml(field_values: dict[str, str]) -> str:
     tags_root = ET.Element("Tags")
     tag_elem = ET.SubElement(tags_root, "Tag")
     for name, value in field_values.items():
-        simple = ET.SubElement(tag_elem, "Simple")
-        ET.SubElement(simple, "Name").text = name
-        ET.SubElement(simple, "String").text = str(value)
+        if isinstance(value, (list, tuple)):
+            parts = [str(part) for part in value]  # already one entry per repeated tag
+        elif name in MULTI_VALUE_TAGS:
+            parts = [part for part in str(value).split(MULTI_SEPARATOR) if part.strip()] or [str(value)]
+        else:
+            parts = [str(value)]
+        for part in parts:
+            simple = ET.SubElement(tag_elem, "Simple")
+            ET.SubElement(simple, "Name").text = name
+            ET.SubElement(simple, "String").text = clean_tag_text(part)
     return ET.tostring(tags_root, encoding="unicode", xml_declaration=False)
 
 
@@ -158,12 +184,24 @@ def parse_tags_xml(xml_text: str) -> dict[str, str]:
         return {}
 
     result: dict[str, str] = {}
-    for simple in root.iter("Simple"):
-        name_elem = simple.find("Name")
-        string_elem = simple.find("String")
-        if name_elem is not None and name_elem.text and string_elem is not None:
-            result[name_elem.text] = string_elem.text or ""
+    for tag in root.iter("Tag"):
+        if _is_targeted(tag):
+            continue  # a track's, chapter's or attachment's tag is not the file's own
+        for simple in tag.findall("Simple"):
+            name_elem = simple.find("Name")
+            string_elem = simple.find("String")
+            if name_elem is not None and name_elem.text and string_elem is not None:
+                text = string_elem.text or ""
+                before = result.get(name_elem.text, "")
+                # A repeated tag (several actors, genres): all the values, in order.
+                result[name_elem.text] = f"{before}{MULTI_SEPARATOR}{text}" if before and text else (before or text)
     return result
+
+
+def _is_targeted(tag: ET.Element) -> bool:
+    """True for a <Tag> aimed at one track, chapter, edition or attachment (a UID in its <Targets>)."""
+    targets = tag.find("Targets")
+    return targets is not None and any(child.tag.endswith("UID") for child in targets)
 
 
 # mkvpropedit edits in place and mkvmerge -J / mkvextract tags only read
@@ -321,7 +359,8 @@ def read_mkv_metadata(path: str, diagnostics: Optional[dict] = None) -> VideoMet
             except ValueError:
                 meta.content_type = ContentType.UNSET
         elif field_name in ("season_number", "episode_number", "personal_rating"):
-            setattr(meta, field_name, int(value) if str(value).isdigit() else None)
+            text = str(value)
+            setattr(meta, field_name, int(text) if text.isascii() and text.isdigit() else None)
         else:
             setattr(meta, field_name, value)
 
@@ -347,12 +386,31 @@ def _identify(path: str) -> dict:
     return info if isinstance(info, dict) else {}
 
 
+def _identify_for_edit(path: str) -> dict:
+    """_identify() for a step that CHANGES the attachments: an answer that failed (mkvmerge exit 2, no JSON) must
+    not read as "no attachments", or the old cover would be left in place and a second cover.jpg added. Raises
+    RuntimeError instead (the save then reports it and nothing was changed)."""
+    result = run_tool([get_executable_path("mkvmerge"), "-J", path], timeout=MKV_TOOL_TIMEOUT_SECONDS)
+    info = None
+    if result.returncode in (0, 1) and result.stdout:
+        try:
+            info = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            info = None
+    if not isinstance(info, dict):
+        raise RuntimeError("could not list the file's attachments (mkvmerge -J failed), so the poster was not changed")
+    return info
+
+
 def read_mkv_cover(path: str) -> Optional[bytes]:
     """The embedded cover's bytes (the attachment named cover.jpg, else cover.png/.webp), or None. Extracted with
     `mkvextract <file> attachments <id>:<out>`."""
     cover = _find_cover_attachment(_identify(path))
     if cover is None or not isinstance(cover.get("id"), int):
         return None
+    size = cover.get("size")
+    if isinstance(size, int) and size > MAX_INPUT_BYTES:
+        return None  # mkvmerge already told the size: never extract a multi-GB "cover" to the temp drive
     tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".img", delete=False) as handle:
@@ -392,7 +450,7 @@ def write_mkv_cover(path: str, image: bytes) -> subprocess.CompletedProcess:
             handle.write(image)
             tmp_path = handle.name
         args: list[str] = []
-        old = _find_cover_attachment(_identify(path))
+        old = _find_cover_attachment(_identify_for_edit(path))
         if old is not None:
             selector = str(old["id"]) if isinstance(old.get("id"), int) else f"name:{old['file_name']}"
             args += ["--delete-attachment", selector]
@@ -406,7 +464,7 @@ def write_mkv_cover(path: str, image: bytes) -> subprocess.CompletedProcess:
 def remove_mkv_cover(path: str) -> subprocess.CompletedProcess:
     """Deletes the cover attachment (the one _find_cover_attachment detects), BY ITS ATTACHMENT ID (or its exact file
     name when the id is unknown): `mkvpropedit --delete-attachment <id>`. No cover in the file: nothing to do, success."""
-    old = _find_cover_attachment(_identify(path))
+    old = _find_cover_attachment(_identify_for_edit(path))
     if old is None:
         return subprocess.CompletedProcess(["mkvpropedit"], 0, "", "")
     selector = str(old["id"]) if isinstance(old.get("id"), int) else f"name:{old['file_name']}"
@@ -460,6 +518,7 @@ def plan_global_tags(existing_xml: str, ours: dict[str, str]) -> Optional[str]:
     nothing needs writing (nothing of ours to set, none to clear)."""
     kept: list[ET.Element] = []
     had_ours = False
+    repeated: dict[str, list[str]] = {}
     if existing_xml.strip():
         try:
             root = ET.fromstring(existing_xml)
@@ -476,10 +535,19 @@ def plan_global_tags(existing_xml: str, ours: dict[str, str]) -> Optional[str]:
             for simple in tag.findall("Simple"):
                 name = simple.find("Name")
                 if name is not None and name.text in REVERSE_FIELD_MAP:
+                    string = simple.find("String")
+                    repeated.setdefault(name.text, []).append((string.text or "") if string is not None else "")
                     tag.remove(simple)
                     had_ours = True
             if tag.findall("Simple"):
                 kept.append(tag)
+    # A tag that was repeated in the file and whose text is unchanged is written back as it was (several actors
+    # stay several actors, whatever the tag's name), not collapsed into one value.
+    ours = {
+        name: (repeated[name] if len(repeated.get(name, [])) > 1
+               and MULTI_SEPARATOR.join(part for part in repeated[name] if part) == value else value)
+        for name, value in ours.items()
+    }
     if not ours and not had_ours:
         return None
     new_root = ET.Element("Tags")
@@ -532,7 +600,7 @@ def write_mkv_metadata(path: str, meta: VideoMetadata) -> subprocess.CompletedPr
     --tags as a file path, not stdin) and always cleaned up afterward,
     success or failure, via try/finally.
     """
-    title = getattr(meta, "title", None)
+    title = clean_tag_text(getattr(meta, "title", None))
 
     tag_values: dict[str, str] = {}
     for field_name, mkv_tag in FIELD_TO_MKV_TAG.items():
@@ -541,7 +609,10 @@ def write_mkv_metadata(path: str, meta: VideoMetadata) -> subprocess.CompletedPr
             value = value.value if isinstance(value, ContentType) else value
         if value in (None, ""):
             continue
-        tag_values[mkv_tag] = str(value)
+        value = clean_tag_text(str(value))
+        if value == "":
+            continue  # nothing but control characters
+        tag_values[mkv_tag] = value
 
     results: list[subprocess.CompletedProcess] = []
 
@@ -564,11 +635,14 @@ def write_mkv_metadata(path: str, meta: VideoMetadata) -> subprocess.CompletedPr
     elif _current_native_title(path):
         results.append(run_mkvpropedit(path, ["--edit", "info", "--delete", "title"]))
 
-    existing_xml = _extract_tags_xml(path)
-    if existing_xml is None:
-        planned = build_tags_xml(tag_values) if tag_values else None
+    if any(r.returncode not in (0, 1) for r in results):
+        planned = None  # the title step failed: stop here, nothing more is written on top of a failed save
     else:
-        planned = plan_global_tags(existing_xml, tag_values)
+        existing_xml = _extract_tags_xml(path)
+        if existing_xml is None:
+            planned = build_tags_xml(tag_values) if tag_values else None
+        else:
+            planned = plan_global_tags(existing_xml, tag_values)
 
     if planned is not None:
         tmp_xml_path = None

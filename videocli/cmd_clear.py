@@ -62,7 +62,7 @@ def run_clear(args: argparse.Namespace, out: Output) -> int:
         raise CliError("refusing to clear without --yes (use --dry-run to see what would be cleared)")
     files = collect(args.paths, out, recurse=not args.no_recurse)
     failed = 0
-    for index, video in enumerate(load_videos(files, out), start=1):
+    for index, video in enumerate(load_videos(files, out, for_write=True), start=1):
         path = str(video.path)
         out.progress(index, len(files), path)
         row = {"path": path, "status": "", "cleared": {}, "message": ""}

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from typing import Callable, Optional
@@ -129,7 +130,8 @@ def ffmpeg_args(source: str, srt_path: str, temp: str, language: str, drop: list
             "-map", "0:V", "-map", "0:a?", "-map", "0:s?"]
     for index in drop:
         args += ["-map", f"-0:s:{index}"]
-    args += ["-map", "1:0", "-map_chapters", "0", "-c", "copy", "-c:s", "mov_text",
+    # -c:s copy keeps the file's own subtitle tracks as they are; only the new track (number `kept`) becomes mov_text.
+    args += ["-map", "1:0", "-map_chapters", "0", "-c", "copy", "-c:s", "copy", f"-c:s:{kept}", "mov_text",
              f"-metadata:s:s:{kept}", f"language={language}",
              f"-metadata:s:s:{kept}", f"handler_name={LYRICS_TRACK_NAME}",
              f"-metadata:s:s:{kept}", f"title={LYRICS_TRACK_NAME}",
@@ -211,7 +213,12 @@ def embed_lyrics_track(
 
 
 def _run_mkvmerge(args: list[str]) -> tuple[Optional[int], str]:
-    result = run_tool([get_executable_path(args[0])] + args[1:], timeout=MKV_TOOL_TIMEOUT_SECONDS * 6)
+    try:
+        result = run_tool([get_executable_path(args[0])] + args[1:], timeout=MKV_TOOL_TIMEOUT_SECONDS * 6)
+    except subprocess.TimeoutExpired:
+        return None, "mkvmerge took too long and was stopped"
+    except OSError as exc:  # missing, not a program, no permission
+        return None, f"mkvmerge could not be run ({exc})"
     return result.returncode, (result.stdout or "") + (result.stderr or "")
 
 
@@ -220,6 +227,8 @@ def _mkv_build(srt_path: str, lang: str, drop: list[int], default: bool, runner)
         code, output = runner(mkvmerge_args(source, srt_path, temp, lang, drop, default))
         if code in (0, 1):  # 1 = warnings only; the file is written
             return True, ""
+        if code is None:
+            return False, _last_line(output) or "mkvmerge did not finish"
         return False, _last_line(output) or f"mkvmerge failed (exit code {code})"
     return build
 

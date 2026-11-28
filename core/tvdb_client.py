@@ -36,7 +36,8 @@ from redactor_common.core.lookup_client import (
     as_dict, as_int, as_text, build_request, dict_items, fetch_bytes, fetch_json, json_object, make_default_fetch,
 )
 
-BASE_URL = "https://api.thetvdb.com/v4"
+BASE_URL = "https://api4.thetvdb.com/v4"  # the v4 host (api.thetvdb.com is the old v2/v3 one)
+MAX_EPISODE_PAGES = 100  # a page holds about 500 episodes
 USER_AGENT = "TheVideoRedactor"
 # Injectable for tests; see redactor_common.core.lookup_client.
 _fetch = make_default_fetch(USER_AGENT, timeout=10)
@@ -234,14 +235,18 @@ def get_series_episodes(series_id: int) -> list[EpisodeInfo]:
     fetches the full episode list once; group_episodes_into_seasons()
     derives the season picker's list from this same data client-side.
 
-    NOTE: only fetches the first page. TheTVDB's episodes endpoint is
-    paginated for very long-running shows; a show with enough episodes
-    to exceed one page would need `page` parameter handling added here
-    -- flagged as a known gap rather than silently truncating long-
-    running shows without mentioning it.
+    The episodes endpoint is paged (page=0, 1, 2...): pages are read until one comes back empty or its
+    `links.next` is empty, up to MAX_EPISODE_PAGES.
     """
-    data = _get_json(f"/series/{series_id}/episodes/default")
-    episodes_data = dict_items(as_dict(data.get("data")).get("episodes"))
+    episodes_data: list = []
+    for page in range(MAX_EPISODE_PAGES):
+        data = _get_json(f"/series/{series_id}/episodes/default", {"page": page})
+        batch = dict_items(as_dict(data.get("data")).get("episodes"))
+        if not batch:
+            break
+        episodes_data.extend(batch)
+        if not as_dict(data.get("links")).get("next"):
+            break
     return [
         EpisodeInfo(
             season_number=as_int(e.get("seasonNumber")),

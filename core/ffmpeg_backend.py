@@ -74,7 +74,7 @@ def _run(args: list[str], timeout: float = PROBE_TIMEOUT_SECONDS) -> Optional[su
     resolved_args = [get_executable_path(args[0])] + args[1:]
     try:
         return run_tool(resolved_args, timeout=timeout)
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired):  # FileNotFoundError, PermissionError (a folder), WinError 193 ...
         return None
 
 
@@ -150,6 +150,7 @@ def _run_ffmpeg(
     args: list[str],
     cancel_event: Optional[threading.Event] = None,
     timeout: Optional[float] = None,
+    stdout_sink: Optional[list] = None,
 ) -> tuple[Optional[int], str]:
     """Runs ffmpeg (args[0] is the logical name) via Popen + polling
     communicate(), so `cancel_event` can kill it mid-run -- `_run()`'s
@@ -170,6 +171,8 @@ def _run_ffmpeg(
         )
     except FileNotFoundError:
         return None, "ffmpeg not found on PATH -- is it installed?"
+    except OSError as exc:
+        return None, f"ffmpeg could not be started: {exc}"
 
     waited = 0.0
     stderr = ""
@@ -178,7 +181,9 @@ def _run_ffmpeg(
     try:
         while True:
             try:
-                _, stderr = proc.communicate(timeout=0.5)
+                out, stderr = proc.communicate(timeout=0.5)
+                if stdout_sink is not None:  # a caller that wants stdout (a subtitle as SubRip on "-")
+                    stdout_sink.append(out or "")
                 break
             except subprocess.TimeoutExpired:
                 waited += 0.5

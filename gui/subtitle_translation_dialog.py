@@ -26,7 +26,7 @@ from PyQt6.QtWidgets import (
 )
 from redactor_common.core.srt import Cue, align_cues, clock_text, parse_srt
 from redactor_common.core.translate import TranslateError, Translator
-from redactor_common.gui.progress import run_work_with_progress
+from redactor_common.gui.progress import run_busy, run_work_with_progress
 from redactor_common.gui.sortable_table import NaturalTableWidgetItem, enable_sorting, suspend_sorting
 from redactor_common.gui.table_columns import make_columns_resizable
 
@@ -57,6 +57,7 @@ class SubtitleTranslationDialog(OwnedDialog):
         self._source_cues: list[Cue] = []
         self._texts: dict[int, str] = {}
         self._loading = False
+        self._text_cache: dict[tuple, str] = {}  # embedded tracks already read by ffmpeg, per (file, stream)
 
         translate = mode == MODE_TRANSLATE
         self.setWindowTitle("Subtitle translation" if translate else "Compare subtitles")
@@ -183,6 +184,18 @@ class SubtitleTranslationDialog(OwnedDialog):
         elif code:
             self.language_combo.setEditText(code)
 
+    def _read_source_text(self, source) -> str:
+        """The track as SRT text. An embedded track is read by ffmpeg, which reads the whole file: that runs on a
+        worker thread under the busy dialog (the window is disabled meanwhile, so the combos cannot be changed),
+        and the text is kept per track, so going back to a track already read costs nothing. A sidecar is a small
+        file and is read directly."""
+        if source.kind != st.KIND_EMBEDDED:
+            return st.read_text(source)
+        key = (source.path, source.stream_index)
+        if key not in self._text_cache:
+            self._text_cache[key] = run_busy(self, f"Reading {source.label}...", st.read_text, source)
+        return self._text_cache[key]
+
     def _load_source(self) -> None:
         source = self.current_source()
         self._loading = True
@@ -190,7 +203,7 @@ class SubtitleTranslationDialog(OwnedDialog):
             self.write_button.setEnabled(False)
             self.result = None
             try:
-                text = st.read_text(source)
+                text = self._read_source_text(source)
             except Exception as exc:  # noqa: BLE001 -- shown to the user, not raised
                 self._source_cues = []
                 self.status_label.setText(f"Could not read that subtitle: {exc}")
@@ -350,8 +363,8 @@ class SubtitleTranslationDialog(OwnedDialog):
             self._fit_columns()
             return
         try:
-            a = parse_srt(st.read_text(left))
-            b = parse_srt(st.read_text(right))
+            a = parse_srt(self._read_source_text(left))
+            b = parse_srt(self._read_source_text(right))
         except Exception as exc:  # noqa: BLE001
             self.table.setRowCount(0)
             self.status_label.setText(f"Could not read a subtitle: {exc}")

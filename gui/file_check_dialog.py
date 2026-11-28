@@ -744,13 +744,17 @@ def _run_fix_all(window, files: list[VideoFile], error_details) -> None:
         report += cut_report(cut)
         errors += cut_errors
     if "repair" in steps:
-        current = eligible_fixes(files)["repair"]
+        # Only the files the confirmed plan named: a file that became repairable after the remux is not in it.
+        planned = {id(vf) for vf in fixes["repair"]}
+        current = [vf for vf in eligible_fixes(files)["repair"] if id(vf) in planned]
         repaired, repair_errors, repair_notes = repair_files(window, current)
         report += [f"{vf.path.name}: repaired" for vf in repaired] + repair_notes
         errors += repair_errors
     window._refresh_table_rows()
 
-    language_files = eligible_fixes(files)["language"] if "language" in steps else []
+    planned_language = {id(vf) for vf in fixes["language"]}  # the confirmed plan's files only
+    language_files = ([vf for vf in eligible_fixes(files)["language"] if id(vf) in planned_language]
+                      if "language" in steps else [])
     parts = [f"Fix All: {len([s for s in steps if s != 'language'])} step(s) run"]
     if errors:
         parts.append(f"{len(errors)} problem(s)")

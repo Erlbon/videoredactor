@@ -93,7 +93,8 @@ class RemuxLog:
         if not os.path.isfile(self.path):
             return []
         with open(self.path, encoding="utf-8", newline="") as f:
-            lines = [raw for raw in f.read().split("\n") if raw.strip()]
+            # A log saved by an editor with CRLF line ends: drop the "\r" so the last cell reads right.
+            lines = [raw.rstrip("\r") for raw in f.read().split("\n") if raw.strip()]
         out = []
         for raw in lines:
             cells = raw.split("\t")
@@ -184,7 +185,9 @@ def remux_file(
     if not outcome.converted:
         message = outcome.message or "not converted"
         skipped = any(a.verb == "skip" and "left alone" in a.detail for a in run.actions)
-        if message == "Cancelled":
+        # The message arrives wrapped ("original kept (conversion failed: Cancelled)"), so match its end too.
+        if message == "Cancelled" or message.endswith("Cancelled)") or any(
+                a.detail.endswith("Cancelled)") for a in run.actions):
             return RemuxResult(path, SKIPPED, "cancelled, the file is untouched")
         if not skipped:
             _log_failure(log, path, original_bytes, message)
@@ -243,12 +246,19 @@ def undo_remux_log(
     share one new file, which is moved aside with the first row undone; the others just come back)."""
     log = RemuxLog(log_path)
     rows = log.rows()
-    already = {(r["original"], r["new"]) for r in rows if r["result"] == UNDONE}
+    undone_after: dict[tuple[str, str], int] = {}  # per pair: UNDONE rows not yet matched to an earlier done row
     lines: list[str] = []
     problems: list[str] = []
     stamp = (day or date.today()).isoformat()
     for row in reversed(rows):
-        if row["result"] != done_status or (row["original"], row["new"]) in already:
+        pair = (row["original"], row["new"])
+        if row["result"] == UNDONE:
+            undone_after[pair] = undone_after.get(pair, 0) + 1
+            continue
+        if row["result"] != done_status:
+            continue
+        if undone_after.get(pair, 0) > 0:  # this done row was undone by a later UNDONE row (matched by count, not by pair)
+            undone_after[pair] -= 1
             continue
         original, quarantined, new = row["original"], row["quarantined"], row["new"]
         name = os.path.basename(original)

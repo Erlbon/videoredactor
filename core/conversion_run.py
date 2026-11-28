@@ -95,6 +95,10 @@ def verify_result(
     want_subs = expected_subtitle_count(source, plan, added_subtitles)
     if len(result.of("subtitle")) != want_subs:
         problems.append(f"subtitle tracks: expected {want_subs}, got {len(result.of('subtitle'))}")
+    if plan.container == ".mkv":  # fonts and other attachments travel (the poster is restored separately)
+        want_att, got_att = len(cp.keepable_attachments(source)), len(cp.keepable_attachments(result))
+        if got_att != want_att:
+            problems.append(f"attachments (fonts): {want_att} before, {got_att} after")
     if plan.scales:
         video = result.video
         target = plan.scale_to(settings)
@@ -124,16 +128,19 @@ def _streams_agree(result: cp.MediaInfo) -> bool:
     return abs(video.duration - audio.duration) <= DURATION_TOLERANCE
 
 
-def decode_problem(path: str) -> str:
+def decode_problem(path: str, cancel_event=None) -> str:
     """"" when ffmpeg decodes every stream of `path` with no error at all (a full decode to the null muxer), else the
-    first error line. Used to verify a remux of a file whose container was wrong."""
-    from core.ffmpeg_backend import _run  # noqa: PLC0415
+    first error line. Used to verify a remux of a file whose container was wrong. It runs through the cancellable
+    ffmpeg path: `cancel_event` stops it, and closing the app kills it."""
+    from core.ffmpeg_backend import _run_ffmpeg  # noqa: PLC0415
 
-    result = _run(["ffmpeg", "-v", "error", "-i", path, "-map", "0:V", "-map", "0:a?", "-f", "null", "-"], timeout=CONVERT_TIMEOUT_SECONDS)
-    if result is None:
-        return "the full decode could not run (ffmpeg missing or timed out)"
-    lines = [line.strip() for line in (result.stderr or "").splitlines() if line.strip()]
-    if result.returncode != 0 or lines:
+    code, stderr = _run_ffmpeg(
+        ["ffmpeg", "-v", "error", "-i", path, "-map", "0:V", "-map", "0:a?", "-f", "null", "-"],
+        cancel_event=cancel_event, timeout=CONVERT_TIMEOUT_SECONDS)
+    if code is None:
+        return f"the full decode did not finish ({stderr or 'ffmpeg missing or timed out'})"
+    lines = [line.strip() for line in (stderr or "").splitlines() if line.strip()]
+    if code != 0 or lines:
         return f"the result does not decode cleanly: {lines[0] if lines else 'ffmpeg failed'}"
     return ""
 
@@ -318,7 +325,10 @@ def convert_file(
             if expected != ("matroska" if want == ".mkv" else "mp4"):
                 problem = f"the result is not a real {want[1:].upper()} file (ffprobe says {result_info.format_name if result_info else '?'})"
             else:
-                problem = decode_check(temp)
+                if decode_check is decode_problem:
+                    problem = decode_problem(temp, cancel_event=cancel_event)
+                else:
+                    problem = decode_check(temp)
         if not problem and cover:
             problem = verify_cover(temp, cover)
         return problem
@@ -370,17 +380,23 @@ def _partial_ok(source: cp.MediaInfo, result: cp.MediaInfo) -> bool:
     return cp.LENIENT_MIN_FRACTION * source.duration <= result.duration < source.duration
 
 
-def embedded_subtitle_texts(info: cp.MediaInfo, source: str) -> list[str]:
-    """The text of each embedded text subtitle (ffmpeg -> SubRip on stdout), for the duplicate check."""
-    from core.ffmpeg_backend import _run  # noqa: PLC0415
+def embedded_subtitle_texts(info: cp.MediaInfo, source: str, cancel_event=None) -> list[str]:
+    """The text of each embedded text subtitle (ffmpeg -> SubRip on stdout), for the duplicate check. Runs through
+    the cancellable ffmpeg path (`cancel_event` stops it, closing the app kills it)."""
+    from core.ffmpeg_backend import _run_ffmpeg  # noqa: PLC0415
 
     texts = []
     for track in info.of("subtitle"):
         if track.codec not in cp.TEXT_SUBTITLES:
             continue
-        result = _run(["ffmpeg", "-v", "error", "-i", source, "-map", f"0:{track.index}", "-f", "srt", "-"], timeout=300)
-        if result is not None and result.returncode == 0 and result.stdout:
-            texts.append(result.stdout)
+        if cancel_event is not None and cancel_event.is_set():
+            break
+        sink: list[str] = []
+        code, _stderr = _run_ffmpeg(
+            ["ffmpeg", "-v", "error", "-i", source, "-map", f"0:{track.index}", "-f", "srt", "-"],
+            cancel_event=cancel_event, timeout=300, stdout_sink=sink)
+        if code == 0 and sink and sink[0]:
+            texts.append(sink[0])
     return texts
 
 
@@ -444,6 +460,10 @@ def read_source_tags(path: str):
         return None
     tags = copy.deepcopy(vf.metadata)
     tags.scan_stamp = ""  # a Check Files stamp describes the OLD file's bytes: the new file is unchecked
+    # A "Collected from" load() only SUGGESTED (from a web address in the Comment) was never saved or seen by the
+    # user: it must not be written into the new file by a conversion nobody asked to tag.
+    from core import collected_from
+    collected_from.drop_suggestion(tags)
     return tags
 
 
@@ -518,7 +538,10 @@ def _process_file(
         readable, video_had_subtitles=bool(info.of("subtitle")), whitelist=si.language_whitelist(settings.subtitle_languages),
     )
     if chosen and info.of("subtitle"):  # the embedded-text extraction (ffmpeg) only when there is something to compare
-        embedded = embedded_texts(info, source)
+        if embedded_texts is embedded_subtitle_texts:
+            embedded = embedded_subtitle_texts(info, source, cancel_event=convert_kwargs.get("cancel_event"))
+        else:
+            embedded = embedded_texts(info, source)
         chosen = [s for s in chosen if not si.duplicate_of_embedded(s.text, embedded)]
     if chosen:
         plan = cp.plan_conversion(

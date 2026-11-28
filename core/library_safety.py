@@ -334,6 +334,9 @@ class SafeRun:
     dry_run: bool = True
     delete_after_conversion: bool = False
     keep_originals: bool = False  # the policy "keep": a result with its own name leaves the original where it is
+    # The user's explicit "keep the original" for this run: a result that would take the original's own name is
+    # refused (the original would have to be set aside), and it beats delete_after_conversion.
+    keep_strict: bool = False
     recent_minutes: int = DEFAULT_RECENT_MINUTES
     tolerance_seconds: float = DEFAULT_DURATION_TOLERANCE_SECONDS
     tolerance_fraction: float = DEFAULT_DURATION_TOLERANCE_FRACTION
@@ -398,7 +401,7 @@ class SafeRun:
     def dispose(self, path: str, kind: str, reason: str) -> bool:
         """A file that has served its purpose (an external subtitle now inside the video): deleted when
         delete_after_conversion is on, else quarantined / Recycle Bin like any replaced file."""
-        if not self.delete_after_conversion:
+        if not self.delete_after_conversion or self.keep_strict:
             return self.quarantine(path, kind, reason) is not None
         busy = self.busy_reason(path)
         if busy:
@@ -453,6 +456,9 @@ class SafeRun:
         if not same and os.path.lexists(final):
             self._note("skip", source, f"{final} already exists", reason)
             return False
+        if same and self.keep_strict:
+            self._note("skip", source, "left alone", "the original is kept, and the result would need the same name")
+            return False
         action = self._note("convert", source, final, reason)
         if self.dry_run:
             return True
@@ -479,7 +485,7 @@ class SafeRun:
         except BaseException:
             _remove_temp(temp)
             raise
-        if self.keep_originals and not same and not self.delete_after_conversion:
+        if self.keep_originals and not same and (self.keep_strict or not self.delete_after_conversion):
             # The policy "keep the original": the verified result just takes its own name; nothing is moved.
             try:
                 os.rename(temp, final)
@@ -498,7 +504,7 @@ class SafeRun:
         # keeps the original beside the result (never a delete).
         from redactor_common.core.pipeline import CommitError, commit_in_place  # noqa: PLC0415
 
-        if self.delete_after_conversion:
+        if self.delete_after_conversion and not self.keep_strict:
             # The user's explicit setting: the verified result replaces the original for good (not undoable).
             disposer, how = os.remove, "original deleted: delete-after-conversion is on"
         elif self.quarantine_root:

@@ -648,7 +648,7 @@ def test_subtitles_are_off_by_default():
 
 def test_a_hash_matched_subtitle_is_downloaded_beside_the_video(work, bin_, tmp_path, monkeypatch):
     monkeypatch.setattr(osc, "search_by_hash", lambda path, lang: [candidate(True)])
-    monkeypatch.setattr(osc, "download_subtitle_text", lambda file_id: "1\n00:00:01,000 --> 00:00:02,000\nHi\n")
+    monkeypatch.setattr(osc, "download_subtitle_text", lambda file_id, language="und": "1\n00:00:01,000 --> 00:00:02,000\nHi\n")
     vf = stub(work, "Some Movie 2020.mp4")
     entry = subtitle_entry(vf, make_env(bin_, tmp_path))
     assert entry.status is FileStatus.CHANGED and "auto-applied at 95%" in entry.applied[0]
@@ -658,7 +658,7 @@ def test_a_hash_matched_subtitle_is_downloaded_beside_the_video(work, bin_, tmp_
 def test_a_title_matched_subtitle_needs_review_and_writes_nothing(work, bin_, tmp_path, monkeypatch):
     monkeypatch.setattr(osc, "search_by_hash", lambda path, lang: [])
     monkeypatch.setattr(osc, "search_by_title", lambda query, lang: [candidate(False)])
-    monkeypatch.setattr(osc, "download_subtitle_text", lambda file_id: pytest.fail("downloaded"))
+    monkeypatch.setattr(osc, "download_subtitle_text", lambda file_id, language="und": pytest.fail("downloaded"))
     vf = stub(work, "Some Movie 2020.mp4")
     entry = subtitle_entry(vf, make_env(bin_, tmp_path))
     assert entry.status is FileStatus.NEEDS_REVIEW and "sync is not guaranteed" in entry.review[0].reason

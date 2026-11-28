@@ -137,7 +137,7 @@ def test_mp4_save_verifies_the_stamp_and_clears_dirty(clips, tmp_path):
 @needs_ffmpeg
 def test_fingerprint_is_stable_across_tag_writes_and_copy_remux(clips, tmp_path):
     original = video_fingerprint(str(clips / "a.mp4"))
-    assert original.startswith("v1-") and ";" not in original
+    assert original.startswith("v2-") and ";" not in original
 
     tagged = tmp_path / "tagged.mp4"
     tagged.write_bytes((clips / "a.mp4").read_bytes())

@@ -28,6 +28,7 @@ No new field (the content type is Porn): the code (SKU) and the duration have no
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import os
 import re
@@ -146,6 +147,16 @@ def clean_date(value: object) -> str:
     if not match:
         return ""
     year, month, day = match.groups()
+    if int(year) < 1800:  # "0000-00-00" and the like
+        return ""
+    if month and day:
+        try:
+            datetime.date(int(year), int(month), int(day))
+            return f"{year}-{month}-{day}"
+        except ValueError:
+            day = None  # "2010-02-31": keep what is real
+    if month and not 1 <= int(month) <= 12:
+        month = None  # "2010-00-00", "2021-13-45": the year alone
     return "-".join(p for p in (year, month, day) if p)
 
 

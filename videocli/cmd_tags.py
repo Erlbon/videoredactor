@@ -95,7 +95,11 @@ def _read_lyrics_source(source: str) -> str:
     """The text for `-s lyrics=@FILE`: the UTF-8 file, or standard input for `@-`."""
     try:
         if source == "-":
-            return sys.stdin.read()
+            stream = getattr(sys.stdin, "buffer", None)
+            if stream is None:
+                raise CliError("cannot read the lyrics from standard input: no input is connected "
+                               "(use -s lyrics=@FILE instead)")
+            return stream.read(LYRICS_MAX_BYTES * 2).decode("utf-8-sig")
         with open(source, encoding="utf-8-sig") as handle:
             return handle.read(LYRICS_MAX_BYTES * 2)
     except (OSError, UnicodeDecodeError) as exc:
@@ -110,13 +114,17 @@ def run_set(args: argparse.Namespace, out: Output) -> int:
             value = check_value(field, _read_lyrics_source(value[1:]))
         changes[field] = value
     for name in args.clear:
+        if name.strip().lower().replace("_", "").replace("-", "").replace(" ", "") == "tracktitle":
+            # The retired name is an alias of title for -s; for --clear an old script meant the unused track title.
+            raise CliError("track_title is retired: the title is the song, so --clear track_title would empty the "
+                           "Title. Use --clear title if that is what you want")
         changes[resolve_field(name)] = ""
     if not changes:
         raise CliError("nothing to change: give at least one -s FIELD=VALUE or --clear FIELD")
 
     files = collect(args.paths, out, recurse=not args.no_recurse)
     failed = 0
-    for index, video in enumerate(load_videos(files, out), start=1):
+    for index, video in enumerate(load_videos(files, out, for_write=True), start=1):
         path = str(video.path)
         out.progress(index, len(files), path)
         row = {"path": path, "status": "", "changes": {}, "message": ""}
@@ -127,6 +135,11 @@ def run_set(args: argparse.Namespace, out: Output) -> int:
         else:
             for field, new in changes.items():
                 old = field_text(video.metadata, field)
+                if field == "content_type" and getattr(video.metadata, "content_type_from_media_type", False):
+                    # Only the MP4 media type (stik 6) says Music Video: a suggestion, the file has no content type.
+                    old = ""
+                    if not new:
+                        row["message"] = "the media type still says Music Video; that is not removed"
                 if old != new:
                     row["changes"][field] = {"old": old, "new": new}
             if not row["changes"]:

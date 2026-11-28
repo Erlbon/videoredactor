@@ -98,6 +98,10 @@ class VocabularyEditorDialog(OwnedDialog):
         name = self.new_item_edit.text().strip()
         if not name:
             return
+        if "," in name:
+            QMessageBox.information(self, "No Commas", "An entry cannot contain a comma: a comma separates the "
+                                    "values of a field, so the entry would be stored as two.")
+            return
         if name in self._get_options():
             QMessageBox.information(self, "Already Exists", f'"{name}" is already in the list.')
             return

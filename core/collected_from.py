@@ -57,3 +57,15 @@ def suggest(metadata) -> bool:
     metadata.collected_from_detail = url
     metadata.collected_from_suggested = True
     return True
+
+
+def drop_suggestion(metadata) -> bool:
+    """Undo suggest() while the suggestion is still unconfirmed (the user never kept it): the two fields go empty
+    again and the flag clears. For writers that save without the user having seen the panel (a conversion, the
+    command line). Returns True when something was dropped."""
+    if not getattr(metadata, "collected_from_suggested", False):
+        return False
+    metadata.collected_from = ""
+    metadata.collected_from_detail = ""
+    metadata.collected_from_suggested = False
+    return True

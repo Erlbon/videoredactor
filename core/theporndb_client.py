@@ -27,6 +27,7 @@ site's own privacy policy page is the only legal page that can be read without l
 
 from __future__ import annotations
 
+import math
 import re
 import time
 from typing import Any, Optional
@@ -188,7 +189,7 @@ def parse_scene(scene: Any, match_kind: str = MATCH_TITLE, kind: str = "scene") 
         landscape_urls=_landscape_urls(scene),
         kind=kind,
         code=clean_text(scene.get("sku"), 100, single_line=True),
-        duration=int(duration) if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration > 0 else None,
+        duration=int(duration) if isinstance(duration, (int, float)) and not isinstance(duration, bool) and math.isfinite(duration) and duration > 0 else None,
         match_kind=match_kind,
     )
 

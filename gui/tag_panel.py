@@ -104,6 +104,35 @@ def save_field_order(order: list[str]) -> None:
     set_setting("panel", "field_order", encode_order(order))
 
 
+class _FocusWheelSpinBox(QSpinBox):
+    """A spin box that ignores the mouse wheel unless it has focus, so scrolling the side panel
+    never changes (and so never stages) a value the user did not click into."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def wheelEvent(self, event) -> None:
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            event.ignore()
+
+
+class _FocusWheelComboBox(QComboBox):
+    """Same as _FocusWheelSpinBox, for the panel's plain drop-down lists."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def wheelEvent(self, event) -> None:
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            event.ignore()
+
+
 class TagPanel(QWidget):
     """Emits fieldsChanged(dict) with only the fields the user actually
     touched -- mirrors the epub tool's <multiple values> handling: fields
@@ -475,7 +504,7 @@ class TagPanel(QWidget):
 
     def _make_input_widget(self, field_name: str) -> QWidget:
         if field_name == "content_type":
-            combo = QComboBox()
+            combo = _FocusWheelComboBox()
             combo.addItem("", "")  # blank = leave unset/mixed
             # Porn only while Preferences > Adult Content shows it, or for a file that already is Porn.
             from core.lookup_types import adult_shown, content_type_choices
@@ -489,7 +518,7 @@ class TagPanel(QWidget):
         if field_name == "collected_from":
             from core.collected_from import COLLECTED_FROM_CHOICES
 
-            combo = QComboBox()
+            combo = _FocusWheelComboBox()
             combo.addItem("", "")  # blank = not set / mixed
             for choice in COLLECTED_FROM_CHOICES:
                 combo.addItem(choice, choice)
@@ -505,7 +534,7 @@ class TagPanel(QWidget):
             return multi
 
         if field_name in INT_FIELDS:
-            spin = QSpinBox()
+            spin = _FocusWheelSpinBox()
             spin.setRange(0, 9999)
             spin.setSpecialValueText(" ")  # 0 displays as blank = "not set"
             spin.valueChanged.connect(lambda _, f=field_name: self._mark_touched(f))

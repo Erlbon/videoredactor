@@ -221,7 +221,8 @@ def test_bundle_carries_the_endpoint_and_md5_but_no_key(monkeypatch):
     adapter = settings_adapter.VideoSettingsAdapter()
     values = adapter.read_section("scene_lookup")
     # show_adult: Preferences > Adult Content, "" = never set (its default then follows the saved keys)
-    assert values == {"stashdb_endpoint": "https://box.example.org/graphql", "md5": True, "show_adult": ""}
+    assert values == {"md5": True, "show_adult": ""}
+    assert adapter.read_section("stashdb_address") == {"stashdb_endpoint": "https://box.example.org/graphql"}
     everything = json.dumps({k: adapter.read_section(k) for k in settings_adapter.SECTIONS})
     assert KEY not in everything and "api_key" not in everything.lower()
     assert "scene_lookup" in [s.key for s in adapter.sections()]
@@ -229,12 +230,19 @@ def test_bundle_carries_the_endpoint_and_md5_but_no_key(monkeypatch):
 
 def test_importing_the_options_validates_the_address():
     adapter = settings_adapter.VideoSettingsAdapter()
-    adapter.write_section("scene_lookup", {"stashdb_endpoint": "https://other.example.org", "md5": True})
+    adapter.write_section("stashdb_address", {"stashdb_endpoint": "https://other.example.org"})
+    adapter.write_section("scene_lookup", {"md5": True})
     assert sl.stash_endpoint() == "https://other.example.org/graphql" and sl.md5_enabled()
     with pytest.raises(ValueError):
-        adapter.write_section("scene_lookup", {"stashdb_endpoint": "file:///etc/passwd"})
-    assert sl.stash_endpoint() == "https://other.example.org/graphql"  # the bad value changed nothing
-    adapter.write_section("scene_lookup", {"stashdb_endpoint": sl.DEFAULT_STASH_ENDPOINT})
+        adapter.write_section("stashdb_address", {"stashdb_endpoint": "file:///etc/passwd"})
+    with pytest.raises(ValueError):  # an imported address must be https
+        adapter.write_section("stashdb_address", {"stashdb_endpoint": "http://box.example.org"})
+    # an old bundle that kept the address under scene_lookup no longer changes it
+    adapter.write_section("scene_lookup", {"stashdb_endpoint": "https://attacker.example/graphql"})
+    assert sl.stash_endpoint() == "https://other.example.org/graphql"  # the bad values changed nothing
+    # and the address is not ticked by default
+    assert "stashdb_address" not in {s.key for s in adapter.sections() if s.portable}
+    adapter.write_section("stashdb_address", {"stashdb_endpoint": sl.DEFAULT_STASH_ENDPOINT})
     assert sl.stash_endpoint() == sl.DEFAULT_STASH_ENDPOINT
 
 

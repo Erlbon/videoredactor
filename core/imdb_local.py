@@ -180,6 +180,7 @@ class ImdbEpisodeInfo(EpisodeInfo):
     rating: Optional[float] = None
     votes: Optional[int] = None
     year: Optional[int] = None
+    number_known: bool = True  # False when the database has no episode number (episode_number is then 0)
 
 
 _TITLE_COLUMNS = "tconst, kind, title, original_title, year, end_year, runtime, genres, rating, votes"
@@ -328,7 +329,7 @@ def _episode(row: tuple) -> ImdbEpisodeInfo:
     return ImdbEpisodeInfo(
         episode_number=episode or 0, name=title or "", overview=" | ".join(b for b in bits if b),
         air_date=str(year) if year else "", imdb_id=imdb_id(tconst), series=parent, season=season or 0,
-        runtime=runtime, rating=rating, votes=votes, year=year,
+        runtime=runtime, rating=rating, votes=votes, year=year, number_known=episode is not None,
     )
 
 
@@ -381,6 +382,6 @@ def episode_fields(episode: ImdbEpisodeInfo) -> dict:
     fields: dict = {"title": episode.name, "release_date": episode.air_date}
     if episode.season is not None:
         fields["season_number"] = episode.season
-    if episode.episode_number:
+    if episode.episode_number is not None and episode.number_known:  # 0 is a real number (a pilot listed as episode 0)
         fields["episode_number"] = episode.episode_number
     return {k: v for k, v in fields.items() if v not in ("", None)}

@@ -299,7 +299,7 @@ def _mp4_patches(path: str, tracks: list[TrackInfo], new: dict[int, str]) -> lis
                 f"track {stream.index} is {stream.kind} for ffprobe but '{mdhd.handler}' in the file, so the tracks "
                 f"cannot be matched safely; nothing was changed")
         decoded = decode_packed(mdhd.packed)
-        if decoded is not None and decoded != codes.normalize(stream.language):
+        if decoded is not None and codes.normalize(decoded) != codes.normalize(stream.language):
             raise TrackLanguageError(
                 f"track {stream.index}: the file's language field reads '{decoded}' but ffprobe says "
                 f"'{codes.normalize(stream.language)}', so the tracks cannot be matched safely; nothing was changed")
@@ -340,6 +340,8 @@ def _mkv_ietf_keys(path: str) -> set[str]:
     keys, counts = set(), {}
     for track in data.get("tracks") or []:
         kind = track.get("type")
+        if kind == "subtitles":  # mkvmerge's word; the app's own is "subtitle"
+            kind = "subtitle"
         if kind not in KINDS:
             continue
         counts[kind] = counts.get(kind, 0) + 1

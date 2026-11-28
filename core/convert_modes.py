@@ -67,6 +67,13 @@ def plan_remux(info: cp.MediaInfo) -> cp.Plan:
     if bitmap:
         plan.skip_reason = f"the subtitles ({bitmap[0]}) cannot be copied into an MP4 (Automatic keeps the file as MKV)"
         return plan
+    if any(t.codec in ("ass", "ssa") for t in info.of("subtitle")):
+        plan.skip_reason = "the styled (ASS) subtitles would be flattened in an MP4 (Automatic keeps the file as MKV)"
+        return plan
+    attachments = cp.keepable_attachments(info)
+    if attachments:
+        plan.skip_reason = f"the attachment {attachments[0].filename or '?'} cannot be carried into an MP4"
+        return plan
     plan.container = ".mp4"
     plan.video = cp.V_COPY
     plan.reasons.append(f"lossless remux from {info.ext or 'the file'} to MP4")
@@ -118,6 +125,7 @@ def convert_with_mode(
     """Converts one file in `mode` through `run`. `keep`: the original stays where it is (the new file gets its own
     name); it overrides the run's own originals handling for this call. MODE_RULES is conversion_run.process_file."""
     run.keep_originals = bool(keep)
+    run.keep_strict = bool(keep)  # an explicit keep beats delete-after-conversion and refuses a same-name result
     if mode == MODE_RULES:
         return conversion_run.process_file(
             run, source, conv, is_series=is_series, kind=kind, options=options, cancel_event=cancel_event, tags=tags,

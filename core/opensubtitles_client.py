@@ -122,8 +122,9 @@ def search_by_hash(video_path: str, language: str = "en") -> list[SubtitleCandid
     if file_hash is None:
         return []
 
-    data = _get_json("/subtitles", {"moviehash": file_hash, "languages": language})
-    return _parse_results(data, hash_matched=True)
+    # moviehash_match=only: the server's default ("include") adds title matches after the hash matches.
+    data = _get_json("/subtitles", {"moviehash": file_hash, "moviehash_match": "only", "languages": language})
+    return _parse_results(data, hash_matched=True, require_hash_flag=True)
 
 
 def search_by_title(query: str, language: str = "en") -> list[SubtitleCandidate]:
@@ -136,12 +137,15 @@ def search_by_title(query: str, language: str = "en") -> list[SubtitleCandidate]
     return _parse_results(data, hash_matched=False)
 
 
-def _parse_results(data: dict, hash_matched: bool) -> list[SubtitleCandidate]:
+def _parse_results(data: dict, hash_matched: bool, require_hash_flag: bool = False) -> list[SubtitleCandidate]:
     """The candidates of a /subtitles answer. A malformed entry (not an object, no usable file id) is skipped: the
-    server is outside our control and must never be able to crash the dialog."""
+    server is outside our control and must never be able to crash the dialog. With `require_hash_flag` (a hash
+    search) an entry whose own `moviehash_match` is not true is skipped: it is a title match, not a sync-verified one."""
     results = []
     for entry in dict_items(as_dict(data).get("data")):
         attrs = as_dict(entry.get("attributes"))
+        if require_hash_flag and attrs.get("moviehash_match") is not True:
+            continue
         files = dict_items(attrs.get("files"))
         if not files:
             continue
@@ -158,12 +162,14 @@ def _parse_results(data: dict, hash_matched: bool) -> list[SubtitleCandidate]:
     return results
 
 
-def download_subtitle_text(file_id: int) -> str:
+def download_subtitle_text(file_id: int, language: str = "und") -> str:
     """Resolve a file_id to an actual download link, then fetch the
     subtitle's text content. Two-step process per OpenSubtitles' API
     (POST /download returns a short-lived link, not the content itself).
     Uses API-key-only (anonymous) auth -- no login required for the
-    free-tier daily download quota.
+    free-tier daily download quota (OpenSubtitles' own developer guide says a key is enough to download).
+    The bytes are decoded the way Import Subtitles decodes a file (core/subtitle_ingest.decode_srt): a BOM,
+    else UTF-8, else the language's legacy codepage, else cp1252; `language` is the subtitle's language code.
     """
     link_data = _post_json("/download", {"file_id": file_id})
     download_url = link_data.get("link")
@@ -171,4 +177,9 @@ def download_subtitle_text(file_id: int) -> str:
         raise OpenSubtitlesError("OpenSubtitles did not return a download link.")
 
     data = fetch_bytes(download_url, _download_fetch, OpenSubtitlesError, what="the subtitle file")
-    return data.decode("utf-8", errors="replace")
+    from core.subtitle_ingest import SubtitleDecodeError, decode_srt, language_code  # noqa: PLC0415
+
+    try:
+        return decode_srt(data, language_code(language) or "und")
+    except SubtitleDecodeError as exc:
+        raise OpenSubtitlesError(f"The downloaded subtitle could not be read as text: {exc}") from exc

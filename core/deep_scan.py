@@ -272,6 +272,9 @@ def find_zero_runs(
                         run_start = open_start if open_start is not None else position
                         if position + lead - run_start >= min_run:
                             runs.append((run_start, position + lead))
+                    elif open_start is not None and position - open_start >= min_run:
+                        # The run ended exactly at the edge of the previous chunk.
+                        runs.append((open_start, position))
                     open_start = None
                     trail = n - len(data.rstrip(b"\x00"))
                     middle = data[lead:n - trail] if trail else data[lead:]

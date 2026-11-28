@@ -15,7 +15,8 @@ built from what makes the streams what they are:
    and of the first audio stream (`ffmpeg -c copy -frames:X N -f md5`:
    no decoding, so it costs the same on a 50 MB clip and a 50 GB one).
 
-Both go into one SHA-256; the result is "v1-<16 hex>". Any failure
+Cover pictures (attached pictures) and attachments are left out of both (version v2).
+Both go into one SHA-256; the result is "v2-<16 hex>". Any failure
 (ffprobe/ffmpeg missing, unreadable file, a timeout) returns "" -- "no
 fingerprint", never an exception. A re-encode or truncation changes the
 parameters, the duration or the packets; a tag edit or a copy-remux of
@@ -32,7 +33,8 @@ from typing import Optional
 from core.ffmpeg_backend import _run
 
 PACKET_LIMIT = 200
-_VERSION = "v1"
+_VERSION = "v2"  # v2 (2026-11-28): attached pictures and attachments no longer count; a v1 stamp reads "unverified"
+FINGERPRINT_VERSION = _VERSION
 _PROBE_TIMEOUT_SECONDS = 60
 _HASH_TIMEOUT_SECONDS = 120
 
@@ -42,6 +44,13 @@ _STREAM_KEYS = {
     "video": ("codec_name", "width", "height", "pix_fmt"),
     "audio": ("codec_name", "sample_rate", "channels"),
 }
+
+
+def _is_extra(stream: dict) -> bool:
+    """A stream that is not part of the video itself: a cover picture or an attachment."""
+    disposition = stream.get("disposition")
+    attached = isinstance(disposition, dict) and bool(disposition.get("attached_pic"))
+    return attached or stream.get("codec_type") == "attachment"
 
 
 def _packet_hash(path: str, selector: str, frames_flag: str) -> Optional[str]:
@@ -75,7 +84,9 @@ def video_fingerprint(path: str) -> str:
         return ""
     if not isinstance(info, dict):
         return ""
-    streams = [s for s in (info.get("streams") or []) if isinstance(s, dict)]
+    # Only the streams that ARE the video: a poster (an attached picture, a cover) and an attachment (a font, a
+    # cover.jpg in an MKV) can come and go in a tag edit without the video changing.
+    streams = [s for s in (info.get("streams") or []) if isinstance(s, dict) and not _is_extra(s)]
     if not streams:
         return ""
     try:
@@ -93,7 +104,8 @@ def video_fingerprint(path: str) -> str:
     # Only streams the file has: ffmpeg given an unmatched optional map
     # falls back to its default stream choice, which would hash the
     # video under the audio's name.
-    for kind, selector, flag in (("video", "v:0", "-frames:v"), ("audio", "a:0", "-frames:a")):
+    # (capital V: ffmpeg's selector that leaves out attached pictures, so a cover is never "the first video")
+    for kind, selector, flag in (("video", "V:0", "-frames:v"), ("audio", "a:0", "-frames:a")):
         if kind not in kinds:
             continue
         packets = _packet_hash(path, selector, flag)

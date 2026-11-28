@@ -1,5 +1,54 @@
 # Changelog
 
+## 2026-11-28#02 -- the code review of 2026-11-28: "keep the original" always wins, safer tags, joins and conversions, no frozen window
+
+Files at risk:
+- **"Keep the original" in Convert now always wins.** With delete-after-conversion on, the original was deleted although keep was ticked; it is now kept. In Automatic mode a file whose result would need the original's own name is skipped with a clear message, instead of the original going to the Recycle Bin.
+- **Saving an MP4 no longer cuts a multi-valued tag** (several genres or artists) down to its first value: they show joined with "; " and are kept unless you edit them. **MKV files with several actors or genres keep all of them**, and a track's own tags no longer show up as the file's fields.
+- **Converting an MKV keeps its fonts and other attachments**, and the check catches a lost one; the lossless MP4 remux skips files with styled (ASS) subtitles or fonts. A bad audio track (for example wavpack) no longer makes every audio track lossy AAC: only that track is re-encoded.
+- **Join Files keeps the parts' chapters** (moved to the right times) and an MKV's fonts. If a later part cannot be moved after a join, the join still finishes, part 1 can still be undone, and the message says which part stayed. Join warns when part 1 is missing or the set is shorter than "of N" says.
+- **The `join-files` command only joins files with a part marker** (cd1, part 2 ...) unless you add `--join-unmarked`, so a folder of episodes is no longer joined as one movie.
+- **Scrolling the side panel with the mouse wheel** no longer changes Season, Episode, Rating, Content Type or Collected from by accident.
+- **Number Episodes and Auto-Number** count down the rows in the order the table shows them, not in the order you clicked.
+- **Renaming a video** (F2, by pattern or with Search & Replace) also renames its subtitle and poster files, and Undo Last Rename puts them all back.
+- **Undo after Save** leaves the row marked as unsaved, so Save All can write the reverted values.
+- **Find Duplicates only says "Identical"** after comparing the whole files byte by byte.
+- Saving MP4 tags keeps the file's creation date.
+- A "Collected from" the app only guessed from a web address in the Comment is no longer written by conversions, remux, join, lyrics embed or the command line's `set`, `clear` and `check --stamp`.
+- Embed Existing Poster Files skips a video that has an unsaved poster change.
+- Redact's MKV to MP4 change saves straight to the new name, so a failed rename can no longer leave MP4 data in a .mkv file.
+- The "keep the source unless the result is under" box accepts 1 to 100 percent only.
+- Embedding lyrics as a subtitle track in an MP4 no longer re-encodes the subtitle tracks already there.
+- `--clear track_title` on the command line no longer empties the Title; it says the field is retired.
+
+Wrong results and crashes:
+- **TheTVDB lookups use the current v4 server** (api4.thetvdb.com) and read every page of a long series' episode list. Not yet tried with a real key.
+- **Looking up a file in the local IMDb database** no longer crashes when its IMDb id belongs to an episode; it opens on the series and the right episode. Episodes numbered 0 keep their number, and Redact looks up specials (season 0).
+- Set Track Language works on MP4 tracks stored as deu, fra, nld, nob and so on, and also updates the language-ietf of MKV subtitle tracks.
+- Deep scan no longer misses a zeroed-out stretch that ends exactly at an 8 MB block edge. Check Files no longer stamps a file CHECKED OK when ffmpeg could not run, and only repairs the files that were in the plan you confirmed.
+- Adding or removing a cover no longer makes a scanned file read "changed since"; stamps from the older fingerprint read "unverified". Groups you dismissed in Find Duplicates may show once more.
+- A TV episode picker whose season list could not be loaded is no longer shown empty.
+- Cancelling a container fix or a join is reported as cancelled, not failed. undo-remux and undo-join work on logs saved with Windows line ends and on reused logs.
+- A wide but short series video (for example 1920x696) is no longer scaled up to 720p.
+- A tool path that is a folder or not a program no longer crashes loading. A missing or timed-out mkvmerge gives "Lyrics Not Embedded" instead of a crash.
+- A strange digit or non-text byte in a tag no longer makes a file unreadable. MKV tags with line breaks or control characters from a lookup save and verify correctly.
+- **A damaged settings file no longer stops the app from starting**: it is renamed to .bad, the defaults are used, and the status bar says so once.
+- Remove from List asks about a typed edit that was not applied yet.
+- "inf" or "1e999" in a number field or a scene's length no longer crashes a batch.
+- Studios: a website with a stray "[" no longer makes OK do nothing; studio names with a comma match. The list editor refuses entries with a comma, and emptying a genre or language list no longer brings the defaults back.
+- The scene name guess keeps title words such as Internal and Scenes; impossible release dates like 2010-00-00 are cut back to the year.
+- Command line: `set -s lyrics=@-` reads UTF-8 from standard input and says so when none is connected; `set` and `--clear` on a Music Video MP4 that only has the media-type atom report and write correctly; `rename` and `move` accept the old %track_title% token; `check --stamp` exits with an error when the stamp could not be saved; `notes` obeys the "Wikipedia introduction" setting.
+- OpenSubtitles: a hash search asks for hash matches only, and downloaded subtitles in older encodings (cp1252, cp1251 and others) are decoded correctly.
+
+Window and Cancel:
+- **Saving, loading files and Export (copy) no longer freeze the window**: they run on a worker, even one file shows the progress window, and Cancel works at once, even in the middle of a big copy.
+- Translate Subtitles no longer freezes the window while reading an embedded subtitle track, and reads each track only once.
+- Cancel and closing the app also stop the full-decode check (convert, remux, join) and the subtitle comparison.
+- The preview picture is stopped before a save, rename, move, convert or Redact touches the file, and comes back afterwards.
+
+Security:
+- Import Settings: the StashDB address is a separate section, not ticked by default, and must be https; imported tool paths must be named like the tool and exist. A huge fake cover attachment in an MKV is no longer extracted, and a failed attachment listing no longer adds a second cover.
+
 ## 2026-11-28#01 -- shared-code update: redactor_common 2026-11-28-01
 
 - Shared-code update: redactor_common 2026-11-28-01 (from 2026-11-27-06). It brings: the overwrite review reads Content Type by its value, so the app's own workaround for that is removed; the shared lookup dialog shows a failed search on its row instead of losing the batch; the Identical duplicate tier no longer claims "exactly the same" on its own; and a clearer note on stopping a preview load before a file is changed.

@@ -109,6 +109,7 @@ class EpisodePickerDialog(OwnedDialog):
         # information but no season/episode data) or "skip" (the file stays completely untouched). Closing the
         # window (Esc, X, Skip This File) is "skip", never "show_only".
         self.choice = CHOICE_SKIP
+        self._load_failed = False  # the season list could not be loaded: exec() will not show the dialog
 
         self.setWindowTitle(title or source.window_title)
         self.resize(450, 500)
@@ -172,15 +173,25 @@ class EpisodePickerDialog(OwnedDialog):
 
         self._load_seasons()
 
+    def exec(self) -> int:
+        """A picker whose season list failed to load (or came back empty) was already closed as a skip in the
+        constructor: exec() would still show it, empty, and 'Show Information Only' would import without an
+        episode. It returns 'rejected' at once instead."""
+        if self._load_failed:
+            return int(QDialog.DialogCode.Rejected)
+        return super().exec()
+
     def _load_seasons(self) -> None:
         try:
             seasons = self.source.seasons(self)
         except self.source.errors as e:
+            self._load_failed = True
             QMessageBox.warning(self, self.source.seasons_error_title, str(e))
             self.skip_file()
             return
 
         if not seasons:
+            self._load_failed = True
             QMessageBox.information(self, self.source.empty_title, self.source.empty_text)
             self.skip_file()
             return

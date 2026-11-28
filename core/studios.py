@@ -27,8 +27,11 @@ def normalize_website(text: str) -> str:
     value = (text or "").strip()
     if not value:
         return ""
-    parts = urllib.parse.urlsplit(value if "//" in value else "//" + value)
-    host = (parts.hostname or "").lower().strip(".")
+    try:
+        parts = urllib.parse.urlsplit(value if "//" in value else "//" + value)
+        host = (parts.hostname or "").lower().strip(".")
+    except ValueError:  # a stray "[" ("http://[x/y") is read as an IPv6 address and raises
+        return ""
     if host.startswith("www."):
         host = host[4:]
     if not host or "." not in host or any(c.isspace() for c in host):
@@ -64,6 +67,9 @@ def website_for(studio: str, studios: dict[str, str] | None = None) -> str:
     """The website of `studio` ('' = unknown). A studio with several names ("A, B") uses the first with a website."""
     table = load_studios() if studios is None else studios
     by_key = {_key(n): h for n, h in table.items()}
+    whole = by_key.get(_key(studio))  # "Brazzers, Inc." is one name: try it whole before splitting
+    if whole:
+        return whole
     for name in (studio or "").replace(";", ",").split(","):
         host = by_key.get(_key(name))
         if host:

@@ -132,7 +132,7 @@ def run_notes(args: argparse.Namespace, out: Output) -> int:
     guessed = 0  # notes written (or that would be) from an uncertain match
     failed = 0
     cancelled = False
-    engine = NotesEngine(make_fetchers(not args.no_wikipedia), cache=make_cache(args))
+    engine = NotesEngine(make_fetchers(not args.no_wikipedia and notes_settings.wikipedia_enabled()), cache=make_cache(args))
     engine.phases.add("scan", scan_seconds, count=len(found.targets))
     started = time.perf_counter()
 

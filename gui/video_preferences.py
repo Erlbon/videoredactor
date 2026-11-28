@@ -344,7 +344,9 @@ class ConversionPage(QWidget):
         self.hw_decode.setChecked(s.hw_decode)
         form.addRow("", self.hw_decode)
         self.hw_decode_help = self._help(form, HW_DECODE_HELP)
-        self.ratio = self._dspin(form, "Keep the source unless the result is under:", s.output_max_ratio * 100, " % of it")
+        self.ratio = self._dspin(
+            form, "Keep the source unless the result is under:", s.output_max_ratio * 100, " % of it", 1, 100)
+        self.ratio.setValue(min(max(self.ratio.value(), 1), 100))
         self.many_subs = self._spin(form, "MKV when a file has at least:", 1, 99, s.many_subtitle_tracks, " subtitle tracks")
         self.many_subs_help = self._help(form, MANY_SUBS_HELP)
         self.disc = QComboBox()
@@ -417,9 +419,9 @@ class ConversionPage(QWidget):
         form.addRow(label, box)
         return box
 
-    def _dspin(self, form, label, value, suffix) -> QDoubleSpinBox:
+    def _dspin(self, form, label, value, suffix, low=0, high=100000) -> QDoubleSpinBox:
         box = QDoubleSpinBox()
-        box.setRange(0, 100000)
+        box.setRange(low, high)
         box.setDecimals(1)
         box.setValue(value)
         box.setSuffix(suffix)

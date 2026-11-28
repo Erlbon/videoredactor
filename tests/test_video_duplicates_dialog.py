@@ -121,8 +121,31 @@ def test_groups_carry_tier_reason_fingerprints_and_progress(env):
 def test_identical_contents_make_an_identical_group(env, monkeypatch):
     monkeypatch.setattr(dd, "content_fingerprint", lambda path: "same")
     files = _files(env[0], ["a.mp4", "b.mp4"])
+    files[1].path.write_bytes(files[0].path.read_bytes())  # really the same bytes
     groups = dd.find_groups([Candidate(vf, 4.0) for vf in files], 6, lambda *a: None, lambda: False, [])
     assert [g.tier for g in groups] == [TIER_IDENTICAL]
+
+
+def test_equal_sampled_fingerprints_but_different_bytes_are_not_called_identical(env, monkeypatch):
+    """The fingerprint is size plus three samples: a same-size copy that differs outside the samples must not be
+    labelled Identical (review 2026-11-28, card 14). Same frame hash, so it is a Strong match instead."""
+    monkeypatch.setattr(dd, "content_fingerprint", lambda path: "same")
+    files = _files(env[0], ["a.mp4", "b.mp4"])  # same size, different bytes
+    groups = dd.find_groups([Candidate(vf, 4.0) for vf in files], 6, lambda *a: None, lambda: False, [])
+    assert [g.tier for g in groups] == [TIER_STRONG]
+
+
+def test_cancelling_during_the_full_compare_returns_nothing(env, monkeypatch):
+    monkeypatch.setattr(dd, "content_fingerprint", lambda path: "same")
+    files = _files(env[0], ["a.mp4", "b.mp4"])
+    files[1].path.write_bytes(files[0].path.read_bytes())
+    asked = []
+
+    def cancelled():
+        asked.append(1)
+        return len(asked) > 4  # lets the hashing and fingerprinting finish, then Cancel inside the compare
+
+    assert dd.find_groups([Candidate(vf, 4.0) for vf in files], 6, lambda *a: None, cancelled, []) == []
 
 
 def test_unreadable_files_drop_out_and_are_named(env, monkeypatch):

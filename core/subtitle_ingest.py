@@ -108,8 +108,8 @@ def parse_subtitle_name(video_path: str, sub_path: str) -> ExternalSub | None:
             code = language_code(token)
             if code and not lang:
                 lang = code
-            elif not code and not lang:
-                return None  # something else after the stem: not this video's subtitle
+            elif not code:
+                return None  # something else after the stem (even after a language word): not this video's subtitle
     return ExternalSub(sub_path, lang or "und", hearing_impaired_hint=sdh)
 
 

@@ -76,7 +76,7 @@ def set_field_text(metadata: VideoMetadata, field_name: str, text: str) -> bool:
             return True
         try:
             setattr(metadata, field_name, int(float(text)))
-        except ValueError:
+        except (ValueError, OverflowError):  # "inf" and "1e999" are not numbers a field can hold
             return False
         return True
     if field_name == "content_type":

@@ -54,7 +54,7 @@ def run_check(args: argparse.Namespace, out: Output) -> int:
     # The Recycle Bin, tried again for a moment when a scanner or indexer still holds the original.
     trash = trash_to(args.trash_dir) if args.trash_dir else trash_with_retries()
     problems = 0
-    for index, video in enumerate(load_videos(files, out), start=1):
+    for index, video in enumerate(load_videos(files, out, for_write=bool(args.stamp)), start=1):
         path = str(video.path)
         out.progress(index, len(files), path)
         row = {
@@ -77,7 +77,7 @@ def run_check(args: argparse.Namespace, out: Output) -> int:
                 row["status"] = result.status
                 row["findings"] = _findings(result)
                 row["declared_seconds"], row["readable_seconds"] = result.declared_seconds, result.readable_seconds
-                row["problem"] = result.status in PROBLEM_STATUSES or not result.openable
+                row["problem"] = row["problem"] or result.status in PROBLEM_STATUSES or not result.openable
         problems += row["problem"]
         out.record(row)
         out.line(f"{'PROBLEM' if row['problem'] else 'ok':8} {path}  [{row['status']}]")
@@ -128,5 +128,6 @@ def _maybe_stamp(video: VideoFile, result: CheckResult, args, row: dict) -> None
         video.save()
         if video.save_error:
             _say(row, f"the result could not be recorded: {video.save_error}")
+            row["problem"] = True  # the exit code must not say all is well
         else:
             row["stamped"] = True

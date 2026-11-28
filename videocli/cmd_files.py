@@ -17,7 +17,7 @@ import argparse
 
 from core import history
 from core.config import get_setting
-from core.filename_pattern import DEFAULT_RENAME_PATTERN, placeholder_values
+from core.filename_pattern import DEFAULT_RENAME_PATTERN, modernize_pattern, placeholder_values
 from core.redact_steps import empty_required_tokens
 from core.sidecars import sidecar_moves, sidecar_pairs
 from core.video_file import VideoFile
@@ -81,7 +81,7 @@ def add_rename_parser(sub) -> None:
 
 
 def run_rename(args: argparse.Namespace, out: Output) -> int:
-    pattern = args.pattern or DEFAULT_RENAME_PATTERN
+    pattern = modernize_pattern(args.pattern or DEFAULT_RENAME_PATTERN)
     zero_pad = _zero_pad(args)
     videos = load_videos(collect(args.paths, out, recurse=not args.no_recurse), out)
     failed = commands.rename_items(
@@ -112,13 +112,14 @@ def add_move_parser(sub) -> None:
 
 def run_move(args: argparse.Namespace, out: Output) -> int:
     root = args.root or get_setting("rename", "library_root", "").strip()
+    pattern = modernize_pattern(args.pattern)
     zero_pad = _zero_pad(args)
     videos = load_videos(collect(args.paths, out, recurse=not args.no_recurse), out)
     # Tools > History follows every file this run really renames or moves (history.record_move, a no-op while
     # history is off); a copy is not a move, so its entries stay.
     failed = commands.move_items(
-        videos, root=root, pattern=args.pattern, values_for=lambda v: _values_for(v, zero_pad),
-        path_of=lambda v: str(v.path), skip_reason=_skip_for(args.pattern, zero_pad), out=out,
+        videos, root=root, pattern=pattern, values_for=lambda v: _values_for(v, zero_pad),
+        path_of=lambda v: str(v.path), skip_reason=_skip_for(pattern, zero_pad), out=out,
         dry_run=args.dry_run, copy=args.copy, ascii_only=_ascii(args), companions=sidecar_moves,
         on_moved=history.record_move,
     )

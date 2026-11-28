@@ -48,7 +48,7 @@ from redactor_common.core.lookups.tmdb import (
 from core.tvdb_client import get_series_details, get_episode_details, download_image, TVDBError
 from redactor_common.core.lookups.release_name import parse_release_name
 from core.redact_steps import _tv_guess, conversion_is_series, conversion_kind
-from core.sidecars import with_sidecars
+from core.sidecars import sidecar_pairs, with_sidecars
 from core.lookup_sources import imdb_values, tmdb_values, tvdb_values
 from core.source_tags import ref_in, sources_summary
 from gui.source_apply import SourceStage, apply_sources, fetch_prepared_poster
@@ -307,15 +307,31 @@ def _save_include_subfolders(on: bool) -> None:
     set_setting("general", "include_subfolders", "1" if on else "0")
 
 
-def _copy_no_clobber(src: str, dst: str) -> None:
-    """shutil.copy2 that refuses to replace an existing `dst` (copy2
-    silently overwrites, and "Export" must never destroy a file): copies
-    to a temporary name, then renames without clobbering."""
+class _CopyCancelled(Exception):
+    """Cancel was pressed while a file was being copied: the partial copy was removed, the original is untouched."""
+
+
+_COPY_CHUNK = 4 * 1024 * 1024
+
+
+def _copy_no_clobber(src: str, dst: str, should_cancel=None) -> None:
+    """A copy that refuses to replace an existing `dst` ("Export" must never destroy a file): copies in chunks to
+    a temporary name (so Cancel is noticed within a chunk, not after a 30 GB file), keeps the dates like
+    shutil.copy2, then renames without clobbering. `should_cancel()` True -> the partial copy is removed and
+    _CopyCancelled is raised."""
     if os.path.exists(dst):
         raise FileExistsError(f"{os.path.basename(dst)} already exists")
     tmp = f"{dst}.copying"
     try:
-        shutil.copy2(src, tmp)
+        with open(src, "rb") as reader, open(tmp, "wb") as writer:
+            while True:
+                if should_cancel is not None and should_cancel():
+                    raise _CopyCancelled()
+                chunk = reader.read(_COPY_CHUNK)
+                if not chunk:
+                    break
+                writer.write(chunk)
+        shutil.copystat(src, tmp)
         rename_no_clobber(tmp, dst)
     except BaseException:
         try:
@@ -323,6 +339,63 @@ def _copy_no_clobber(src: str, dst: str) -> None:
         except OSError:
             pass
         raise
+
+
+def _run_items_in_worker(parent, items, step, label, threshold: int = 1, cancellable: bool = True,
+                         label_for=None, on_error=None, pass_cancel: bool = False) -> bool:
+    """run_with_progress for slow file work: the same call and the same result (True = every item was processed,
+    False = Cancel), but every `step(item, index)` runs on a worker thread under redactor_common's counted
+    progress dialog, so the window keeps painting and Cancel is clicked at once (it is noticed between items; a
+    step that copies polls the cancel itself). The dialog appears after a short delay, whatever the number of
+    items (`threshold` is accepted for the call's sake and ignored: even one big file may take minutes).
+
+    `step` and `label_for` run off the GUI thread: they must not touch a widget or the app's lists (collect into
+    a local list and apply it afterwards on the GUI thread). `on_error(item, exc)` is called on the GUI thread,
+    after the run, for every item whose step raised (without it the exception ends the run, as before).
+    `pass_cancel`: the step is called as step(item, index, should_cancel), for a step (a big copy) that polls the
+    cancel itself inside one item."""
+    items = list(items)
+    if not items:
+        return True
+    failures: list[tuple[object, Exception]] = []
+
+    def work(progress) -> bool:
+        for index, item in enumerate(items):
+            if cancellable and progress.should_cancel():
+                return False
+            if label_for is not None:
+                progress.set_label(label_for(item))
+            try:
+                if pass_cancel:
+                    step(item, index, progress.should_cancel)
+                else:
+                    step(item, index)
+            except Exception as exc:  # noqa: BLE001 -- isolated per item on purpose, like run_with_progress's on_error
+                if on_error is None:
+                    raise
+                failures.append((item, exc))
+            progress.set_value(index + 1)
+        return True
+
+    finished, cancelled = run_work_with_progress(parent, len(items), label, work, cancellable=cancellable)
+    for item, exc in failures:
+        on_error(item, exc)
+    return bool(finished) and not cancelled
+
+
+def _rename_sidecars(pairs: list[tuple[str, str]], errors: list[str]) -> list[tuple[str, str]]:
+    """Renames the poster and subtitle files that belong to a video that was just renamed (`pairs` from
+    core.sidecars.sidecar_pairs, planned BEFORE the video moved). Never replaces an existing file. Returns the
+    (old, new) pairs that were done, for the rename log, so Undo Last Rename puts them back with the video; a
+    sidecar that could not be renamed is added to `errors` and does not undo the video's rename."""
+    done: list[tuple[str, str]] = []
+    for old, new in pairs:
+        try:
+            rename_no_clobber(old, new)
+            done.append((old, new))
+        except OSError as exc:
+            errors.append(f"{os.path.basename(old)} (belongs to the renamed video): {exc}")
+    return done
 
 
 def _drop_keys(items: MenuItems, keys: set[str]) -> MenuItems:
@@ -386,6 +459,7 @@ class MainWindow(QMainWindow):
         # the frame at the video's full resolution.
         self._preview_loader = AsyncPreviewLoader(QSize(960, 960), parent=self)
         self._preview_loader.image_ready.connect(self._on_preview_ready)
+        self._preview_stopped = False  # set when a file operation stopped the loader; the next row refresh re-asks
 
         self._build_ui()
         # Help > Check for Updates and the opt-in daily check (redactor_common's gui/update_controller.py).
@@ -396,6 +470,11 @@ class MainWindow(QMainWindow):
         self._check_external_tools_on_startup()
         self._restore_last_folder_on_startup()
         self.updates.start_auto_check()  # nothing unless switched on in Preferences > Updates
+        from core import config as _config  # noqa: PLC0415
+
+        if _config.SETTINGS_RESET_MESSAGE:  # a damaged settings file was set aside (review card 42): say so once
+            self.status_bar.showMessage(_config.SETTINGS_RESET_MESSAGE)
+            _config.SETTINGS_RESET_MESSAGE = ""
 
     def _build_ui(self) -> None:
         central = QWidget()
@@ -986,7 +1065,7 @@ class MainWindow(QMainWindow):
             vf.save_error = ""
             vf._thumbnail_path = None
 
-        run_with_progress(
+        _run_items_in_worker(
             self, stale, step, "Re-reading restored files...", threshold=1, cancellable=False,
             label_for=lambda vf: f"Reading {vf.path.name}",
         )
@@ -1262,15 +1341,17 @@ class MainWindow(QMainWindow):
         self.filter_header.clear_all_filters()
 
     def _visible_video_files(self) -> list[VideoFile]:
-        """Every loaded file whose row is not hidden by a column filter, in list order. With no filter active
+        """Every loaded file whose row is not hidden by a column filter. With no filter active
         that is every loaded file. Used where an action means 'all the files I can see' when nothing is
         selected (Redact, batch edits, Check Files); Save All, Find Duplicates and Clear List deliberately
-        keep working on every loaded file."""
+        keep working on every loaded file. The order is the table's, as sorted on screen."""
+        in_table = [vf for row in range(self.table.rowCount())
+                    if (not self.table.isRowHidden(row) or not self.filter_header.filters.any_active())
+                    and (vf := self._file_for_row(row)) is not None]
         if not self.filter_header.filters.any_active():
-            return list(self.video_files)
-        visible = {id(vf) for row in range(self.table.rowCount())
-                   if not self.table.isRowHidden(row) and (vf := self._file_for_row(row)) is not None}
-        return [vf for vf in self.video_files if id(vf) in visible]
+            seen = {id(vf) for vf in in_table}
+            return in_table + [vf for vf in self.video_files if id(vf) not in seen]
+        return in_table
 
     # --- Loading files ---------------------------------------------------
 
@@ -1299,16 +1380,19 @@ class MainWindow(QMainWindow):
                 fresh.append(p)
         skipped = len(paths) - len(fresh)
 
+        loaded_now: list[VideoFile] = []  # filled on the worker thread; the list the window shows is changed below
+
         def _step(p: Path, _index: int) -> None:
             vf = VideoFile(path=p)
             vf.load()
-            self.video_files.append(vf)
+            loaded_now.append(vf)
 
         before = len(self.video_files)
-        cancelled = not run_with_progress(
-            self, fresh, _step, "Loading video files...", threshold=3,
+        cancelled = not _run_items_in_worker(
+            self, fresh, _step, "Loading video files...", threshold=1,
             label_for=lambda p: f"Loading {p.name}",
         )
+        self.video_files.extend(loaded_now)
         self._refresh_table_rows()
         added = self.video_files[before:]
         failed = sum(1 for vf in added if vf.load_error)
@@ -1337,14 +1421,17 @@ class MainWindow(QMainWindow):
         elif choice == DELETE:
             self.delete_files(confirm=False)  # the question above already asked
 
-    @staticmethod
-    def _release_previews(paths) -> None:
+    def _release_previews(self, paths) -> None:
         """Lets the Play window (Ctrl+P) let go of any of `paths` before they are renamed, moved, converted or
         saved: an open player holds its file, and Windows refuses the rename or the save's replace
-        (redactor_common card 65). The window stays open."""
+        (redactor_common card 65). The window stays open. The side panel's poster / frame grab is stopped too,
+        and waited for (the loader's shutdown(), not cancel(): cancel() leaves the worker reading the file); the
+        next _refresh_table_rows asks for the selected file's preview again."""
         from redactor_common.gui import media_preview  # noqa: PLC0415
 
         media_preview.release_previews_of([str(p) for p in paths])
+        self._preview_loader.shutdown()
+        self._preview_stopped = True
 
     @staticmethod
     def _release_players(paths: list[Path]) -> None:
@@ -1397,7 +1484,8 @@ class MainWindow(QMainWindow):
                 return
 
         # Nothing may hold the files open: the preview's frame grab and the player window.
-        self._preview_loader.cancel()
+        self._preview_loader.shutdown()  # waits for a worker still reading one of the files
+        self._preview_stopped = True
         self._release_players([vf.path for vf in to_delete])
 
         trash = trash_with_fallback(history.quarantine_folder)  # retries; a drive with no bin -> backup folder
@@ -1443,6 +1531,7 @@ class MainWindow(QMainWindow):
         the list. Nothing on disk is touched; unsaved edits on them are lost,
         so that is confirmed first. The Undo stack is cleared (it may point at
         the removed files), like any other replacement of the list."""
+        self._commit_pending_panel_edits()  # a typed, not yet applied edit counts as unsaved (and is asked about)
         selected = self._selected_video_files()
         if not selected:
             self.status_bar.showMessage("No files selected")
@@ -1510,19 +1599,20 @@ class MainWindow(QMainWindow):
             return
         self.video_files = []
         self._clear_undo()
+        loaded_now: list[VideoFile] = []  # filled on the worker thread; the window's list is set below
 
         def _step(p: Path, _index: int) -> None:
             vf = VideoFile(path=p)
             vf.load()
-            self.video_files.append(vf)
+            loaded_now.append(vf)
 
-        # The shared helper: threshold-gated, fixed width (the old
-        # hand-rolled dialog grew with each long "Loading <name>" label
-        # and never shrank back), per-file label elided, Cancel works.
-        cancelled = not run_with_progress(
-            self, paths, _step, "Loading video files...", threshold=3,
+        # The shared progress dialog on a worker thread (card 59 of the 2026-11-28 review): a big MKV is probed
+        # without freezing the window, fixed width, per-file label elided, Cancel works at once.
+        cancelled = not _run_items_in_worker(
+            self, paths, _step, "Loading video files...", threshold=1,
             label_for=lambda p: f"Loading {p.name}",
         )
+        self.video_files = loaded_now
 
         self._refresh_table_rows()
         loaded = sum(1 for vf in self.video_files if not vf.load_error)
@@ -1607,18 +1697,20 @@ class MainWindow(QMainWindow):
 
         self.video_files = []
         self._clear_undo()
+        loaded_now: list[VideoFile] = []  # filled on the worker thread; the window's list is set below
 
         def _step(p: Path, _index: int) -> None:
             vf = VideoFile(path=p)
             vf.load()
-            self.video_files.append(vf)
+            loaded_now.append(vf)
 
         # Not cancellable: the old list is already gone, so stopping
         # halfway would silently drop the rest of the loaded files.
-        run_with_progress(
-            self, all_paths, _step, "Refreshing...", threshold=3, cancellable=False,
+        _run_items_in_worker(
+            self, all_paths, _step, "Refreshing...", threshold=1, cancellable=False,
             label_for=lambda p: f"Loading {p.name}",
         )
+        self.video_files = loaded_now
 
         self._refresh_table_rows()
 
@@ -1679,6 +1771,11 @@ class MainWindow(QMainWindow):
         # if they left the list. The same files still selected -> the panel and its pending edit are left alone.
         if not self._panel_shows(self._selected_video_files()):
             self._on_selection_changed()
+        elif getattr(self, "_preview_stopped", False):
+            selected = self._selected_video_files()
+            if len(selected) == 1 and not selected[0].load_error:
+                self._update_preview(selected)  # the loader was stopped for a file operation: ask again
+        self._preview_stopped = False
 
     def _refresh_table_rows_impl(self, selected_ids: list[int]) -> None:
         with suspend_sorting(self.table):
@@ -1860,13 +1957,14 @@ class MainWindow(QMainWindow):
         return item.data(FILE_ROLE) if item else None
 
     def _selected_video_files(self) -> list[VideoFile]:
+        """The selected files in the order the table shows them (not the order they were clicked in), so
+        Number Episodes and Auto-Number count down the rows the user sees."""
         files: list[VideoFile] = []
-        seen_rows = set()
-        for item in self.table.selectedItems():
-            if item.row() in seen_rows or self.table.isRowHidden(item.row()):
+        rows = sorted({item.row() for item in self.table.selectedItems()})
+        for row in rows:
+            if self.table.isRowHidden(row):
                 continue  # a row hidden by a column filter is never a target, even if Select All reached it
-            seen_rows.add(item.row())
-            filename_item = self.table.item(item.row(), 0)
+            filename_item = self.table.item(row, 0)
             vf = filename_item.data(FILE_ROLE) if filename_item else None
             if vf is not None:
                 files.append(vf)
@@ -1985,8 +2083,24 @@ class MainWindow(QMainWindow):
         prompt_rename_single_file to avoid shadowing this method's own
         name)."""
         self._release_previews([vf.path])
-        if prompt_rename_single_file(self, str(vf.path), lambda p: setattr(vf, "path", Path(p)), log=_rename_log()):
+        old_path = str(vf.path)
+        sidecars: list[tuple[str, str]] = []
+        errors: list[str] = []
+
+        def renamed(new_path: str) -> None:
+            # The video is renamed already: its poster and subtitle files follow, and ALL of it goes into the
+            # rename log as one batch (the library's own record is switched off below), so one Undo Last Rename
+            # puts everything back.
+            vf.path = Path(new_path)
+            sidecars.extend(_rename_sidecars(sidecar_pairs(old_path, new_path), errors))
+
+        if prompt_rename_single_file(self, old_path, renamed, log=None):
+            if not _rename_log().record("Rename File", [(old_path, str(vf.path)), *sidecars]):
+                QMessageBox.warning(self, "Rename File", "The file was renamed, but the undo log could not be saved, "
+                                                         "so Undo Last Rename cannot take this one back.")
             self._refresh_table_rows()
+            if errors:
+                QMessageBox.warning(self, "Some files failed to rename", _error_details(errors))
 
     def undo_last_rename(self) -> None:
         """File > Undo Last Rename...: renames the newest logged rename back
@@ -2213,9 +2327,11 @@ class MainWindow(QMainWindow):
             report.failed.append((vf.path.name, vf.save_error))
             crash_dialog.report_exception(exc, "Save All hit an unexpected error")
 
-        cancelled = not run_with_progress(
+        # On a worker thread (review 2026-11-28, card 59): saving a big MP4 whose atoms must move no longer freezes
+        # the window, and even one file shows the dialog with a working Cancel. _on_error runs on the GUI thread.
+        cancelled = not _run_items_in_worker(
             self, files, _step, "Saving files...",
-            threshold=3,
+            threshold=1,
             label_for=lambda vf: f"Saving {vf.path.name}...",
             on_error=_on_error,
         )
@@ -2662,13 +2778,22 @@ class MainWindow(QMainWindow):
             title, year = (tv_title, tv_year) if guess.kind == "tv" else (guess.title, guess.year or "")
             candidate = shows.get(normalize_words(title)) if is_tv else None
             dialog = None
+            held_episode = None  # the episode the file's IMDB_ID names, when it names one
             if candidate is None:
                 existing = None
                 held = ref_in(vf.metadata, "imdb", ("title",))
                 found_local = imdb_local.title_by_id(db, held.id) if held is not None else None
+                if isinstance(found_local, imdb_local.ImdbEpisodeInfo):
+                    # The id this app wrote for an earlier episode import: preselect its SERIES, in TV mode, and
+                    # open the episode picker on that season and episode (an episode has no movie fields).
+                    held_episode = found_local
+                    found_local = imdb_local.series_by_id(db, found_local.series)
+                    if found_local is not None:
+                        is_tv = True
                 if found_local is not None:
                     shown = getattr(found_local, "title", "") or getattr(found_local, "name", "")
-                    existing = (found_local, f"IMDb {held.id} ({shown})")
+                    existing = (found_local, f"IMDb {found_local.imdb_id} ({shown})"
+                                if held_episode is not None else f"IMDb {held.id} ({shown})")
                     is_tv = isinstance(found_local, imdb_local.ImdbTVCandidate)
                 dialog = TMDBSearchDialog(
                     mode="tv" if is_tv else "movie", initial_query=title, initial_year=year,
@@ -2688,8 +2813,12 @@ class MainWindow(QMainWindow):
                 shows[normalize_words(title)] = shows[normalize_words(candidate.name)] = candidate
                 # Nothing is written to the file until THIS file is confirmed in the picker (2026-10-17).
                 episode_dialog = ImdbEpisodePickerDialog(
-                    path, candidate.tconst, candidate.name, initial_season=vf.metadata.season_number or guess.season,
-                    initial_episode=vf.metadata.episode_number or guess.episode, parent=self,
+                    path, candidate.tconst, candidate.name,
+                    initial_season=vf.metadata.season_number
+                    or (held_episode.season if held_episode is not None else None) or guess.season,
+                    initial_episode=vf.metadata.episode_number
+                    or (held_episode.episode_number if held_episode is not None else None) or guess.episode,
+                    parent=self,
                     context=file_context(vf, index + 1, len(files)),
                 )
                 accepted = episode_dialog.exec()
@@ -3410,7 +3539,7 @@ class MainWindow(QMainWindow):
         candidate = dialog.selected_candidate
 
         try:
-            subtitle_text = run_lookup(self, download_subtitle_text, candidate.file_id)
+            subtitle_text = run_lookup(self, download_subtitle_text, candidate.file_id, candidate.language or "und")
         except OpenSubtitlesError as e:
             QMessageBox.warning(self, "Subtitle Download Failed", str(e))
             return
@@ -3636,25 +3765,36 @@ class MainWindow(QMainWindow):
         if not export_mode:
             self._release_previews([old for _vf, old, _new in planned])
 
-        def one(item, _index: int) -> None:
+        def one(item, _index: int, should_cancel=None) -> None:
             nonlocal done
             vf, old_path, new_path = item
             try:
                 if export_mode:
-                    _copy_no_clobber(old_path, new_path)
+                    _copy_no_clobber(old_path, new_path, should_cancel)
                 else:
+                    sidecars = sidecar_pairs(str(old_path), str(new_path))
                     rename_no_clobber(old_path, new_path)
                     vf.path = Path(new_path)
                     renamed.append((str(old_path), str(new_path)))
+                    renamed.extend(_rename_sidecars(sidecars, errors))
                 done += 1
+            except _CopyCancelled:
+                pass  # Cancel during a big copy: the partial copy is already removed, the run ends after this item
             except OSError as exc:
                 errors.append(f"{os.path.basename(old_path)}: {exc}")
 
-        # Copies (Export) of large videos take real time, and renames on a network share are not instant.
-        finished = run_with_progress(
-            self, planned, one, "Exporting files..." if export_mode else "Renaming files...", threshold=3,
-            label_for=lambda item: f"{'Copying' if export_mode else 'Renaming'} {os.path.basename(item[1])}",
-        )
+        # Copies (Export) of large videos take real time (card 59 of the 2026-11-28 review): they run on a worker
+        # thread, in chunks, and Cancel stops the copy being made. Renames are quick and stay on the GUI thread.
+        if export_mode:
+            finished = _run_items_in_worker(
+                self, planned, one, "Exporting files...", threshold=1, pass_cancel=True,
+                label_for=lambda item: f"Copying {os.path.basename(item[1])}",
+            )
+        else:
+            finished = run_with_progress(
+                self, planned, one, "Renaming files...", threshold=3,
+                label_for=lambda item: f"Renaming {os.path.basename(item[1])}",
+            )
         _rename_log().record("Rename by Pattern", renamed)
 
         self._refresh_table_rows()
@@ -3797,9 +3937,11 @@ class MainWindow(QMainWindow):
                 if new_path.exists() and new_path != vf.path:
                     raise FileExistsError(f"{new_path.name} already exists")
                 old_path = vf.path
+                sidecars = sidecar_pairs(str(old_path), str(new_path))
                 rename_no_clobber(str(vf.path), str(new_path))
                 vf.path = new_path
                 logged.append((str(old_path), str(new_path)))
+                logged.extend(_rename_sidecars(sidecars, errors))
                 renamed += 1
             except OSError as exc:
                 errors.append(f"{vf.path.name}: {exc}")
@@ -3895,6 +4037,10 @@ class MainWindow(QMainWindow):
         vf.metadata, vf.dirty = copy.deepcopy(snapshot[0]), snapshot[1]
         vf.metadata.scan_stamp = scan_stamp
         vf.dirty = vf.dirty or stamp_changed
+        # The snapshot was taken before a Save that may have come since: a clean snapshot whose values differ from
+        # what is now on disk (the file's baseline) is an unsaved edit, so Save All still offers it.
+        if not vf.dirty and vf.baseline is not None and history.fields_text(vf.metadata) != vf.baseline:
+            vf.dirty = True
 
     def _push_undo(self, label: str, files: list[VideoFile]) -> None:
         """Call BEFORE mutating `files`, to capture their prior state."""

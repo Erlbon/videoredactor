@@ -35,14 +35,19 @@ def collect(paths: list[str], out: Output, recurse: bool = True) -> list[str]:
     return files
 
 
-def load_videos(files: list[str], out: Output | None = None) -> list[VideoFile]:
-    """Loads each file; `out` shows "reading N of M" on stderr while a big batch is read."""
+def load_videos(files: list[str], out: Output | None = None, for_write: bool = False) -> list[VideoFile]:
+    """Loads each file; `out` shows "reading N of M" on stderr while a big batch is read. `for_write`: the command
+    saves what it loaded, so a "Collected from" that load() only suggested is dropped (it would be written with
+    the save, though the report names only the fields the user asked for)."""
     videos = []
     for index, path in enumerate(files, start=1):
         if out is not None:
             out.progress(index, len(files), f"reading {path}")
         video = VideoFile(path=Path(path))
         video.load()
+        if for_write and not video.load_error:
+            from core import collected_from
+            collected_from.drop_suggestion(video.metadata)
         videos.append(video)
     return videos
 

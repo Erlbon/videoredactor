@@ -37,6 +37,9 @@ def add_join_files_parser(sub) -> None:
     parser.add_argument("-R", "--no-recurse", action="store_true", help="for a folder, look only at the files directly in it")
     parser.add_argument("--apply", action="store_true", help="really join (the default is a dry run that writes nothing)")
     parser.add_argument("--chapters", action="store_true", help="add one chapter per part (Part 1, Part 2, ...)")
+    parser.add_argument("--join-unmarked", action="store_true",
+                        help="also join files WITHOUT a part marker in their name, one movie per folder (by hand; "
+                             "never use it on a folder of episodes). Without it such files are left out")
     parser.add_argument("--log", metavar="FILE", help="with --apply: the TSV undo log to write (default: beside the quarantine folder)")
     add_common_options(parser)
     parser.set_defaults(handler=run_join_files)
@@ -58,7 +61,11 @@ def run_join_files(args: argparse.Namespace, out: Output) -> int:
         out.error(f"nothing found for {argument}")
     if not files:
         raise CliError("no video files found")
-    groups = join_files.group_files(files)
+    groups = join_files.group_files(files, join_unmarked=args.join_unmarked)
+    left_out = len(files) - sum(len(g.parts) for g in groups)
+    if left_out > 0:
+        out.line(f"{left_out} file(s) without a part marker (cd1, part 2, ...) in the name were left out "
+                 "(--join-unmarked joins such files by hand).")
     problems = 0
 
     def show(result: join_files.JoinResult) -> None:

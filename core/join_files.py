@@ -47,9 +47,17 @@ UNDONE_FOLDER = "undone join"
 # "Title cd1", "Title - CD 2", "Title (disc1)", "Title [part 2]", "Title pt1", "Title cd1 of 2": a part marker at the END
 # of the name. Group 1 is the movie's name, group 2 the part number.
 _PART_TAIL = re.compile(
-    r"^(?P<base>.*?)[\s._\-]*[\(\[]?\s*(?:cd|disc|disk|part|pt)[\s._-]*0*(?P<n>\d{1,2})(?:\s*of\s*\d+)?\s*[\)\]]?\s*$",
+    r"^(?P<base>.*?)[\s._\-]*[\(\[]?\s*(?:cd|disc|disk|part|pt)[\s._-]*0*(?P<n>\d{1,2})(?:\s*of\s*(?P<total>\d+))?\s*[\)\]]?\s*$",
     re.IGNORECASE,
 )
+
+
+def part_total(stem: str) -> int | None:
+    """The N of 'Title cd1 of 3' (None when the name does not say how many parts there are)."""
+    match = _PART_TAIL.match(stem or "")
+    if not match or not match.group("base").strip() or not match.group("total"):
+        return None
+    return int(match.group("total"))
 
 
 def split_part_name(stem: str) -> tuple[str, int | None]:
@@ -88,13 +96,16 @@ def _common_start(texts: list[str]) -> str:
     return first[:length]
 
 
-def group_files(paths: list[str]) -> list[JoinGroup]:
+def group_files(paths: list[str], *, join_unmarked: bool = True) -> list[JoinGroup]:
     """Groups `paths` into movies: files in one folder whose names are the same apart from a trailing part marker. Parts
     are ordered by their number. A selection with no part markers at all is ONE group in natural name order (named by
-    the common start of the names), so two files picked by hand can still be joined. A single file with a marker or a
-    group with missing or repeated numbers is returned with a `note`; the caller shows it and does not join it."""
+    the common start of the names), so two files picked by hand can still be joined; `join_unmarked=False` (the
+    command line, which is fed whole folders) leaves files without a marker out instead. A single file with a marker,
+    a group with missing or repeated numbers, one that does not start at part 1 or is shorter than its "of N" is
+    returned with a `note`; the caller shows it and does not join it."""
     unique = list(dict.fromkeys(os.path.abspath(p) for p in paths))
     marked: dict[tuple[str, str], list[tuple[int, str]]] = {}
+    totals: dict[tuple[str, str], set[int]] = {}  # the "of N" the names of a group carry
     unmarked: list[str] = []
     for path in unique:
         stem = os.path.splitext(os.path.basename(path))[0]
@@ -102,13 +113,18 @@ def group_files(paths: list[str]) -> list[JoinGroup]:
         if number is None:
             unmarked.append(path)
         else:
-            marked.setdefault((os.path.dirname(path), base.casefold()), []).append((number, path))
+            key = (os.path.dirname(path), base.casefold())
+            marked.setdefault(key, []).append((number, path))
+            total = part_total(stem)
+            if total is not None:
+                totals.setdefault(key, set()).add(total)
     groups: list[JoinGroup] = []
-    for (folder, _key), items in marked.items():
+    for (folder, base_key), items in marked.items():
         items.sort(key=lambda item: (item[0], natural_key(os.path.basename(item[1]))))
         name = split_part_name(os.path.splitext(os.path.basename(items[0][1]))[0])[0]
         numbers = [n for n, _p in items]
         group = JoinGroup(name, folder, [p for _n, p in items], numbers)
+        stated = totals.get((folder, base_key), set())
         if len(items) < 2:
             group.note = "only one part was selected"
         elif len(set(numbers)) != len(numbers):
@@ -116,8 +132,16 @@ def group_files(paths: list[str]) -> list[JoinGroup]:
         elif numbers != list(range(numbers[0], numbers[0] + len(numbers))):
             missing = sorted(set(range(numbers[0], numbers[-1] + 1)) - set(numbers))
             group.note = "part " + ", ".join(str(m) for m in missing) + " is missing from the selection"
+        elif numbers[0] > 1:
+            group.note = "part 1 is missing from the selection"
+        elif len(stated) > 1:
+            group.note = "the names disagree on how many parts there are (" + ", ".join(str(t) for t in sorted(stated)) + ")"
+        elif stated and len(items) < next(iter(stated)):
+            group.note = f"the names say {next(iter(stated))} parts, but only {len(items)} were selected"
         groups.append(group)
-    if unmarked and not marked and len(unmarked) >= 2:
+    if not join_unmarked:
+        pass  # files without a part marker are left out (the caller counts them)
+    elif unmarked and not marked and len(unmarked) >= 2:
         by_folder: dict[str, list[str]] = {}
         for path in unmarked:
             by_folder.setdefault(os.path.dirname(path), []).append(path)
@@ -261,14 +285,59 @@ def _concat_quote(path: str) -> str:
     return "file '" + path.replace("\\", "/").replace("'", "'\\''") + "'"
 
 
-def _chapters_text(durations: list[float]) -> str:
-    lines = [";FFMETADATA1"]
+Chapter = tuple[float, float, str]  # start seconds, end seconds, title
+
+
+def _part_chapters(durations: list[float]) -> list[Chapter]:
+    """One chapter per part: 'Part 1', 'Part 2', ... (the 'Add a chapter at each part' option)."""
+    out: list[Chapter] = []
     start = 0.0
     for index, length in enumerate(durations, 1):
-        end = start + length
-        lines += ["[CHAPTER]", "TIMEBASE=1/1000", f"START={int(start * 1000)}", f"END={int(end * 1000)}", f"title=Part {index}"]
-        start = end
+        out.append((start, start + length, f"Part {index}"))
+        start += length
+    return out
+
+
+def _carried_chapters(part_chapters: list[list[Chapter]], durations: list[float]) -> list[Chapter]:
+    """The parts' own chapters on the joined file's time line: each part's chapters moved by the lengths of the parts
+    before it."""
+    out: list[Chapter] = []
+    offset = 0.0
+    for chapters, length in zip(part_chapters, durations):
+        out += [(start + offset, end + offset, title) for start, end, title in chapters]
+        offset += length
+    return out
+
+
+def _chapters_text(chapters: list[Chapter]) -> str:
+    """ffmpeg's ffmetadata text for `chapters`."""
+    lines = [";FFMETADATA1"]
+    for start, end, title in chapters:
+        clean = re.sub(r"([=;#\\\n])", lambda m: "\\" + ("n" if m.group(1) == "\n" else m.group(1)), title or "")
+        lines += ["[CHAPTER]", "TIMEBASE=1/1000", f"START={int(round(start * 1000))}", f"END={int(round(end * 1000))}",
+                  f"title={clean}"]
     return "\n".join(lines) + "\n"
+
+
+def read_chapters(path: str) -> list[Chapter] | None:
+    """The chapters of `path` (start, end, title) in seconds; [] when it has none, None when ffprobe could not read it."""
+    result = _run(["ffprobe", "-v", "error", "-show_chapters", "-of", "json", path])
+    if result is None or result.returncode != 0:
+        return None
+    try:
+        raw = json.loads(result.stdout).get("chapters") or []
+        return [(float(c["start_time"]), float(c["end_time"]), str((c.get("tags") or {}).get("title") or ""))
+                for c in raw if isinstance(c, dict)]
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return None
+
+
+def _carried_attachment_indexes(info) -> list[int]:
+    """The stream numbers of the attachments (fonts ...) an MKV part holds, except the poster, which is carried
+    separately (read before and written back after, see conversion_run)."""
+    from core.mkv_backend import _COVER_NAME_RE  # noqa: PLC0415
+
+    return [s.index for s in info.of("attachment") if not _COVER_NAME_RE.match(s.filename or "")]
 
 
 def join_group(
@@ -284,9 +353,14 @@ def join_group(
     probe: Callable[[str], object] = probe_media,
     runner: Callable = _run_ffmpeg,
     decode_check: Callable[[str], str] = conversion_run.decode_problem,
+    chapter_reader: Callable[[str], list[Chapter] | None] = read_chapters,
 ) -> JoinResult:
     """Joins one checked group (or reports what would be done). Never raises for an ordinary failure: the result says
-    what happened, and every part is untouched unless the status is JOINED."""
+    what happened, and every part is untouched unless the status is JOINED.
+
+    The parts' own chapters are kept: each part's chapters move by the lengths of the parts before it. With `chapters`
+    (one chapter per part, "Part 1", "Part 2", ...) those replace them. An MKV's attachments (fonts ...) are carried
+    over from the first part."""
     group = plan.group
     name = os.path.basename(group.output_path)
     if not plan.compatible:
@@ -319,6 +393,15 @@ def join_group(
     sizes = {p: os.path.getsize(p) for p in group.parts}
     final = group.output_path
     is_mp4 = group.extension in (".mp4", ".m4v")
+    lengths = [d or 0.0 for d in plan.durations]
+    if chapters:
+        chapter_list = _part_chapters(lengths)
+    else:
+        found = [chapter_reader(p) for p in group.parts]
+        if any(c is None for c in found):
+            return JoinResult(name, FAILED, "couldn't read the chapters of a part (ffprobe failed); the parts are untouched")
+        chapter_list = _carried_chapters([c or [] for c in found], lengths)
+    attachments = [] if is_mp4 else _carried_attachment_indexes(info0)
 
     def build(_source: str, temp: str) -> tuple[bool, str]:
         folder = os.path.dirname(os.path.abspath(final))
@@ -329,13 +412,16 @@ def join_group(
                 handle.write("\n".join(_concat_quote(p) for p in group.parts) + "\n")
                 list_path = handle.name
             args = ["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", list_path]
-            if chapters:
+            if chapter_list:
                 with tempfile.NamedTemporaryFile("w", suffix=".txt", dir=folder, delete=False, encoding="utf-8",
                                                  prefix="redact-join-meta-") as handle:
-                    handle.write(_chapters_text([d or 0.0 for d in plan.durations]))
+                    handle.write(_chapters_text(chapter_list))
                     meta_path = handle.name
                 args += ["-f", "ffmetadata", "-i", meta_path, "-map_chapters", "1"]
-            args += ["-map", "0:V", "-map", "0:a?", "-map", "0:s?", "-c", "copy", "-map_metadata", "0"]
+            args += ["-map", "0:V", "-map", "0:a?", "-map", "0:s?"]
+            for index in attachments:
+                args += ["-map", f"0:{index}"]
+            args += ["-c", "copy", "-map_metadata", "0"]
             if is_mp4:
                 args += ["-movflags", "+faststart"]
             args.append(temp)
@@ -368,12 +454,21 @@ def join_group(
         for kind in ("video", "audio", "subtitle"):
             if len(result.of(kind)) != len(info0.of(kind)):
                 problems.append(f"{kind} tracks: {len(info0.of(kind))} before, {len(result.of(kind))} after")
+        if not is_mp4 and len(result.of("attachment")) != len(info0.of("attachment")):
+            problems.append(f"attachments: {len(info0.of('attachment'))} before, {len(result.of('attachment'))} after")
+        got_chapters = chapter_reader(temp)
+        if got_chapters is None or len(got_chapters) != len(chapter_list):
+            problems.append(f"chapters: {len(chapter_list)} expected, "
+                            f"{'unreadable' if got_chapters is None else len(got_chapters)} after")
         allowed = max(run.tolerance_seconds * len(group.parts), total * run.tolerance_fraction)
         if result.duration is None or abs(result.duration - total) > allowed:
             problems.append(f"length {result.duration if result.duration is None else round(result.duration, 1)} s "
                             f"against the parts' {total:.1f} s")
         if not problems:
-            problem = decode_check(temp)
+            if decode_check is conversion_run.decode_problem:  # the real check: Cancel and the close-time kill reach it
+                problem = conversion_run.decode_problem(temp, cancel_event=cancel_event)
+            else:
+                problem = decode_check(temp)
             if problem:
                 problems.append(problem)
         if not problems and cover:
@@ -389,21 +484,37 @@ def join_group(
         return JoinResult(name, FAILED, f"the parts are kept: {exc}")
     if not ok:
         detail = run.actions[-1].detail if run.actions else "not joined"
+        if detail == "Cancelled" or detail.endswith("Cancelled)"):  # wrapped: "original kept (conversion failed: Cancelled)"
+            return JoinResult(name, SKIPPED, "cancelled, the parts are untouched")
         return JoinResult(name, SKIPPED if "left alone" in detail else FAILED, detail)
-    quarantined = {first: next((new for new, old in capture.moves if old == first), "")}
-    notes = []
-    for path in group.parts[1:]:
-        dest = run.quarantine(path, KIND_JOINED, reason)
-        if dest is None:
-            notes.append(f"{os.path.basename(path)} could not be moved and is still beside the joined file")
-        quarantined[path] = next((new for new, old in capture.moves if old == path), dest or "")
+    # The joined file is in place and part 1 is in quarantine. From here nothing may escape: every step that can fail
+    # (writing the log, moving another part) is noted and the run goes on, so part 1 always has its undo row.
     if os.path.normcase(os.path.abspath(final)) != os.path.normcase(os.path.abspath(first)):
         history.record_move(first, final)
     new_bytes = os.path.getsize(final) if os.path.isfile(final) else 0
-    if log is not None:
-        for path in group.parts:
-            if quarantined.get(path):
-                log.append(path, quarantined[path], final, sizes[path], new_bytes, JOINED)
+    notes = []
+
+    def write_row(path: str) -> None:
+        if log is None or not quarantined.get(path):
+            return
+        try:
+            log.append(path, quarantined[path], final, sizes[path], new_bytes, JOINED)
+        except (OSError, SafetyError) as exc:
+            notes.append(f"the undo log could not be written for {os.path.basename(path)} ({exc})")
+
+    quarantined = {first: next((new for new, old in capture.moves if old == first), "")}
+    write_row(first)
+    for path in group.parts[1:]:
+        try:
+            dest = run.quarantine(path, KIND_JOINED, reason)
+        except OSError as exc:  # open in a player, disk full ...
+            dest = None
+            notes.append(f"{os.path.basename(path)} could not be moved ({exc}) and is still beside the joined file")
+        else:
+            if dest is None:
+                notes.append(f"{os.path.basename(path)} could not be moved and is still beside the joined file")
+        quarantined[path] = next((new for new, old in capture.moves if old == path), dest or "")
+        write_row(path)
     where = ", ".join(sorted({os.path.dirname(q) for q in quarantined.values() if q and q != "Recycle Bin"}))
     message = f"{len(group.parts)} parts joined; originals in {where or 'the Recycle Bin'}"
     if notes:

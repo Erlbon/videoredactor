@@ -268,6 +268,8 @@ class Plan:
     container: str = ""  # ".mp4" / ".mkv" (the output extension), "" when skipped
     video: str = V_COPY
     audio_reencode: bool = False  # AAC for audio no container can hold
+    # Which audio streams (ffprobe indexes) need that AAC; the others are copied. Empty with audio_reencode on: all.
+    audio_reencode_indices: list[int] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
     heavy_audio: bool = False
     bitrate_driven: bool = False  # the 85 percent size check applies
@@ -405,9 +407,8 @@ def bitrate_rule(
         if size_bytes > s.scale_size_trigger_gb * 1073741824 or mbps > s.scale_video_mbps:
             ceiling = kind_ceiling(kind, s)
             head = f"{height}p at {mbps:.1f} Mb/s, {size_bytes / 1073741824:.1f} GB"
-            # A series episode is scaled whenever it is tall, as before (a wide one is also tall); another kind only
-            # when it is above its own ceiling.
-            if ceiling and (height > ceiling or kind == KIND_SERIES):
+            # Scaled only when the picture is above its kind's ceiling (never an upscale).
+            if ceiling and height > ceiling:  # never an upscale: a wide but short picture keeps its size
                 return BitrateRule(
                     over=True, scale=True, limit_mbps=s.scale_video_mbps, target_height=ceiling,
                     reason=f"{head}: scale to {ceiling}p",
@@ -434,6 +435,14 @@ def is_heavy_audio(info: MediaInfo, s: ConversionSettings) -> bool:
 
 def _mkv_only_audio(codec: str) -> bool:
     return codec in AUDIO_MKV_ONLY or is_pcm(codec)
+
+
+def keepable_attachments(info: MediaInfo) -> list[StreamInfo]:
+    """The MKV attachments a conversion must carry (fonts and the like): every one except the poster, which the
+    cover step restores on its own."""
+    from core.mkv_backend import _COVER_NAME_RE  # noqa: PLC0415
+
+    return [s for s in info.of("attachment") if not _COVER_NAME_RE.match(s.filename or "")]
 
 
 def mappable_subtitles(info: MediaInfo) -> list[StreamInfo]:
@@ -499,6 +508,7 @@ def plan_conversion(
     unknown_audio = [a for a in audio if a.codec not in AUDIO_MP4_OK and not _mkv_only_audio(a.codec)]
     if unknown_audio:
         plan.audio_reencode = True
+        plan.audio_reencode_indices = [a.index for a in unknown_audio]
         plan.reasons.append(f"audio {unknown_audio[0].codec} can't be copied: AAC {s.fallback_audio_bitrate}")
     needs_mkv = needs_mkv or any(_mkv_only_audio(a.codec) for a in audio)
     if needs_mkv:
@@ -513,6 +523,10 @@ def plan_conversion(
     if extra_subtitles:
         needs_mkv = True
         why_mkv.append(f"{extra_subtitles} external subtitle(s) to add: MKV")
+    styled = [t for t in subs if t.codec in ("ass", "ssa")]
+    if styled or keepable_attachments(info):  # MP4 would flatten the styling and cannot hold fonts
+        needs_mkv = True
+        why_mkv.append("styled (ASS) subtitles or attachments (fonts): MKV")
     plan.container = ".mkv" if needs_mkv else ".mp4"
 
     # --- container change? ---
@@ -629,6 +643,9 @@ def build_ffmpeg_args(
         args += ["-map", f"0:{t.index}"]
     for n, _extra in enumerate(added, start=1):
         args += ["-map", f"{n}:0"]
+    if not mp4:  # an MKV keeps its fonts and other attachments (the poster is restored separately)
+        for att in keepable_attachments(info):
+            args += ["-map", f"0:{att.index}"]
     args += ["-dn"]
 
     if plan.video == V_COPY:
@@ -650,6 +667,13 @@ def build_ffmpeg_args(
             args += ["-vf", f"scale=-2:{height}"]
     if plan.video == V_X264:
         args += ["-c:a", "aac", "-b:a", plan.audio_bitrate or s.fallback_audio_bitrate]
+    elif plan.audio_reencode and plan.audio_reencode_indices and plan.video != V_X265:
+        # Only the streams no container can hold become AAC; the good ones next to them are copied untouched.
+        for position, a in enumerate(info.of("audio")):
+            if a.index in plan.audio_reencode_indices:
+                args += [f"-c:a:{position}", "aac", f"-b:a:{position}", s.fallback_audio_bitrate]
+            else:
+                args += [f"-c:a:{position}", "copy"]
     elif plan.audio_reencode or plan.video == V_X265:
         args += ["-c:a", "aac", "-b:a", s.fallback_audio_bitrate]
     elif audio_fallback:
@@ -682,7 +706,10 @@ def build_ffmpeg_args(
 def output_size_ok(source_bytes: int, output_bytes: int, settings: ConversionSettings | None = None) -> bool:
     """A bitrate-driven result must be under output_max_ratio of the source, otherwise keep the source."""
     s = settings or ConversionSettings()
-    return source_bytes > 0 and output_bytes < source_bytes * s.output_max_ratio
+    ratio = s.output_max_ratio
+    if not 0.01 <= ratio <= 1.0:  # a hand-edited value (or nan) never lets a larger result replace the source
+        ratio = 1.0 if ratio > 1.0 else 0.85 if ratio != ratio else 0.01
+    return source_bytes > 0 and output_bytes < source_bytes * ratio
 
 
 # --- persistence ([conversion] in videoredactor_settings.ini) ---------------------------
