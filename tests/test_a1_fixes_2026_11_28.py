@@ -85,13 +85,56 @@ def test_without_keep_a_same_name_result_still_replaces_the_original(tmp_path):
 
 def test_card7_only_the_odd_audio_track_is_reencoded():
     streams = [cp.StreamInfo(0, "video", "h264", width=1280, height=720),
-               cp.StreamInfo(1, "audio", "wavpack", bit_rate=500_000), cp.StreamInfo(2, "audio", "ac3", bit_rate=640_000)]
+               cp.StreamInfo(1, "audio", "adpcm_ima_wav", bit_rate=500_000),
+               cp.StreamInfo(2, "audio", "ac3", bit_rate=640_000, channels=6)]
     m = cp.MediaInfo("F:/Video/Show/ep.mkv", 300 * MB, 3000.0, streams)
     plan = cp.plan_conversion(m, extra_subtitles=1)
     assert plan.audio_reencode and plan.audio_reencode_indices == [1]
     args = cp.build_ffmpeg_args(m, plan, "in.mkv", "out.mkv")
     assert args[args.index("-c:a:0") + 1] == "aac" and args[args.index("-c:a:1") + 1] == "copy"
     assert "-c:a" not in args
+
+
+def test_card7_codecs_an_mkv_holds_are_copied_not_reencoded():
+    for codec in ("wavpack", "tta", "mp1"):
+        streams = [cp.StreamInfo(0, "video", "h264", width=1280, height=720),
+                   cp.StreamInfo(1, "audio", codec, bit_rate=500_000),
+                   cp.StreamInfo(2, "audio", "ac3", bit_rate=640_000, channels=6)]
+        m = cp.MediaInfo("F:/Video/Show/ep.mkv", 300 * MB, 3000.0, streams)
+        plan = cp.plan_conversion(m, extra_subtitles=1)
+        assert not plan.audio_reencode, codec
+        assert plan.container == ".mkv", codec
+        args = cp.build_ffmpeg_args(m, plan, "in.mkv", "out.mkv")
+        assert args[args.index("-c:a") + 1] == "copy" and "aac" not in args, codec
+
+
+def test_card7_the_aac_rate_scales_with_the_channels():
+    def a(ch):
+        return cp.StreamInfo(1, "audio", "x", channels=ch)
+    assert cp.aac_bitrate(a(0), "160k") == "160k"  # unknown: as it is
+    assert cp.aac_bitrate(a(1), "160k") == "160k"
+    assert cp.aac_bitrate(a(2), "160k") == "160k"
+    assert cp.aac_bitrate(a(6), "160k") == "480k"
+    assert cp.aac_bitrate(a(8), "160k") == "640k"  # capped
+    assert cp.aac_bitrate(a(6), "192000") == "576k"
+    assert cp.aac_bitrate(a(6), "fast") == "fast"  # unreadable: passed on
+
+
+def test_card7_a_surround_track_gets_a_surround_rate_when_all_audio_is_aac():
+    streams = [cp.StreamInfo(0, "video", "h264", width=640, height=360),
+               cp.StreamInfo(1, "audio", "ac3", channels=6), cp.StreamInfo(2, "audio", "aac", channels=2)]
+    m = cp.MediaInfo("in.avi", 300 * MB, 3000.0, streams)
+    plan = cm.plan_h264(m, cm.transcode_settings.TranscodeSettings(crf=20, audio_bitrate="160k", threads=4))
+    args = cp.build_ffmpeg_args(m, plan, "in.avi", "out.mp4")
+    assert args[args.index("-b:a:0") + 1] == "480k" and args[args.index("-b:a:1") + 1] == "160k"
+    assert "-c:a" not in args
+
+
+def test_card7_ffprobe_channels_are_read():
+    info = cp.parse_ffprobe("x.mkv", {"format": {}, "streams": [
+        {"index": 0, "codec_type": "audio", "codec_name": "ac3", "channels": 6},
+        {"index": 1, "codec_type": "audio", "codec_name": "aac", "channels": None}]})
+    assert [s.channels for s in info.streams] == [6, 0]
 
 
 # --- card 20 and 37 -----------------------------------------------------------------------------------------------

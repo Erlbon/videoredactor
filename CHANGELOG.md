@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-28#03 -- audio in conversions: surround keeps a surround bit rate, wavpack/TTA/MP1 are copied
+
+- **A surround audio track that has to become AAC now gets a surround bit rate**: the AAC setting is the stereo rate, and a 5.1 track gets it per pair of channels (160k becomes 480k, at most 640k). Mono and stereo tracks are unchanged. This holds for the H.264 mode, the HEVC fallback, the shrink's audio fallback and a single odd track.
+- **WavPack, TTA and MP1 audio are copied into an MKV** instead of being re-encoded to AAC (an MKV can hold them). That finishes card 7 of the 2026-11-28 review.
+
 ## 2026-11-28#02 -- the code review of 2026-11-28: "keep the original" always wins, safer tags, joins and conversions, no frozen window
 
 Files at risk:

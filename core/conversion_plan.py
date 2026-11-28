@@ -51,7 +51,10 @@ VIDEO_MKV_ONLY = frozenset({"vp8", "theora", "msmpeg4v2", "msmpeg4v3", "wmv3", "
 VIDEO_REENCODE = frozenset({"rv10", "rv20", "rv30", "rv40", "flv1", "wmv1", "wmv2", "msmpeg4v1", "svq1", "svq3"})
 
 AUDIO_MP4_OK = frozenset({"aac", "mp3", "ac3", "eac3", "alac", "opus", "mp2"})
-AUDIO_MKV_ONLY = frozenset({"vorbis", "flac", "dts", "truehd", "wmav1", "wmav2", "wmapro", "wmalossless", "wmavoice"})
+# Card 7: wavpack, tta and mp1 have Matroska codec IDs (A_WAVPACK4, A_TTA1, A_MPEG/L1) that ffmpeg's MKV muxer writes,
+# so they are copied into an MKV instead of turned into AAC.
+AUDIO_MKV_ONLY = frozenset({"vorbis", "flac", "dts", "truehd", "wmav1", "wmav2", "wmapro", "wmalossless", "wmavoice",
+                            "wavpack", "tta", "mp1"})
 
 TEXT_SUBTITLES = frozenset({"subrip", "srt", "ass", "ssa", "mov_text", "webvtt", "text"})
 BITMAP_SUBTITLES = frozenset({"hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle", "xsub"})
@@ -86,6 +89,7 @@ class StreamInfo:
     attached_pic: bool = False  # cover art: "not video"
     duration: float | None = None  # the stream's own length, when ffprobe says
     filename: str = ""  # an attachment stream's file name (an MKV's cover.jpg, a font), from the filename tag
+    channels: int = 0  # an audio stream's channel count (6 for 5.1), 0 when ffprobe does not say
 
 
 @dataclass
@@ -107,6 +111,13 @@ class MediaInfo:
     def video(self) -> StreamInfo | None:
         v = self.of("video")
         return v[0] if v else None
+
+
+def _int_or_zero(value) -> int:
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def parse_ffprobe(path: str, data: dict) -> MediaInfo:
@@ -144,7 +155,7 @@ def parse_ffprobe(path: str, data: dict) -> MediaInfo:
             language=str(tags.get("language") or ""), title=str(tags.get("title") or ""),
             default=bool(disp.get("default")), hearing_impaired=bool(disp.get("hearing_impaired")),
             attached_pic=bool(disp.get("attached_pic")), duration=stream_duration,
-            filename=str(tags.get("filename") or ""),
+            filename=str(tags.get("filename") or ""), channels=_int_or_zero(raw.get("channels")),
         ))
     return MediaInfo(
         path=path, size_bytes=size, duration=duration, streams=streams, format_name=str(fmt.get("format_name") or ""),
@@ -304,6 +315,48 @@ def audio_bitrate(stream: StreamInfo) -> int:
     if is_pcm(stream.codec):
         return 1_536_000
     return AUDIO_BITRATE_ESTIMATE.get(stream.codec, DEFAULT_AUDIO_ESTIMATE)
+
+
+AAC_MAX_BPS = 640_000  # the most a surround AAC track is given
+
+
+def _rate_bps(rate: str) -> int | None:
+    """"160k" -> 160000, "1M" -> 1000000, "192000" -> 192000; None when it cannot be read."""
+    text = str(rate).strip().lower()
+    factor = 1
+    if text.endswith("k"):
+        factor, text = 1000, text[:-1]
+    elif text.endswith("m"):
+        factor, text = 1_000_000, text[:-1]
+    try:
+        value = float(text) * factor
+    except ValueError:
+        return None
+    return int(value) if value > 0 else None
+
+
+def aac_bitrate(stream: StreamInfo, base: str) -> str:
+    """The AAC rate for one audio stream. `base` is a stereo rate: mono and stereo get it as it is, a surround track
+    gets it per pair of channels (160k -> 480k for 5.1), capped at AAC_MAX_BPS. An unreadable base is passed on."""
+    bps = _rate_bps(base)
+    if bps is None or stream.channels <= 2:
+        return base
+    return f"{min(bps * stream.channels // 2, AAC_MAX_BPS) // 1000}k"
+
+
+def _aac_args(audio: list[StreamInfo], base: str, only: list[int] | None = None) -> list[str]:
+    """Per-stream audio codec arguments: AAC at aac_bitrate for the streams in `only` (all when None), copy for the
+    rest. Without a surround stream to re-encode, all-AAC stays the one global "-c:a aac -b:a base"."""
+    targets = [a for a in audio if only is None or a.index in only]
+    if only is None and not any(a.channels > 2 for a in targets):
+        return ["-c:a", "aac", "-b:a", base]
+    args: list[str] = []
+    for position, a in enumerate(audio):
+        if any(a is t for t in targets):
+            args += [f"-c:a:{position}", "aac", f"-b:a:{position}", aac_bitrate(a, base)]
+        else:
+            args += [f"-c:a:{position}", "copy"]
+    return args
 
 
 def video_mbps_from(size_bytes: int | None, duration: float | None, audio_bps: float) -> float | None:
@@ -665,19 +718,17 @@ def build_ffmpeg_args(
         args += ["-c:v", "libx265", "-preset", s.x265_preset, "-crf", str(s.x265_crf), "-tag:v", "hvc1"]
         if scaling:
             args += ["-vf", f"scale=-2:{height}"]
+    audio = info.of("audio")
+    # Every AAC rate below is a stereo rate; a surround track gets it per pair of channels (aac_bitrate, card 7).
     if plan.video == V_X264:
-        args += ["-c:a", "aac", "-b:a", plan.audio_bitrate or s.fallback_audio_bitrate]
+        args += _aac_args(audio, plan.audio_bitrate or s.fallback_audio_bitrate)
     elif plan.audio_reencode and plan.audio_reencode_indices and plan.video != V_X265:
         # Only the streams no container can hold become AAC; the good ones next to them are copied untouched.
-        for position, a in enumerate(info.of("audio")):
-            if a.index in plan.audio_reencode_indices:
-                args += [f"-c:a:{position}", "aac", f"-b:a:{position}", s.fallback_audio_bitrate]
-            else:
-                args += [f"-c:a:{position}", "copy"]
+        args += _aac_args(audio, s.fallback_audio_bitrate, only=plan.audio_reencode_indices)
     elif plan.audio_reencode or plan.video == V_X265:
-        args += ["-c:a", "aac", "-b:a", s.fallback_audio_bitrate]
+        args += _aac_args(audio, s.fallback_audio_bitrate)
     elif audio_fallback:
-        args += ["-c:a", "aac", "-b:a", SHRINK_FALLBACK_AUDIO]
+        args += _aac_args(audio, SHRINK_FALLBACK_AUDIO)
     else:
         args += ["-c:a", "copy"]
     if mp4:
