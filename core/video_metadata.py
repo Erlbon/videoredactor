@@ -27,12 +27,6 @@ class ContentType(str, Enum):
     MISC = "Misc"
     UNSET = ""  # default until the user sets it
 
-    def __str__(self) -> str:
-        # On Python 3.12+ str() of a str-mixin Enum is "ContentType.PORN". redactor_common's overwrite review
-        # (2026-11-27) reads a field with str(), so a blank file's UNSET looked like an existing value to
-        # overwrite and the review opened on every lookup.
-        return self.value
-
 
 @dataclass
 class VideoMetadata:

@@ -19,8 +19,8 @@ ROOT = Path(__file__).resolve().parent.parent
 def test_requirements_pin_and_pywin32():
     text = (ROOT / "requirements.txt").read_text(encoding="utf-8")
     assert 'pywin32>=306; sys_platform == "win32"' in text
-    assert "redactor_common.git@2026-11-27-06" in text
-    assert "redactor_common.git@2026-11-26-02" not in text
+    assert "redactor_common.git@2026-11-28-01" in text  # moved on 2026-11-28 (review card 81)
+    assert "redactor_common.git@2026-11-27-06" not in text
 
 
 def test_spec_names_the_windows_recycle_bin_modules():
@@ -92,4 +92,8 @@ def test_a_blank_content_type_is_not_an_existing_value_to_overwrite():
     from redactor_common.gui.overwrite_review_dialog import _text
 
     assert _text(VideoMetadata().content_type) == ""
-    assert _text(ContentType.PORN) == "Porn" and str(ContentType.MOVIE) == "Movie"
+    # Since redactor_common 2026-11-27-07 the review reads an enum by its value, so ContentType needs no
+    # __str__ of its own any more (removed 2026-11-28, review card 81).
+    assert _text(ContentType.PORN) == "Porn"
+    assert ContentType.__dict__.get("__str__") in (None, str.__str__, *(
+        getattr(base, "__str__", None) for base in ContentType.__mro__[1:]))

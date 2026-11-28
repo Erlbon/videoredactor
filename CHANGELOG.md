@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-28#01 -- shared-code update: redactor_common 2026-11-28-01
+
+- Shared-code update: redactor_common 2026-11-28-01 (from 2026-11-27-06). It brings: the overwrite review reads Content Type by its value, so the app's own workaround for that is removed; the shared lookup dialog shows a failed search on its row instead of losing the batch; the Identical duplicate tier no longer claims "exactly the same" on its own; and a clearer note on stopping a preview load before a file is changed.
+
 ## 2026-11-27#02 -- the Play window lets go of files, safer filename Search & Replace and Recycle Bin
 
 - **The Play window no longer blocks Save, Rename, Move into Folders, Convert and Redact.** An open player holds its file and Windows then refuses to rename or replace it. The file is now released first; the window stays open.
